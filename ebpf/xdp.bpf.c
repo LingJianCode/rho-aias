@@ -39,6 +39,7 @@ struct packet_info {
     // Transport layer
     __be16 src_port;                // Source port (TCP/UDP)
     __be16 dst_port;                // Destination port (TCP/UDP)
+
     // Protocol information
     __u16 eth_proto;                // Ethernet protocol type
     __u16 ip_proto;                 // IP protocol number
@@ -249,7 +250,7 @@ submit:
     pkt_info->match_type = match_type;
     // Notify event
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, pkt_info, sizeof(*pkt_info));
-
+	
     if (match_type != MATCH_BY_PASS) {
         return XDP_DROP;  // Match rule, drop
     }

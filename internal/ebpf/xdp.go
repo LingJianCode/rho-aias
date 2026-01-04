@@ -1,19 +1,27 @@
 package ebpf
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"rho-aias/utils"
 
 	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
 )
 
 type Xdp struct {
 	InterfaceName string
-	objects       xdpObjects
-	link          link.Link
+	objects       *xdpObjects
+	link          *link.Link
+	reader        *perf.Reader
+	done          chan struct{}
+	linkType      string
 }
 
 func NewXdp(interface_name string) *Xdp {
@@ -34,17 +42,26 @@ func (x *Xdp) Start() error {
 		return fmt.Errorf("failed to load eBPF objects: %s", err.Error())
 	}
 
+	x.reader, err = perf.NewReader(x.objects.Events, os.Getpagesize())
+	if err != nil {
+		x.Close()
+		return fmt.Errorf("failed to create perf event reader: %s", err.Error())
+	}
+	x.done = make(chan struct{})
+
 	// ---------- attach XDP ----------
 	count := 0
 	flagNames := []string{"offload", "driver", "generic"}
 	for i, mode := range []link.XDPAttachFlags{link.XDPOffloadMode, link.XDPDriverMode, link.XDPGenericMode} {
 		flagName := flagNames[i]
-		x.link, err = link.AttachXDP(link.XDPOptions{
-			Program:   x.objects.XdpProgFunc,
+		l, err := link.AttachXDP(link.XDPOptions{
+			Program:   x.objects.XdpProg,
 			Interface: iface.Index,
 			Flags:     mode,
 		})
 		if err == nil {
+			x.linkType = flagName
+			x.link = &l
 			log.Printf("XDP program attached successfully, current mode: %s", flagName)
 			break
 		}
@@ -52,14 +69,104 @@ func (x *Xdp) Start() error {
 		fmt.Printf("failed to attach XDP program with %s mode: %s\n", flagName, err.Error())
 	}
 	if count == 3 {
+		x.Close()
 		return errors.New("failed to attach XDP program")
 	}
 	return nil
 }
 
-func (x *Xdp) Stop() {
-	if x.link != nil {
-		x.link.Close()
+func (x *Xdp) Close() {
+	if x.done != nil {
+		close(x.done)
 	}
-	x.objects.Close()
+	if x.reader != nil {
+		x.reader.Close()
+	}
+	if x.link != nil {
+		(*x.link).Close()
+	}
+	if x.objects != nil {
+		x.objects.Close()
+	}
+}
+
+func (x *Xdp) GetLinkType() string {
+	return x.linkType
+}
+
+func (x *Xdp) monitorEvents(submit func(*PacketInfo)) {
+	for {
+		select {
+		case <-x.done:
+			return
+		default:
+			record, err := x.reader.Read()
+			if err != nil {
+				if err == perf.ErrClosed {
+					log.Printf("perf event reader closed, trying to restart eBPF")
+					x.Close()
+					if err := x.Start(); err != nil {
+						log.Fatalf("failed to restart eBPF: %s", err.Error())
+					} else {
+						log.Printf("eBPF restarted successfully")
+					}
+					return
+				}
+				continue
+			}
+			var pi PacketInfo
+			if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &pi); err != nil {
+				continue
+			}
+			submit(&pi)
+		}
+	}
+}
+
+func (x *Xdp) updateMap(iptype utils.IPType, value []byte, add bool) (err error) {
+	switch iptype {
+	case utils.IPTypeIPv4:
+		if add {
+			err = x.objects.Ipv4List.Put(value, 1)
+		} else {
+			err = x.objects.Ipv4List.Delete(value)
+		}
+	case utils.IPTypeIPV4CIDR:
+		if add {
+			err = x.objects.Ipv4CidrTrie.Put(value, 1)
+		} else {
+			err = x.objects.Ipv4CidrTrie.Delete(value)
+		}
+	case utils.IPTypeIPv6:
+		if add {
+			err = x.objects.Ipv6List.Put(value, 1)
+		} else {
+			err = x.objects.Ipv6List.Delete(value)
+		}
+	case utils.IPTypeIPv6CIDR:
+		if add {
+			err = x.objects.Ipv6CidrTrie.Put(value, 1)
+		} else {
+			err = x.objects.Ipv6CidrTrie.Delete(value)
+		}
+	default:
+		return fmt.Errorf("unsupported match type: %v", iptype)
+	}
+	return err
+}
+
+func (x *Xdp) AddRule(value string) error {
+	bytes, iptype, err := utils.ParseValueToBytes(value)
+	if err != nil {
+		return err
+	}
+	return x.updateMap(iptype, bytes, true)
+}
+
+func (x *Xdp) DeleteRule(value string) error {
+	bytes, iptype, err := utils.ParseValueToBytes(value)
+	if err != nil {
+		return err
+	}
+	return x.updateMap(iptype, bytes, false)
 }
