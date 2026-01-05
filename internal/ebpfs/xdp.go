@@ -192,13 +192,11 @@ func (x *Xdp) GetRule() ([]Rule, error) {
 
 func (x *Xdp) ipv4List() ([]Rule, error) {
 	iter := x.objects.Ipv4List.Iterate()
-	var key uint32
+	var key []byte
 	var value uint8
 	var res []Rule
 	for iter.Next(&key, &value) {
-		ipBytes := make([]byte, 4)
-		binary.LittleEndian.PutUint32(ipBytes, key)
-		ip := net.IP(ipBytes)
+		ip := net.IP(key)
 		res = append(res, Rule{
 			Key:   ip.String(),
 			Value: value,
@@ -216,16 +214,14 @@ func (x *Xdp) ipv4TrieKey() ([]Rule, error) {
 	var value uint8
 	var res []Rule
 	for iter.Next(&key, &value) {
-		ipBytes := make([]byte, 4)
-		binary.LittleEndian.PutUint32(ipBytes, key.Addr)
-		ip := net.IP(ipBytes)
+		ip := net.IP(key.Addr[:])
 		res = append(res, Rule{
 			Key:   fmt.Sprintf("%s/%d", ip.String(), key.PrefixLen),
 			Value: value,
 		})
 	}
 	if err := iter.Err(); err != nil {
-		return []Rule{}, err
+		return res, err
 	}
 	return res, nil
 }
