@@ -1,13 +1,13 @@
 APP := rho-aias
 GO ?= go
-BPF_GEN_DIR := ./internal/ebpf
+BPF_GEN_DIR := ./internal/ebpfs
 
 all: gen build
 
 vmlinux.h: 
-	bpftool btf dump file /sys/kernel/btf/vmlinux format c > ebpf/vmlinux.h
+	bpftool btf dump file /sys/kernel/btf/vmlinux format c > ebpfs/vmlinux.h
 
-gen: ebpf/xdp.bpf.c
+gen: 
 	$(GO) generate $(BPF_GEN_DIR)
 
 build: main.go
