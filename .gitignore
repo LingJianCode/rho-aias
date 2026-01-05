@@ -4,4 +4,4 @@
 rhoaias
 rho-aias
 vmlinux.h
-test/
+*.log

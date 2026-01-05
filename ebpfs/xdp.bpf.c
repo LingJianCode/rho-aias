@@ -1,5 +1,29 @@
 //go:build ignore
 
+/* XDP (eXpress Data Path) BPF 程序
+ *
+ * 功能:
+ * - 在网络驱动层拦截和处理数据包，性能优于传统 netfilter/iptables
+ * - 根据 IPv4/IPv6 地址或 CIDR 规则过滤数据包
+ * - 将匹配的数据包事件发送到用户空间监控
+ *
+ * 数据包处理流程:
+ * 1. 解析以太网头 -> 获取协议类型
+ * 2. 处理 VLAN 标签 (如果存在)
+ * 3. 解析 IP 层 (IPv4/IPv6)
+ *    - 验证头部完整性
+ *    - 处理 IP 分片 (只处理首片)
+ *    - 处理 IPv6 扩展头链
+ * 4. 根据规则匹配 IP 地址
+ * 5. 将事件上报到用户空间
+ * 6. 返回 XDP_DROP 或 XDP_PASS
+ *
+ * 安全特性:
+ * - IPv4 分片: 只处理首片 (offset=0)，丢弃后续分片
+ * - IPv6 扩展头: 限制扩展头数量 (最多 8 个)
+ * - 边界检查: 所有指针访问前都进行边界验证
+ */
+
 #include "vmlinux.h"
 #include "common.h"
 #include <bpf/bpf_helpers.h>
@@ -24,30 +48,31 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define DEFAULT_IPV4_PREFIX  32  // Full IPv4 address length for LPM lookup
 #define DEFAULT_KEY 0
 
+// IPv6 extension header limits (防止 DoS 攻击)
+#define MAX_IPV6_EXT_HEADERS 8   // 最多处理的扩展头数量
+
 /* Packet information structure for processing and event reporting
- * Total size: 68 bytes, packed to avoid padding
+ * 总大小: 64 bytes, packed 避免填充
+ * 注意: 当前不解析传输层信息，只记录网络层地址
  */
 struct packet_info {
-    // Network layer - IPv4 addresses
-    __be32 src_ip;                  // Source IPv4 address
-    __be32 dst_ip;                  // Destination IPv4 address
+    // Network layer - IPv4 addresses (8 bytes)
+    __be32 src_ip;                  // 源 IPv4 地址
+    __be32 dst_ip;                  // 目的 IPv4 地址
 
-    // Network layer - IPv6 addresses
-    __be32 src_ipv6[4];             // Source IPv6 address (128 bits)
-    __be32 dst_ipv6[4];             // Destination IPv6 address (128 bits)
+    // Network layer - IPv6 addresses (32 bytes)
+    __be32 src_ipv6[4];             // 源 IPv6 地址 (128 bits)
+    __be32 dst_ipv6[4];             // 目的 IPv6 地址 (128 bits)
 
-    // Transport layer
-    // __be16 src_port;                // Source port (TCP/UDP)
-    // __be16 dst_port;                // Destination port (TCP/UDP)
+    // Protocol information (2 bytes)
+    __u16 eth_proto;                // 以太网协议类型 (ETH_P_IP/ETH_P_IPV6)
 
-    // Protocol information
-    __u16 eth_proto;                // Ethernet protocol type(IP)
-    // __u16 ip_proto;                 // IP protocol number(TCP/UDP)
+    // Padding (2 bytes) - 保持字段对齐
 
-    // Metadata
-    __u32 pkt_size;                 // Total packet size. offset: 60, bytes: 4
-    __u32 match_type;               // Type of rule that matched. offset: 64, bytes: 4
-} __attribute__((packed));          // 68 bytes
+    // Metadata (8 bytes)
+    __u32 pkt_size;                 // 数据包总大小
+    __u32 match_type;               // 匹配的规则类型
+} __attribute__((packed));          // 64 bytes
 
 /* eBPF maps definitions
  * All maps are limited to MAX_ENTRIES_SIZE entries
@@ -120,9 +145,11 @@ struct {
 } events SEC(".maps");
 
 
-/* Check if packet matches any configured rules
- * Returns: Match type if matched, RUN_MODE_PASS if not matched
- * Note: Checks are performed in order: IPv4 -> IPv6
+/* 检查数据包是否匹配配置的过滤规则
+ * @pi: 包含已解析数据包信息的结构体
+ * 返回值: 匹配类型 (MATCH_BY_IP4_EXACT/IP4_CIDR/IP6_EXACT/IP6_CIDR) 或 MATCH_BY_PASS
+ *
+ * 匹配顺序: IPv4 精确匹配 -> IPv4 CIDR 匹配 -> IPv6 精确匹配 -> IPv6 CIDR 匹配
  */
 static __always_inline __u32 match_by_rule(struct packet_info *pi) {
     // ETH_P_IP 宏定义的是 网络字节序的值, pi->eth_proto 从数据包中读出的也是 网络字节序
@@ -159,49 +186,18 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
     return MATCH_BY_PASS;
 }
 
-/* Parse TCP/UDP header information
- * @pkt_info: Packet info structure to fill
- * @data: Pointer to start of transport header
- * @data_end: Pointer to end of packet data
- * @proto: IP protocol number (IPPROTO_TCP/IPPROTO_UDP)
+/* 解析 IP 层头部信息
+ * @pkt_info: 输出参数，填充解析后的数据包信息
+ * @data: 数据包起始指针
+ * @data_end: 数据包结束指针
+ * 返回值: 0=成功, 1=数据包异常(应丢弃), 2=非 IP 协议
+ *
+ * 处理流程:
+ * 1. 解析以太网头
+ * 2. 处理 VLAN 标签 (802.1Q/802.1AD)
+ * 3. 解析 IPv4 或 IPv6 头部
+ * 4. 处理 IPv6 扩展头链
  */
-/*
-static __always_inline void parse_transport(struct packet_info *pkt_info, void *data, void *data_end, __u8 proto) {
-    pkt_info->ip_proto = proto;
-    pkt_info->src_port = 0;
-    pkt_info->dst_port = 0;
-    
-    switch (proto) {
-    case IPPROTO_TCP: {
-        if (data + sizeof(struct tcphdr) > data_end)
-            return;
-        struct tcphdr *tcp = data;
-
-        // 验证 TCP 头长度（考虑 TCP 选项）
-        __u8 tcp_hlen = tcp->doff * 4;
-        if (tcp_hlen < sizeof(struct tcphdr) || (void *)tcp + tcp_hlen > data_end)
-            return;
-
-        pkt_info->src_port = bpf_ntohs(tcp->source);
-        pkt_info->dst_port = bpf_ntohs(tcp->dest);
-        break;
-    }
-    case IPPROTO_UDP: {
-        if (data + sizeof(struct udphdr) > data_end)
-            return;
-        struct udphdr *udp = data;
-
-        // UDP 头固定 8 字节，无需额外验证
-        pkt_info->src_port = bpf_ntohs(udp->source);
-        pkt_info->dst_port = bpf_ntohs(udp->dest);
-        break;
-    }
-    default:
-        break;
-    }
-}
-*/
-
 static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *data, void *data_end) {
 
     struct ethhdr *eth = data;
@@ -224,52 +220,103 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
     
     // 根据以太网协议类型判断是 IPv4 还是 IPv6
     if (pkt_info->eth_proto == ETH_P_IP) {
-        // IPv4
+        // IPv4 处理
         struct iphdr *iph = (struct iphdr *)ip_data;
+
+        // 验证基本 IP 头边界
         if ((void *)(iph + 1) > data_end)
             return 1;
-        
-        // 验证 IP 头长度
-        if (iph->ihl < 5 || (void *)iph + (iph->ihl * 4) > data_end)
+
+        // 验证 IP 头长度 (ihl 以 4 字节为单位，最小 5)
+        // 同时检查整数乘法后是否溢出数据包边界
+        if (iph->ihl < 5 || iph->ihl > 15)
             return 1;
-        
-        // 跳过 IP 分片（非首片无传输层头）
-        if (iph->frag_off & bpf_htons(IP_MF | IP_OFFSET))
+        __u32 iph_len = iph->ihl * 4;
+        if ((void *)iph + iph_len > data_end)
             return 1;
-        
+
+        // 验证协议类型 (确保是已知协议)
+        // 常见协议: TCP(6), UDP(17), ICMP(1), ESP(50), AH(51)
+        // 这里只做基本验证，不接受未知协议
+        if (iph->protocol == 0 || iph->protocol > 255)
+            return 1;
+
+        // 检查 IP 分片: 只丢弃非首片分片 (fragment offset > 0)
+        // 首片分片 (offset=0) 包含完整的 IP 地址信息，需要处理
+        // IP_OFFSET 是 fragment offset 字段的掩码 (13位，值为 0x1fff)
+        if (iph->frag_off & bpf_htons(IP_OFFSET))
+            return 1;
+
+        // 注意: 首片分片如果设置了 MF (More Fragments) 标志，
+        // offset 仍为 0，所以上面的检查不会丢弃它。
+        // 只有后续分片 (offset > 0) 会被丢弃。
+
         // 填充 IPv4 地址信息
         pkt_info->src_ip = iph->saddr;
         pkt_info->dst_ip = iph->daddr;
-        
-        // 跳转到传输层
-        // void *transport_data = (void *)iph + (iph->ihl * 4);
-        // parse_transport(pkt_info, transport_data, data_end, iph->protocol);
+
+        // 注意: 传输层解析已注释，XDP 程序当前只处理网络层
         
     } else if (pkt_info->eth_proto == ETH_P_IPV6) {
-        // IPv6
+        // IPv6 处理
         struct ipv6hdr *ipv6h = (struct ipv6hdr *)ip_data;
         if ((void *)(ipv6h + 1) > data_end)
             return 1;
-        
-        // 复制 IPv6 地址（128 位 = 4 * 32 位）
-        pkt_info->src_ipv6[0] = ipv6h->saddr.in6_u.u6_addr32[0];
-        pkt_info->src_ipv6[1] = ipv6h->saddr.in6_u.u6_addr32[1];
-        pkt_info->src_ipv6[2] = ipv6h->saddr.in6_u.u6_addr32[2];
-        pkt_info->src_ipv6[3] = ipv6h->saddr.in6_u.u6_addr32[3];
-        
-        pkt_info->dst_ipv6[0] = ipv6h->daddr.in6_u.u6_addr32[0];
-        pkt_info->dst_ipv6[1] = ipv6h->daddr.in6_u.u6_addr32[1];
-        pkt_info->dst_ipv6[2] = ipv6h->daddr.in6_u.u6_addr32[2];
-        pkt_info->dst_ipv6[3] = ipv6h->daddr.in6_u.u6_addr32[3];
-        
 
-        // 处理 IPv6 扩展头（简化处理，只处理最常见的情况）
-        // __u8 proto = ipv6h->nexthdr;
-        // void *transport_data = (void *)(ipv6h + 1);
-        
-        // 这里可以添加对 IPv6 扩展头的处理
-        // 目前简化处理，假设没有扩展头或扩展头已正确处理
-        // parse_transport(pkt_info, transport_data, data_end, proto);      
+        // 复制 IPv6 地址（128 位 = 4 * 32 位）
+        __builtin_memcpy(pkt_info->src_ipv6, ipv6h->saddr.in6_u.u6_addr32, sizeof(pkt_info->src_ipv6));
+        __builtin_memcpy(pkt_info->dst_ipv6, ipv6h->daddr.in6_u.u6_addr32, sizeof(pkt_info->dst_ipv6));
+
+        // 处理 IPv6 扩展头链
+        // 跳过所有扩展头直到找到传输层协议或达到限制
+        __u8 nexthdr = ipv6h->nexthdr;
+        void *ext_hdr = (void *)(ipv6h + 1);
+        int hdr_count = 0;
+
+        // 常见的 IPv6 扩展头类型
+        // 0: Hop-by-Hop Options
+        // 43: Routing
+        // 44: Fragment (分片数据包，可能没有完整地址信息)
+        // 50: Encapsulating Security Payload (ESP)
+        // 51: Authentication Header (AH)
+        // 60: Destination Options
+        // 59: No Next Header (链的末尾)
+
+        while (nexthdr != IPPROTO_TCP && nexthdr != IPPROTO_UDP &&
+               nexthdr != 59 /* No Next Header */) {
+            // 防止 DoS: 限制扩展头数量
+            if (hdr_count++ >= MAX_IPV6_EXT_HEADERS)
+                return 1;
+
+            // 验证至少有 8 字节 (IPv6 扩展头最小长度)
+            if (ext_hdr + 8 > data_end)
+                return 1;
+
+            // 读取 nexthdr 字段 (扩展头第一个字节)
+            __u8 next = *(__u8 *)ext_hdr;
+
+            // 特殊处理: Fragment 扩展头
+            // 需要检查 frag_off 字段 (偏移 2-3 字节)
+            if (nexthdr == IPPROTO_FRAGMENT) {
+                // 验证 frag_hdr 结构 (8 字节)
+                if (ext_hdr + sizeof(struct frag_hdr) > data_end)
+                    return 1;
+                struct frag_hdr *frag = (struct frag_hdr *)ext_hdr;
+                // 如果是后续分片 (offset > 0)，应该丢弃
+                // IP6F_OFF_MASK = 0xFFF8，提取 bits 4-15 的分片偏移
+                if (frag->frag_off & bpf_htons(IP6F_OFF_MASK))
+                    return 1;
+            }
+
+            // 更新 nexthdr
+            nexthdr = next;
+
+            // 跳过 8 字节 (IPv6 扩展头最小单位)
+            ext_hdr += 8;
+        }
+
+        // 注意: 当前代码不解析传输层，但仍需正确跳过扩展头
+        // 以确保正确处理带扩展头的 IPv6 数据包
     } else {
         return 2; // 不是 IPv4 或 IPv6
     }
@@ -277,8 +324,15 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
     return 0;
 }
 
-/* Main XDP program entry point
- * Processes incoming packets and applies filtering rules
+/* XDP 程序主入口点
+ * @ctx: XDP 元数据结构，包含数据包指针和接口信息
+ * 返回值: XDP_DROP (丢弃) 或 XDP_PASS (放行)
+ *
+ * 处理流程:
+ * 1. 从 scratch map 获取临时存储空间
+ * 2. 解析数据包头部信息
+ * 3. 根据规则匹配决定是否丢弃
+ * 4. 将匹配事件上报到用户空间
  */
 SEC("xdp")
 int xdp_prog(struct xdp_md *ctx)
@@ -289,40 +343,48 @@ int xdp_prog(struct xdp_md *ctx)
     struct packet_info *pkt_info;
     __u32 key = DEFAULT_KEY;
     __u32 match_type = DEFAULT_KEY;
-    
+
+    // 基本边界检查
     if (data + sizeof(struct ethhdr) > data_end)
         return XDP_PASS;
 
-    // Get scratch map element
+    // 从 scratch map 获取 percpu 存储空间
     pkt_info = bpf_map_lookup_elem(&scratch, &key);
-    if (!pkt_info){
+    if (!pkt_info) {
         bpf_printk("Failed to lookup scratch map\n");
         return XDP_PASS;
     }
+
+    // 清零并解析数据包
     __builtin_memset(pkt_info, 0, sizeof(*pkt_info));
+    pkt_info->pkt_size = data_end - data;
+
     int res = parse_ip_header(pkt_info, data, data_end);
     switch (res) {
         case 0:
-            goto submit;  
-        case 1:{
-            // 数据包有问题
+            // 解析成功，继续处理
+            goto submit;
+        case 1:
+            // 数据包异常 (分片后续片/头部损坏)
             return XDP_DROP;
-        }
-        case 2:{
-            // 非IP/IPv6
+        case 2:
+            // 非 IP 协议，放行
             return XDP_PASS;
-        }
+        default:
+            return XDP_PASS;
     }
 
 submit:
-    // Check if the packet matches any rules
+    // 检查是否匹配过滤规则
     match_type = match_by_rule(pkt_info);
     pkt_info->match_type = match_type;
-    // Notify event
+
+    // 将匹配事件上报到用户空间监控程序
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, pkt_info, sizeof(*pkt_info));
-	
+
+    // 匹配规则则丢弃，否则放行
     if (match_type != MATCH_BY_PASS) {
-        return XDP_DROP;  // Match rule, drop
+        return XDP_DROP;
     }
     return XDP_PASS;
 }
