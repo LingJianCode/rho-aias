@@ -122,14 +122,17 @@ struct {
 
 /* Check if packet matches any configured rules
  * Returns: Match type if matched, RUN_MODE_PASS if not matched
- * Note: Checks are performed in order: MAC -> IPv4 -> IPv6
+ * Note: Checks are performed in order: IPv4 -> IPv6
  */
 static __always_inline __u32 match_by_rule(struct packet_info *pi) {
+    // ETH_P_IP 宏定义的是 网络字节序的值, pi->eth_proto 从数据包中读出的也是 网络字节序
+    // bpf_printk("match_by_rule eth_proto: %d %d\n", pi->eth_proto, bpf_htons(ETH_P_IP));
 
     // reference: https://docs.kernel.org/next/bpf/map_lpm_trie.html#bpf-map-lookup-elem
     // Process IPv4 packets
-    if (pi->eth_proto == bpf_htons(ETH_P_IP)) {
+    if (pi->eth_proto == ETH_P_IP) {
         // Try exact match first
+        // bpf_printk("match_by_rule IP: %d\n", pi->src_ip);
         if (bpf_map_lookup_elem(&ipv4_list, &pi->src_ip)) return MATCH_BY_IP4_EXACT;
 
         // Then try CIDR match using LPM Trie
@@ -139,7 +142,7 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
         };
         if (bpf_map_lookup_elem(&ipv4_cidr_trie, &key)) return MATCH_BY_IP4_CIDR;
         
-    } else if (pi->eth_proto == bpf_htons(ETH_P_IPV6)) {
+    } else if (pi->eth_proto == ETH_P_IPV6) {
         // Try exact match first
         struct in6_addr ipv6_addr;
         __builtin_memset(&ipv6_addr, 0, sizeof(ipv6_addr));
@@ -198,6 +201,7 @@ static __always_inline void parse_transport(struct packet_info *pkt_info, void *
 }
 
 static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *data, void *data_end) {
+
     struct ethhdr *eth = data;
     
     if ((void *)(eth + 1) > data_end)

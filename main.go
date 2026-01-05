@@ -10,11 +10,12 @@ import (
 
 func main() {
 	xdp := ebpfs.NewXdp("ens33")
+	defer xdp.Close()
 	err := xdp.Start()
 	if err != nil {
 		panic(err)
 	}
-
+	go xdp.MonitorEvents()
 	xdpHandle := handles.NewXdpHandle(xdp)
 	router := gin.Default()
 	api := router.Group("/api")

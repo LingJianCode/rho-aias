@@ -9,4 +9,5 @@ import (
 func RegisterXdpRoutes(group *gin.RouterGroup, xdpHandle *handles.XdpHandle) {
 	group.GET("/rule", xdpHandle.GetRule)
 	group.POST("/rule", xdpHandle.AddRule)
+	group.DELETE("/rule", xdpHandle.DelRule)
 }
