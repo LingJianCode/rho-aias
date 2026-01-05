@@ -153,6 +153,7 @@ func ParseStringToIPType(value string) IPType {
 	return IPTypeUnknown
 }
 
+// 小端字节序？？？
 func ParseValueToBytes(value string) ([]byte, IPType, error) {
 	value = strings.TrimSpace(value)
 	// try to parse as CIDR

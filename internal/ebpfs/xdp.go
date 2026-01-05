@@ -97,6 +97,7 @@ func (x *Xdp) GetLinkType() string {
 }
 
 func (x *Xdp) MonitorEvents() {
+	log.Println("MonitorEvents")
 	for {
 		select {
 		case <-x.done:
@@ -125,7 +126,6 @@ func (x *Xdp) MonitorEvents() {
 	}
 }
 
-// 存大端字节序
 func (x *Xdp) updateMap(iptype utils.IPType, value []byte, add bool) (err error) {
 	switch iptype {
 	case utils.IPTypeIPv4:
