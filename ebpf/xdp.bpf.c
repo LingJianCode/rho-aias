@@ -172,6 +172,12 @@ static __always_inline void parse_transport(struct packet_info *pkt_info, void *
         if (data + sizeof(struct tcphdr) > data_end)
             return;
         struct tcphdr *tcp = data;
+
+        // 验证 TCP 头长度（考虑 TCP 选项）
+        __u8 tcp_hlen = tcp->doff * 4;
+        if (tcp_hlen < sizeof(struct tcphdr) || (void *)tcp + tcp_hlen > data_end)
+            return;
+
         pkt_info->src_port = bpf_ntohs(tcp->source);
         pkt_info->dst_port = bpf_ntohs(tcp->dest);
         break;
@@ -180,6 +186,8 @@ static __always_inline void parse_transport(struct packet_info *pkt_info, void *
         if (data + sizeof(struct udphdr) > data_end)
             return;
         struct udphdr *udp = data;
+
+        // UDP 头固定 8 字节，无需额外验证
         pkt_info->src_port = bpf_ntohs(udp->source);
         pkt_info->dst_port = bpf_ntohs(udp->dest);
         break;
@@ -187,6 +195,80 @@ static __always_inline void parse_transport(struct packet_info *pkt_info, void *
     default:
         break;
     }
+}
+
+static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *data, void *data_end) {
+    struct ethhdr *eth = data;
+    
+    if ((void *)(eth + 1) > data_end)
+        return -1;
+    
+    pkt_info->eth_proto = bpf_ntohs(eth->h_proto);
+    
+    void *ip_data = (void *)(eth + 1);
+    
+    // 处理 VLAN 标签
+    if (eth->h_proto == bpf_htons(ETH_P_8021Q) || eth->h_proto == bpf_htons(ETH_P_8021AD)) {
+        struct vlan_hdr *vlan = (struct vlan_hdr *)(eth + 1);
+        if ((void *)(vlan + 1) > data_end)
+            return -1;
+        ip_data = (void *)(vlan + 1);
+        pkt_info->eth_proto = bpf_ntohs(vlan->h_vlan_encapsulated_proto);
+    }
+    
+    // 根据以太网协议类型判断是 IPv4 还是 IPv6
+    if (pkt_info->eth_proto == ETH_P_IP) {
+        // IPv4
+        struct iphdr *iph = (struct iphdr *)ip_data;
+        if ((void *)(iph + 1) > data_end)
+            return 1;
+        
+        // 验证 IP 头长度
+        if (iph->ihl < 5 || (void *)iph + (iph->ihl * 4) > data_end)
+            return 1;
+        
+        // 跳过 IP 分片（非首片无传输层头）
+        if (iph->frag_off & bpf_htons(IP_MF | IP_OFFSET))
+            return 1;
+        
+        // 填充 IPv4 地址信息
+        pkt_info->src_ip = iph->saddr;
+        pkt_info->dst_ip = iph->daddr;
+        
+        // 跳转到传输层
+        void *transport_data = (void *)iph + (iph->ihl * 4);
+        parse_transport(pkt_info, transport_data, data_end, iph->protocol);
+        
+    } else if (pkt_info->eth_proto == ETH_P_IPV6) {
+        // IPv6
+        struct ipv6hdr *ipv6h = (struct ipv6hdr *)ip_data;
+        if ((void *)(ipv6h + 1) > data_end)
+            return 1;
+        
+        // 复制 IPv6 地址（128 位 = 4 * 32 位）
+        pkt_info->src_ipv6[0] = ipv6h->saddr.in6_u.u6_addr32[0];
+        pkt_info->src_ipv6[1] = ipv6h->saddr.in6_u.u6_addr32[1];
+        pkt_info->src_ipv6[2] = ipv6h->saddr.in6_u.u6_addr32[2];
+        pkt_info->src_ipv6[3] = ipv6h->saddr.in6_u.u6_addr32[3];
+        
+        pkt_info->dst_ipv6[0] = ipv6h->daddr.in6_u.u6_addr32[0];
+        pkt_info->dst_ipv6[1] = ipv6h->daddr.in6_u.u6_addr32[1];
+        pkt_info->dst_ipv6[2] = ipv6h->daddr.in6_u.u6_addr32[2];
+        pkt_info->dst_ipv6[3] = ipv6h->daddr.in6_u.u6_addr32[3];
+        
+        // 处理 IPv6 扩展头（简化处理，只处理最常见的情况）
+        __u8 proto = ipv6h->nexthdr;
+        void *transport_data = (void *)(ipv6h + 1);
+        
+        // 这里可以添加对 IPv6 扩展头的处理
+        // 目前简化处理，假设没有扩展头或扩展头已正确处理
+        parse_transport(pkt_info, transport_data, data_end, proto);
+        
+    } else {
+        return 2; // 不是 IPv4 或 IPv6
+    }
+    
+    return 0;
 }
 
 /* Main XDP program entry point
@@ -197,7 +279,7 @@ int xdp_prog(struct xdp_md *ctx)
 {
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
-    struct ethhdr *eth = data;
+
     struct packet_info *pkt_info;
     __u32 key = DEFAULT_KEY;
     __u32 match_type = DEFAULT_KEY;
@@ -212,36 +294,18 @@ int xdp_prog(struct xdp_md *ctx)
         return XDP_PASS;
     }
     __builtin_memset(pkt_info, 0, sizeof(*pkt_info));
-
-    // Ethernet protocol
-    pkt_info->eth_proto = bpf_ntohs(eth->h_proto);
-    // Packet size
-    pkt_info->pkt_size = data_end - data;
-
-    // Parse packet based on Ethernet protocol
-    switch (pkt_info->eth_proto) {
-    case ETH_P_IP: {
-        struct iphdr *ip = data + sizeof(struct ethhdr);
-        if ((void *)(ip + 1) > data_end)
-            goto submit;
-
-        bpf_probe_read_kernel(&pkt_info->src_ip, sizeof(__be32), &ip->saddr);
-        bpf_probe_read_kernel(&pkt_info->dst_ip, sizeof(__be32), &ip->daddr);
-        parse_transport(pkt_info, (void *)(ip + 1), data_end, ip->protocol);
-        break;
-    }
-    case ETH_P_IPV6: {
-        struct ipv6hdr *ip6 = data + sizeof(struct ethhdr);
-        if ((void *)(ip6 + 1) > data_end)
-            goto submit;
-
-        bpf_probe_read_kernel(pkt_info->src_ipv6, sizeof(pkt_info->src_ipv6), &ip6->saddr);
-        bpf_probe_read_kernel(pkt_info->dst_ipv6, sizeof(pkt_info->dst_ipv6), &ip6->daddr);
-        parse_transport(pkt_info, (void *)(ip6 + 1), data_end, ip6->nexthdr);
-        break;
-    }
-    default:
-        break;
+    int res = parse_ip_header(pkt_info, data, data_end);
+    switch (res) {
+        case 0:
+            goto submit;  
+        case 1:{
+            // 数据包有问题
+            return XDP_DROP;
+        }
+        case 2:{
+            // 非IP/IPv6
+            return XDP_PASS;
+        }
     }
 
 submit:
