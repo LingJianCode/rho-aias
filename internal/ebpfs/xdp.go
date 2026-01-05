@@ -38,10 +38,11 @@ func (x *Xdp) Start() error {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Printf("failed to remove memlock: %s", err.Error())
 	}
-	if err := loadXdpObjects(&x.objects, nil); err != nil {
+	var ebpfObj xdpObjects
+	if err := loadXdpObjects(&ebpfObj, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF objects: %s", err.Error())
 	}
-
+	x.objects = &ebpfObj
 	x.reader, err = perf.NewReader(x.objects.Events, os.Getpagesize())
 	if err != nil {
 		x.Close()
@@ -124,30 +125,31 @@ func (x *Xdp) monitorEvents(submit func(*PacketInfo)) {
 }
 
 func (x *Xdp) updateMap(iptype utils.IPType, value []byte, add bool) (err error) {
+	be32 := binary.BigEndian.Uint32(value)
 	switch iptype {
 	case utils.IPTypeIPv4:
 		if add {
-			err = x.objects.Ipv4List.Put(value, 1)
+			err = x.objects.Ipv4List.Put(be32, uint8(1))
 		} else {
-			err = x.objects.Ipv4List.Delete(value)
+			err = x.objects.Ipv4List.Delete(be32)
 		}
 	case utils.IPTypeIPV4CIDR:
 		if add {
-			err = x.objects.Ipv4CidrTrie.Put(value, 1)
+			err = x.objects.Ipv4CidrTrie.Put(be32, uint8(1))
 		} else {
-			err = x.objects.Ipv4CidrTrie.Delete(value)
+			err = x.objects.Ipv4CidrTrie.Delete(be32)
 		}
 	case utils.IPTypeIPv6:
 		if add {
-			err = x.objects.Ipv6List.Put(value, 1)
+			err = x.objects.Ipv6List.Put(be32, uint8(1))
 		} else {
-			err = x.objects.Ipv6List.Delete(value)
+			err = x.objects.Ipv6List.Delete(be32)
 		}
 	case utils.IPTypeIPv6CIDR:
 		if add {
-			err = x.objects.Ipv6CidrTrie.Put(value, 1)
+			err = x.objects.Ipv6CidrTrie.Put(be32, 1)
 		} else {
-			err = x.objects.Ipv6CidrTrie.Delete(value)
+			err = x.objects.Ipv6CidrTrie.Delete(be32)
 		}
 	default:
 		return fmt.Errorf("unsupported match type: %v", iptype)
@@ -160,6 +162,7 @@ func (x *Xdp) AddRule(value string) error {
 	if err != nil {
 		return err
 	}
+	log.Println(bytes, iptype)
 	return x.updateMap(iptype, bytes, true)
 }
 
@@ -169,4 +172,29 @@ func (x *Xdp) DeleteRule(value string) error {
 		return err
 	}
 	return x.updateMap(iptype, bytes, false)
+}
+
+func (x *Xdp) GetRule() ([]Rule, error) {
+	iter := x.objects.Ipv4List.Iterate()
+	var key uint32
+	var value uint8
+	var res []Rule
+	for iter.Next(&key, &value) {
+		ipBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(ipBytes, key)
+		ip := net.IP(ipBytes)
+		res = append(res, Rule{
+			Key:   ip.String(),
+			Value: value,
+		})
+	}
+	if err := iter.Err(); err != nil {
+		return []Rule{}, err
+	}
+	return res, nil
+}
+
+type Rule struct {
+	Key   string
+	Value uint8
 }
