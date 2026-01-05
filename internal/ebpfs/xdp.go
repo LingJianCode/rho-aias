@@ -122,7 +122,7 @@ func (x *Xdp) MonitorEvents() {
 				log.Println(err.Error())
 				continue
 			}
-			log.Println(pi.SrcIP)
+			log.Println(pi.SrcIP, pi.MatchType)
 		}
 	}
 }
