@@ -37,12 +37,12 @@ struct packet_info {
     __be32 dst_ipv6[4];             // Destination IPv6 address (128 bits)
 
     // Transport layer
-    __be16 src_port;                // Source port (TCP/UDP)
-    __be16 dst_port;                // Destination port (TCP/UDP)
+    // __be16 src_port;                // Source port (TCP/UDP)
+    // __be16 dst_port;                // Destination port (TCP/UDP)
 
     // Protocol information
-    __u16 eth_proto;                // Ethernet protocol type
-    __u16 ip_proto;                 // IP protocol number
+    __u16 eth_proto;                // Ethernet protocol type(IP)
+    // __u16 ip_proto;                 // IP protocol number(TCP/UDP)
 
     // Metadata
     __u32 pkt_size;                 // Total packet size. offset: 60, bytes: 4
@@ -165,6 +165,7 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
  * @data_end: Pointer to end of packet data
  * @proto: IP protocol number (IPPROTO_TCP/IPPROTO_UDP)
  */
+/*
 static __always_inline void parse_transport(struct packet_info *pkt_info, void *data, void *data_end, __u8 proto) {
     pkt_info->ip_proto = proto;
     pkt_info->src_port = 0;
@@ -199,6 +200,7 @@ static __always_inline void parse_transport(struct packet_info *pkt_info, void *
         break;
     }
 }
+*/
 
 static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *data, void *data_end) {
 

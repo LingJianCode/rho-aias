@@ -119,6 +119,7 @@ func (x *Xdp) MonitorEvents() {
 			}
 			var pi PacketInfo
 			if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &pi); err != nil {
+				log.Println(err.Error())
 				continue
 			}
 			log.Println(pi.SrcIP)
