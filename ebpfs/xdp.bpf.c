@@ -240,8 +240,8 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
         pkt_info->dst_ip = iph->daddr;
         
         // 跳转到传输层
-        void *transport_data = (void *)iph + (iph->ihl * 4);
-        parse_transport(pkt_info, transport_data, data_end, iph->protocol);
+        // void *transport_data = (void *)iph + (iph->ihl * 4);
+        // parse_transport(pkt_info, transport_data, data_end, iph->protocol);
         
     } else if (pkt_info->eth_proto == ETH_P_IPV6) {
         // IPv6
@@ -260,14 +260,14 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
         pkt_info->dst_ipv6[2] = ipv6h->daddr.in6_u.u6_addr32[2];
         pkt_info->dst_ipv6[3] = ipv6h->daddr.in6_u.u6_addr32[3];
         
+
         // 处理 IPv6 扩展头（简化处理，只处理最常见的情况）
-        __u8 proto = ipv6h->nexthdr;
-        void *transport_data = (void *)(ipv6h + 1);
+        // __u8 proto = ipv6h->nexthdr;
+        // void *transport_data = (void *)(ipv6h + 1);
         
         // 这里可以添加对 IPv6 扩展头的处理
         // 目前简化处理，假设没有扩展头或扩展头已正确处理
-        parse_transport(pkt_info, transport_data, data_end, proto);
-        
+        // parse_transport(pkt_info, transport_data, data_end, proto);      
     } else {
         return 2; // 不是 IPv4 或 IPv6
     }
