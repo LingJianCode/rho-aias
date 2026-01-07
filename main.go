@@ -38,5 +38,5 @@ func main() {
 	// Register TC routes (new)
 	routers.RegisterTcRoutes(api, tcHandle)
 
-	router.Run(":8080")
+	go router.Run(":8080")
 }

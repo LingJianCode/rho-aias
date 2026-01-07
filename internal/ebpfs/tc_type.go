@@ -2,17 +2,15 @@ package ebpfs
 
 // TcRule represents a TC filtering rule
 type TcRule struct {
-	SrcIP   string `json:"src_ip"`   // Source IP address (0.0.0.0 = wildcard)
+	SrcIP   string `json:"src_ip"`   // Source IP address (exact IP or CIDR)
 	DstPort uint16 `json:"dst_port"` // Destination port
 	Proto   string `json:"proto"`    // Protocol: "tcp" or "udp"
 }
 
-// TcRuleKey is the key used in the eBPF map
-type TcRuleKey struct {
-	SrcIP   uint32 // Source IP in host byte order (0 = wildcard)
+// TcCidrValue is the value for CIDR LPM_TRIE maps
+type TcCidrValue struct {
 	DstPort uint16 // Destination port in host byte order
 	Proto   uint16 // Protocol: IPPROTO_TCP=6, IPPROTO_UDP=17
-	Padding uint16 // Padding to 8-byte boundary
 }
 
 // Proto constants

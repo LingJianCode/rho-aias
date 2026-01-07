@@ -11,4 +11,6 @@
 #define IP6F_OFF_MASK   0xFFF8       /* Fragment offset mask (bits 4-15) */
 #define IP6F_MORE_FRAG  0x0001       /* More fragments flag (bit 3) */
 
-#define IPPROTO_FRAGMENT  44         /* IPv6 Fragment extension header */ 
+// IPv6 扩展头类型
+#define IPPROTO_FRAGMENT  44         /* IPv6 Fragment extension header */
+#define IPPROTO_ICMPV6   58         /* ICMPv6 protocol */ 

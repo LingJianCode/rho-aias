@@ -200,7 +200,7 @@ def main():
     parser.add_argument('target', help='目标 IP 地址 (IPv4 或 IPv6)')
     parser.add_argument('test_type', nargs='?', default='all',
                        help='测试类型 (默认: all)')
-    parser.add_argument('-i', '--interface', help='网络接口 (如 eth0, ens33)')
+    parser.add_argument('-i', '--interface',default='ens33', help='网络接口 (如 eth0, ens33)')
     parser.add_argument('-c', '--count', type=int, default=1,
                        help='发送次数 (默认: 1)')
 

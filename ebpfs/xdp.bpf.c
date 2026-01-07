@@ -32,6 +32,10 @@
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
+// Branch prediction optimization macros
+#define LIKELY(x) __builtin_expect(!!(x), 1)
+#define UNLIKELY(x) __builtin_expect(!!(x), 0)
+
 // Rule match types
 #define MATCH_BY_PASS      0     // No rule matched
 #define MATCH_BY_IP4_EXACT  1    // Match IPv4 address exactly
@@ -163,25 +167,24 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
         if (bpf_map_lookup_elem(&ipv4_list, &pi->src_ip)) return MATCH_BY_IP4_EXACT;
 
         // Then try CIDR match using LPM Trie
-        struct ipv4_trie_key key = {
+        struct ipv4_trie_key v4_key = {
             .prefixlen = DEFAULT_IPV4_PREFIX,
             .addr = pi->src_ip
         };
-        if (bpf_map_lookup_elem(&ipv4_cidr_trie, &key)) return MATCH_BY_IP4_CIDR;
-        
+        if (bpf_map_lookup_elem(&ipv4_cidr_trie, &v4_key)) return MATCH_BY_IP4_CIDR;
+
     } else if (pi->eth_proto == ETH_P_IPV6) {
-        // Try exact match first
+        // Try exact match first - 直接使用 src_ipv6 数组，避免 memset
         struct in6_addr ipv6_addr;
-        __builtin_memset(&ipv6_addr, 0, sizeof(ipv6_addr));
-        __builtin_memcpy(&ipv6_addr, pi->src_ipv6, sizeof(ipv6_addr));
+        __builtin_memcpy(&ipv6_addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(ipv6_addr.in6_u.u6_addr32));
         if (bpf_map_lookup_elem(&ipv6_list, &ipv6_addr)) return MATCH_BY_IP6_EXACT;
-        
-        // Then try CIDR match using LPM Trie
-        struct ipv6_trie_key key = {
+
+        // Then try CIDR match using LPM Trie - 直接初始化 LPM key
+        struct ipv6_trie_key v6_key = {
             .prefixlen = DEFAULT_IPV6_PREFIX,
-            .addr = ipv6_addr
         };
-        if (bpf_map_lookup_elem(&ipv6_cidr_trie, &key)) return MATCH_BY_IP6_CIDR;
+        __builtin_memcpy(&v6_key.addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(v6_key.addr.in6_u.u6_addr32));
+        if (bpf_map_lookup_elem(&ipv6_cidr_trie, &v6_key)) return MATCH_BY_IP6_CIDR;
     }
     return MATCH_BY_PASS;
 }
@@ -270,6 +273,14 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
         // 处理 IPv6 扩展头链
         // 跳过所有扩展头直到找到传输层协议或达到限制
         __u8 nexthdr = ipv6h->nexthdr;
+
+        // 早期退出优化: 如果没有扩展头，直接返回
+        // 大多数 IPv6 包没有扩展头，这可以避免不必要的循环
+        if (nexthdr == IPPROTO_TCP || nexthdr == IPPROTO_UDP ||
+            nexthdr == 59 || nexthdr == IPPROTO_ICMPV6) {
+            return 0;
+        }
+
         void *ext_hdr = (void *)(ipv6h + 1);
         int hdr_count = 0;
 
@@ -350,14 +361,19 @@ int xdp_prog(struct xdp_md *ctx)
 
     // 从 scratch map 获取 percpu 存储空间
     pkt_info = bpf_map_lookup_elem(&scratch, &key);
-    if (!pkt_info) {
+    if (UNLIKELY(!pkt_info)) {
         bpf_printk("Failed to lookup scratch map\n");
         return XDP_PASS;
     }
 
-    // 清零并解析数据包
-    __builtin_memset(pkt_info, 0, sizeof(*pkt_info));
+    // 只初始化需要的字段（避免完整 memset，提高性能）
+    pkt_info->eth_proto = 0;
+    pkt_info->src_ip = 0;
+    pkt_info->dst_ip = 0;
+    __builtin_memset(pkt_info->src_ipv6, 0, sizeof(pkt_info->src_ipv6));
+    __builtin_memset(pkt_info->dst_ipv6, 0, sizeof(pkt_info->dst_ipv6));
     pkt_info->pkt_size = data_end - data;
+    pkt_info->match_type = 0;
 
     int res = parse_ip_header(pkt_info, data, data_end);
     switch (res) {
@@ -379,12 +395,17 @@ submit:
     match_type = match_by_rule(pkt_info);
     pkt_info->match_type = match_type;
 
-    // 将匹配事件上报到用户空间监控程序
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, pkt_info, sizeof(*pkt_info));
+    // 分支预测优化: 大多数包会通过，使用 LIKELY 提示编译器
+    if (LIKELY(match_type == MATCH_BY_PASS))
+        return XDP_PASS;
 
-    // 匹配规则则丢弃，否则放行
-    if (match_type != MATCH_BY_PASS) {
-        return XDP_DROP;
-    }
-    return XDP_PASS;
+    // 匹配规则则丢弃
+    // 考虑做一个开关，打开时才会上报数据，用于实时调试观察丢弃的包？
+    // 建议: 如果需要监控，考虑以下优化：
+    //   1. 添加采样率，避免每个包都上报
+    //   2. 使用 BPF_MAP_TYPE_RINGBUF 替代 PERF_EVENT_ARRAY（内核 5.8+）
+    //   3. 添加配置开关，只在调试时启用
+
+    // bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, pkt_info, sizeof(*pkt_info));
+    return XDP_DROP;
 }
