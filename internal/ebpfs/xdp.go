@@ -101,6 +101,7 @@ func (x *Xdp) MonitorEvents() {
 	for {
 		select {
 		case <-x.done:
+			log.Println("MonitorEvents exit...")
 			return
 		default:
 			record, err := x.reader.Read()
