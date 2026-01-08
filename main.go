@@ -26,24 +26,12 @@ func main() {
 	go xdp.MonitorEvents()
 	xdpHandle := handles.NewXdpHandle(xdp)
 
-	// Initialize TC (new functionality)
-	tc := ebpfs.NewTc("ens33")
-	defer tc.Close()
-	err = tc.Start()
-	if err != nil {
-		panic(err)
-	}
-	tcHandle := handles.NewTcHandle(tc)
-
 	// Setup router and routes
 	r := gin.Default()
 	api := r.Group("/api")
 
 	// Register XDP routes (existing)
 	routers.RegisterXdpRoutes(api, xdpHandle)
-
-	// Register TC routes (new)
-	routers.RegisterTcRoutes(api, tcHandle)
 
 	server := &http.Server{
 		Addr:    ":8080",
