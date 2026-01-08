@@ -147,6 +147,11 @@ The `internal/threatintel/` module integrates external threat intelligence feeds
    - Incremental diff algorithm with source awareness
    - Concurrent-safe operations
 
+7. **Optimized Cache Loading**
+   - `LoadAll()` method skips GetRule() and diff calculation for initial load
+   - Direct batch insertion for fastest startup performance
+   - Suitable for empty kernel scenarios (offline startup)
+
 ### Configuration
 
 Add to `config.yml`:
@@ -283,27 +288,47 @@ count := GetSourceCount(0x05)               // 2
 
 ### Source-Aware Synchronization
 
-The threat intelligence module (`internal/threatintel/sync.go`) implements source-aware incremental sync:
+The threat intelligence module (`internal/threatintel/sync.go`) implements two sync methods:
 
-- `SyncToKernel(data, sourceMask)`: Syncs rules for a specific source
-- `diff(current, newData, sourceMask)`: Calculates additions/removals considering ownership
-- Only deletes rules when `current_mask == sourceMask` (sole ownership)
-- Multi-source rules trigger a warning and are preserved
+- **`SyncToKernel(data, sourceMask)`**: Incremental sync with diff calculation
+  - Calls `GetRule()` to fetch current rules
+  - Calculates additions/removals using `diff()`
+  - Only deletes rules when `current_mask == sourceMask` (sole ownership)
+  - Multi-source rules trigger a warning and are preserved
+  - **Use for**: Scheduled updates, manual triggers
+
+- **`LoadAll(data, sourceMask)`**: Direct bulk load (optimized)
+  - Skips `GetRule()` and diff calculation
+  - Direct batch insertion of all rules
+  - **Use for**: Startup cache loading, empty kernel initialization
 
 ## eBPF Map Structure
 
 #### XDP Program Maps (`ebpfs/xdp.bpf.c`)
 
-| Map | Type | Key | Value | Purpose |
-|-----|------|-----|-------|---------|
-| `ipv4_list` | HASH | `__be32` | `struct block_value` | IPv4 exact match with source tracking |
-| `ipv4_cidr_trie` | LPM_TRIE | `ipv4_trie_key{prefixlen, addr}` | `struct block_value` | IPv4 CIDR match with source tracking |
-| `ipv6_list` | HASH | `in6_addr` | `struct block_value` | IPv6 exact match with source tracking |
-| `ipv6_cidr_trie` | LPM_TRIE | `ipv6_trie_key{prefixlen, addr}` | `struct block_value` | IPv6 CIDR match with source tracking |
-| `events` | PERF_EVENT_ARRAY | int | int | Event reporting |
-| `scratch` | PERCPU_ARRAY | `__u32` | `packet_info` | Per-CPU storage |
+| Map | Type | Key | Value | Capacity | Purpose |
+|-----|------|-----|-------|----------|---------|
+| `ipv4_list` | HASH | `__be32` | `struct block_value` | 250,000 | IPv4 exact match with source tracking |
+| `ipv4_cidr_trie` | LPM_TRIE | `ipv4_trie_key{prefixlen, addr}` | `struct block_value` | 10,000 | IPv4 CIDR match with source tracking |
+| `ipv6_list` | HASH | `in6_addr` | `struct block_value` | 10,000 | IPv6 exact match with source tracking |
+| `ipv6_cidr_trie` | LPM_TRIE | `ipv6_trie_key{prefixlen, addr}` | `struct block_value` | 10,000 | IPv6 CIDR match with source tracking |
+| `events` | PERF_EVENT_ARRAY | int | int | 128 | Event reporting |
+| `scratch` | PERCPU_ARRAY | `__u32` | `packet_info` | 1 | Per-CPU storage |
+
+**Map Capacity Notes:**
+- IPv4 List (250K): Supports IPSum (~230K rules) + manual rules + growth
+- IPv4 CIDR Trie (10K): Supports Spamhaus (~1.5K rules) + other CIDR sources
+- IPv6 maps (10K each): Reserved for future IPv6 threat intelligence
 
 **Value structure changed from `__u8` to `struct block_value` (16 bytes)** to support multi-source tracking.
+
+To change map capacities, modify the constants in `ebpfs/xdp.bpf.c`:
+```c
+#define MAX_IPV4_LIST_ENTRIES 250000   // IPv4 精确匹配
+#define MAX_IPV4_CIDR_ENTRIES 10000    // IPv4 CIDR
+#define MAX_IPV6_LIST_ENTRIES 10000    // IPv6 精确匹配
+#define MAX_IPV6_CIDR_ENTRIES 10000    // IPv6 CIDR
+```
 
 ### Packet Processing Flow
 
@@ -527,7 +552,6 @@ All optimizations are implemented in `ebpfs/xdp.bpf.c`:
     "ipsum": {
       "enabled": true,
       "last_update": "2024-01-15T10:00:00Z",
-      "next_update": "2024-01-15T11:00:00Z",  // Per-source next run time
       "success": true,
       "rule_count": 15000,
       "error": ""
@@ -535,7 +559,6 @@ All optimizations are implemented in `ebpfs/xdp.bpf.c`:
     "spamhaus": {
       "enabled": false,
       "last_update": "2024-01-14T02:00:00Z",
-      "next_update": "2024-01-15T02:00:00Z",  // Per-source next run time
       "success": false,
       "rule_count": 0,
       "error": "source disabled"
@@ -544,7 +567,7 @@ All optimizations are implemented in `ebpfs/xdp.bpf.c`:
 }
 ```
 
-**Note:** Each source has its own independent `next_update` time based on its Cron schedule.
+**Note:** Next update time is not shown in the API response - each source's schedule is defined in `config.yml` using Cron expressions.
 
 ### Supported Rule Formats
 
@@ -619,6 +642,10 @@ sudo hping3 -6 -1 2001:db8::1 --data 1473
 - ✅ Source-aware synchronization in threat intel module
 - ✅ Manual rules set MANUAL bit (0x04)
 - ✅ GetRule() returns source information
+- ✅ **Per-source Cron scheduling** (robfig/cron/v3)
+- ✅ **Optimized cache loading with LoadAll()** (skips GetRule() for empty kernel)
+- ✅ **Expanded eBPF map capacities** (250K IPv4 rules, 10K CIDR rules)
+- ✅ **Fixed deadlock in loadFromCache()** (non-reentrant lock issue)
 
 ### Planned (Phases 2-4)
 - ⏳ Central coordinator for all source synchronization
@@ -626,6 +653,23 @@ sudo hping3 -6 -1 2001:db8::1 --data 1473
 - ⏳ Per-source delete operations (`DELETE /api/rule?source=ipsum`)
 - ⏳ Cache format migration (version 1 → 2)
 - ⏳ Full bitwise delete implementation for multi-source rules
+
+## Performance Notes
+
+### Cache Loading Optimization
+
+For 230K+ threat intelligence rules, cache loading has been optimized:
+
+| Method | GetRule() | Diff Calculation | Load Time |
+|--------|-----------|-----------------|-----------|
+| `SyncToKernel()` | Yes (expensive) | Yes | Several seconds |
+| `LoadAll()` | **No** | **No** | < 1 second |
+
+**Usage:**
+- `LoadAll()`: Used during `loadFromCache()` for startup/offline initialization
+- `SyncToKernel()`: Used for scheduled updates and manual triggers
+
+The `loadFromCache()` function is called within `Start()`'s mutex lock, so it directly updates status fields without calling `updateSourceStatus()` to avoid deadlock (Go mutexes are not reentrant).
 
 ## Graceful Shutdown
 
