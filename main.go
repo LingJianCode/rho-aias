@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/handles"
 	"rho-aias/internal/routers"
@@ -16,8 +18,10 @@ import (
 )
 
 func main() {
+	cfg := config.NewConfig("config.yml")
+	log.Println(cfg)
 	// Initialize XDP (existing functionality)
-	xdp := ebpfs.NewXdp("ens33")
+	xdp := ebpfs.NewXdp(cfg.Ebpf.InterfaceName)
 	defer xdp.Close()
 	err := xdp.Start()
 	if err != nil {
@@ -34,7 +38,7 @@ func main() {
 	routers.RegisterXdpRoutes(api, xdpHandle)
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: r,
 	}
 	go func() {
@@ -42,7 +46,7 @@ func main() {
 			log.Fatalf("Gin服务启动失败: %v", err)
 		}
 	}()
-	log.Println("Gin服务已启动，监听端口: 8080")
+	log.Printf("Gin服务已启动，监听端口: %d\n", cfg.Server.Port)
 
 	// ----------优雅退出处理----------
 	// 创建信号通道
