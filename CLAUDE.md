@@ -4,12 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**rho-aias** is a dual-layer eBPF network firewall with both XDP (eXpress Data Path) and TC (Traffic Control) packet filtering. It uses eBPF programs to intercept and filter network packets at different points in the networking stack. The system consists of:
+**rho-aias** is a dual-layer eBPF network firewall with XDP (eXpress Data Path) packet filtering. It uses eBPF programs to intercept and filter network packets at different points in the networking stack. The system consists of:
 
 1. **eBPF XDP program** (`ebpfs/xdp.bpf.c`) - Early packet filtering at driver level
-2. **eBPF TC program** (`ebpfs/tc.bpf.c`) - Layer 4 filtering (source IP + destination port)
-3. **Go userspace controller** - Manages eBPF lifecycle and provides REST API
-4. **Gin HTTP server** - REST API for rule management
+2. **Go userspace controller** - Manages eBPF lifecycle and provides REST API
+3. **Gin HTTP server** - REST API for rule management
 
 ### Architecture
 
@@ -26,14 +25,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              ↓ (if XDP_PASS)                        │
 │  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  TC Program (ebpfs/tc.bpf.c)                                 │   │
-│  │  - TC ingress hook (after SKB allocation)                    │   │
-│  │  - Filters by: source IP + destination port (L4)             │   │
-│  │  - Supports IPv4/IPv6 with exact match and CIDR             │   │
-│  │  - Returns: TC_ACT_SHOT or TC_ACT_OK                         │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                              ↓                                       │
-│  ┌─────────────────────────────────────────────────────────────┐   │
 │  │  Go Userspace (internal/ebpfs/)                              │   │
 │  │  - xdp.go: XDP lifecycle and rule management                 │   │
 │  │  - tc.go: TC lifecycle and rule management                   │   │
@@ -46,10 +37,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │  │  - POST   /api/rule  - Add XDP rule                          │   │
 │  │  - DELETE /api/rule  - Delete XDP rule                       │   │
 │  │  - GET    /api/rule  - List XDP rules                        │   │
-│  │  TC Routes:                                                  │   │
-│  │  - POST   /api/tc/rule    - Add TC rule                      │   │
-│  │  - DELETE /api/tc/rule    - Delete TC rule                   │   │
-│  │  - GET    /api/tc/rules   - List TC rules                    │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -67,50 +54,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `events` | PERF_EVENT_ARRAY | int | int | Send matched packets to userspace |
 | `scratch` | PERCPU_ARRAY | `__u32` | `packet_info` | Per-CPU temporary storage |
 
-#### TC Program Maps (`ebpfs/tc.bpf.c`)
-
-| Map | Type | Key | Value | Purpose |
-|-----|------|-----|-------|---------|
-| `tc_rules` | HASH | `tc_rule_key{src_ip, dst_port, proto}` | `__u8` | IPv4 exact match |
-| `tc_ipv4_cidr` | LPM_TRIE | `ipv4_trie_key{prefixlen, addr}` | `tc_cidr_value{dst_port, proto}` | IPv4 CIDR match |
-| `tc_ipv6_rules` | HASH | `tc_ipv6_rule_key{src_ip, dst_port, proto}` | `__u8` | IPv6 exact match |
-| `tc_ipv6_cidr` | LPM_TRIE | `ipv6_trie_key{prefixlen, addr}` | `tc_cidr_value{dst_port, proto}` | IPv6 CIDR match |
-
-**TC Map Key Structures:**
-```c
-// IPv4 exact match key (8 bytes)
-struct tc_rule_key {
-    __u32 src_ip;      // Source IPv4 (host byte order)
-    __u16 dst_port;    // Destination port (host byte order)
-    __u16 proto;       // Protocol (IPPROTO_TCP=6, IPPROTO_UDP=17)
-    __u16 padding;     // 8-byte alignment
-};
-
-// IPv6 exact match key (20 bytes)
-struct tc_ipv6_rule_key {
-    struct in6_addr src_ip;  // Source IPv6 (network byte order)
-    __u16 dst_port;          // Destination port (host byte order)
-    __u16 proto;             // Protocol (IPPROTO_TCP=6, IPPROTO_UDP=17)
-    __u32 padding;           // 20-byte alignment
-};
-
-// CIDR trie keys (for both IPv4 and IPv6)
-struct ipv4_trie_key {
-    __u32 prefixlen;   // CIDR prefix length
-    __be32 addr;       // IPv4 address (network byte order)
-};
-
-struct ipv6_trie_key {
-    __u32 prefixlen;   // CIDR prefix length
-    struct in6_addr addr;  // IPv6 address (network byte order)
-};
-
-// CIDR map value
-struct tc_cidr_value {
-    __u16 dst_port;    // Destination port (host byte order)
-    __u16 proto;       // Protocol (IPPROTO_TCP=6, IPPROTO_UDP=17)
-};
-```
 
 ### Packet Processing Flow
 
@@ -126,23 +69,6 @@ struct tc_cidr_value {
 6. Return `XDP_DROP` if matched, `XDP_PASS` otherwise
 
 **XDP filters at L2/L3 only** - does NOT parse transport layer (TCP/UDP).
-
-#### TC Program (`ebpfs/tc.bpf.c`)
-
-1. Parse Ethernet header → get protocol type
-2. Handle VLAN tags (802.1Q/802.1AD) if present
-3. Parse IPv4/IPv6 header
-4. Parse TCP/UDP header to get destination port
-5. Match against rules (exact match → CIDR match):
-   - **IPv4**: `tc_rules` (exact) → `tc_ipv4_cidr` (CIDR)
-   - **IPv6**: `tc_ipv6_rules` (exact) → `tc_ipv6_cidr` (CIDR)
-6. Return `TC_ACT_SHOT` if matched, `TC_ACT_OK` otherwise
-
-**TC filters at L4** - parses transport layer (TCP/UDP) for port-based filtering.
-
-**Matching Order:**
-- Exact match has priority over CIDR match
-- For CIDR, use `/0` prefix for wildcard (e.g., `0.0.0.0/0` matches any IPv4)
 
 ## Common Development Commands
 
@@ -176,20 +102,14 @@ The eBPF C code is compiled to Go using `cilium/ebpf/cmd/bpf2go`. This is config
 
 ```go
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go xdp ../../ebpfs/xdp.bpf.c -- -g -O2 -Wall
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go tc ../../ebpfs/tc.bpf.c -- -g -O2 -Wall
 ```
 
-After modifying `ebpfs/xdp.bpf.c` or `ebpfs/tc.bpf.c`, run `make gen` to regenerate:
+After modifying `ebpfs/xdp.bpf.c`, run `make gen` to regenerate:
 
 **XDP generates:**
 - `internal/ebpfs/xdp_bpfel.go` (little-endian)
 - `internal/ebpfs/xdp_bpfeb.go` (big-endian)
 - `xdpObjects` struct with XDP program and maps
-
-**TC generates:**
-- `internal/ebpfs/tc_bpfel.go` (little-endian)
-- `internal/ebpfs/tc_bpfeb.go` (big-endian)
-- `tcObjects` struct with TC program and maps
 
 ## Key Implementation Details
 
@@ -201,15 +121,6 @@ The program tries XDP attachment modes in order of performance:
 3. **generic** - Fallback (kernel-level, lower performance)
 
 See `internal/ebpfs/xdp.go:54-75`.
-
-### TC Attachment
-
-The TC program attaches to the **ingress** hook using the TCX API (kernel 6.6+):
-- Uses `link.AttachTCX()` with `ebpf.AttachTCXIngress`
-- Falls back to netlink attachment if TCX is unavailable
-- Requires root privileges or CAP_BPF capability
-
-See `internal/ebpfs/tc.go:48-65`.
 
 ### IP Address Byte Encoding
 
@@ -342,57 +253,9 @@ Supported formats:
 - IPv6 CIDR: `2001:db8::/32`
 - MAC: `00:11:22:33:44:55`
 
-### TC Rules (L4 Filtering)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/tc/rule` | Add TC filtering rule |
-| DELETE | `/api/tc/rule` | Delete TC rule |
-| GET | `/api/tc/rules` | List all TC rules |
-
-**Request format:**
-```json
-{
-  "src_ip": "192.168.1.100",   // Source IP (exact or CIDR)
-  "dst_port": 80,               // Destination port
-  "proto": "tcp"                // Protocol: "tcp" or "udp"
-}
-```
-
-**Supported `src_ip` formats:**
-- IPv4 exact: `192.168.1.100`
-- IPv4 CIDR: `192.168.1.0/24`
-- IPv6 exact: `2001:db8::1`
-- IPv6 CIDR: `2001:db8::/32`
-- Wildcard (IPv4): `0.0.0.0/0` (matches any IPv4)
-- Wildcard (IPv6): `::/0` (matches any IPv6)
-
-**Examples:**
-```json
-// Block exact IPv4 to port 80
-{"src_ip": "192.168.1.100", "dst_port": 80, "proto": "tcp"}
-
-// Block IPv4 subnet to port 443
-{"src_ip": "192.168.1.0/24", "dst_port": 443, "proto": "tcp"}
-
-// Block exact IPv6 to port 80
-{"src_ip": "2001:db8::1", "dst_port": 80, "proto": "tcp"}
-
-// Block IPv6 subnet to port 443
-{"src_ip": "2001:db8::/32", "dst_port": 443, "proto": "tcp"}
-
-// Block ALL IPv4 traffic to port 80 (wildcard)
-{"src_ip": "0.0.0.0/0", "dst_port": 80, "proto": "tcp"}
-
-// Block ALL IPv6 traffic to port 80 (wildcard)
-{"src_ip": "::/0", "dst_port": 80, "proto": "tcp"}
-```
-
 **Note:** Wildcard matching uses CIDR notation (`0.0.0.0/0` or `::/0`), not plain `0.0.0.0`.
 
 ## Known Issues
 
 1. **Busy-wait CPU usage** in XDP `MonitorEvents()` - the `default` case causes continuous looping
-2. **Hardcoded interface** "ens33" in `main.go:13`
-3. **No graceful shutdown** - missing signal handling for SIGTERM/SIGINT
 4. **MD5 used** in `utils/net.go` - should use SHA256 for security
