@@ -11,7 +11,7 @@ intel:
       enabled: true
       schedule: "0 1 * * *"  #  每天凌晨 1 点更新
       # url: https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt
-      # url: https://gitcode.com/gh_mirrors/ip/ipsum/blob/master/ipsum.txt
+      # url: https://raw.gitcode.com/gh_mirrors/ip/ipsum/raw/master/ipsum.txt
       url: http://localhost/ipsum.txt
       format: ipsum
     spamhaus:
