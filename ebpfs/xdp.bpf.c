@@ -45,7 +45,11 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MATCH_BY_MAC        5    // Match MAC address exactly
 
 // Maximum number of entries in each map
-#define MAX_ENTRIES_SIZE 1024    // Limit to prevent excessive memory usage
+// 威胁情报数据量: IPSum ~230K, Spamhaus ~1.5K
+#define MAX_IPV4_LIST_ENTRIES 250000   // IPv4 精确匹配（IPSum 有 23万+）
+#define MAX_IPV4_CIDR_ENTRIES 10000    // IPv4 CIDR（Spamhaus 1,454 + 预留）
+#define MAX_IPV6_LIST_ENTRIES 10000    // IPv6 精确匹配（预留）
+#define MAX_IPV6_CIDR_ENTRIES 10000    // IPv6 CIDR（预留）
 
 // Default prefix lengths for IP lookups
 #define DEFAULT_IPV6_PREFIX  128 // Full IPv6 address length for LPM lookup
@@ -58,6 +62,7 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 /* Packet information structure for processing and event reporting
  * 总大小: 64 bytes, packed 避免填充
  * 注意: 当前不解析传输层信息，只记录网络层地址
+ * TODO: 为数据包增加一个匹配规则来源字段，标记由什么规则封禁
  */
 struct packet_info {
     // Network layer - IPv4 addresses (8 bytes)
@@ -86,8 +91,8 @@ struct packet_info {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, __be32);
-    __type(value, __u8);
-    __uint(max_entries, MAX_ENTRIES_SIZE);
+    __type(value, struct block_value);
+    __uint(max_entries, MAX_IPV4_LIST_ENTRIES);
 } ipv4_list SEC(".maps");
 
 /* LPM (Longest Prefix Match) Trie key for IPv4 CIDR matching
@@ -102,8 +107,8 @@ struct ipv4_trie_key {
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
     __type(key, struct ipv4_trie_key);
-    __type(value, __u8);
-    __uint(max_entries, MAX_ENTRIES_SIZE);
+    __type(value, struct block_value);
+    __uint(max_entries, MAX_IPV4_CIDR_ENTRIES);
     __uint(map_flags, BPF_F_NO_PREALLOC);
 } ipv4_cidr_trie SEC(".maps");
 
@@ -111,8 +116,8 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, struct in6_addr);
-    __type(value, __u8);
-    __uint(max_entries, MAX_ENTRIES_SIZE);
+    __type(value, struct block_value);
+    __uint(max_entries, MAX_IPV6_LIST_ENTRIES);
 } ipv6_list SEC(".maps");
 
 /* LPM (Longest Prefix Match) Trie key for IPv6 CIDR matching
@@ -127,8 +132,8 @@ struct ipv6_trie_key {
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
     __type(key, struct ipv6_trie_key);
-    __type(value, __u8);
-    __uint(max_entries, MAX_ENTRIES_SIZE);
+    __type(value, struct block_value);
+    __uint(max_entries, MAX_IPV6_CIDR_ENTRIES);
     __uint(map_flags, BPF_F_NO_PREALLOC);
 } ipv6_cidr_trie SEC(".maps");
 
@@ -164,27 +169,31 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
     if (pi->eth_proto == ETH_P_IP) {
         // Try exact match first
         // bpf_printk("match_by_rule IP: %d\n", pi->src_ip);
-        if (bpf_map_lookup_elem(&ipv4_list, &pi->src_ip)) return MATCH_BY_IP4_EXACT;
+        struct block_value *ipv4_value = bpf_map_lookup_elem(&ipv4_list, &pi->src_ip);
+        if (ipv4_value && ipv4_value->source_mask != 0) return MATCH_BY_IP4_EXACT;
 
         // Then try CIDR match using LPM Trie
         struct ipv4_trie_key v4_key = {
             .prefixlen = DEFAULT_IPV4_PREFIX,
             .addr = pi->src_ip
         };
-        if (bpf_map_lookup_elem(&ipv4_cidr_trie, &v4_key)) return MATCH_BY_IP4_CIDR;
+        struct block_value *ipv4_cidr_value = bpf_map_lookup_elem(&ipv4_cidr_trie, &v4_key);
+        if (ipv4_cidr_value && ipv4_cidr_value->source_mask != 0) return MATCH_BY_IP4_CIDR;
 
     } else if (pi->eth_proto == ETH_P_IPV6) {
         // Try exact match first - 直接使用 src_ipv6 数组，避免 memset
         struct in6_addr ipv6_addr;
         __builtin_memcpy(&ipv6_addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(ipv6_addr.in6_u.u6_addr32));
-        if (bpf_map_lookup_elem(&ipv6_list, &ipv6_addr)) return MATCH_BY_IP6_EXACT;
+        struct block_value *ipv6_value = bpf_map_lookup_elem(&ipv6_list, &ipv6_addr);
+        if (ipv6_value && ipv6_value->source_mask != 0) return MATCH_BY_IP6_EXACT;
 
         // Then try CIDR match using LPM Trie - 直接初始化 LPM key
         struct ipv6_trie_key v6_key = {
             .prefixlen = DEFAULT_IPV6_PREFIX,
         };
         __builtin_memcpy(&v6_key.addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(v6_key.addr.in6_u.u6_addr32));
-        if (bpf_map_lookup_elem(&ipv6_cidr_trie, &v6_key)) return MATCH_BY_IP6_CIDR;
+        struct block_value *ipv6_cidr_value = bpf_map_lookup_elem(&ipv6_cidr_trie, &v6_key);
+        if (ipv6_cidr_value && ipv6_cidr_value->source_mask != 0) return MATCH_BY_IP6_CIDR;
     }
     return MATCH_BY_PASS;
 }

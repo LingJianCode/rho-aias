@@ -4,12 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**rho-aias** is a high-performance eBPF network firewall with XDP (eXpress Data Path) packet filtering. It intercepts and filters network packets at the driver level (L2/L3). The system consists of:
+**rho-aias** is a high-performance eBPF network firewall with XDP (eXpress Data Path) packet filtering and integrated threat intelligence. It intercepts and filters network packets at the driver level (L2/L3) using:
+- Manual rules configured via REST API
+- Automated threat intelligence feeds (IPSum, Spamhaus DROP)
+- Multi-source rule tracking with bitmask tagging (prevents conflicts)
+
+The system consists of:
 
 1. **eBPF XDP program** (`ebpfs/xdp.bpf.c`) - Packet filtering at driver level
 2. **Go userspace controller** - Manages eBPF lifecycle and provides REST API
-3. **Gin HTTP server** - REST API for rule management
-4. **Configuration system** - Port and interface configurable via `config.yml`
+3. **Threat Intelligence module** - Auto-syncs external threat feeds
+4. **Gin HTTP server** - REST API for rule and threat intel management
+5. **Configuration system** - Port, interface, and threat intel configurable via `config.yml`
 
 ### Architecture
 
@@ -32,11 +38,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              ↓                                       │
 │  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Threat Intelligence (internal/threatintel/)                │   │
+│  │  - intel.go: Threat intel manager and scheduler               │   │
+│  │  - fetcher.go: Fetches data from external sources             │   │
+│  │  - parser.go: Parses IPSum/Spamhaus formats                │   │
+│  │  - sync.go: Atomic sync to kernel eBPF maps                  │   │
+│  │  - cache.go: Local persistence for offline startup             │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                              ↓                                       │
+│  ┌─────────────────────────────────────────────────────────────┐   │
 │  │  HTTP API (internal/handles/, internal/routers/)             │   │
 │  │  Routes:                                                     │   │
-│  │  - POST   /api/rule  - Add rule                              │   │
-│  │  - DELETE /api/rule  - Delete rule                           │   │
-│  │  - GET    /api/rule  - List rules                            │   │
+│  │  - POST   /api/rule       - Add rule                         │   │
+│  │  - DELETE /api/rule       - Delete rule                      │   │
+│  │  - GET    /api/rule       - List rules                       │   │
+│  │  - GET    /api/intel/status - Get intel status                 │   │
+│  │  - POST   /api/intel/update - Trigger update                  │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -45,55 +62,248 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```
 rho-aias/
-├── main.go                    # Main entry point
-├── config.yml                 # Configuration file (port, interface)
-├── go.mod                     # Go module dependencies
-├── Makefile                   # Build scripts
-├── ebpfs/                     # eBPF C source
-│   ├── xdp.bpf.c              # XDP program
-│   ├── common.h               # Common constants
-│   └── vmlinux.h              # Kernel headers (generated)
+├── main.go                       # 主程序入口
+├── config.yml                    # 配置文件（端口、网卡、威胁情报）
+├── go.mod                        # Go 模块依赖
+├── Makefile                      # 构建脚本
+├── ebpfs/                        # eBPF C 源码
+│   ├── xdp.bpf.c                 # XDP 程序
+│   ├── common.h                  # 公共常量定义
+│   └── vmlinux.h                 # 内核头文件（自动生成）
 ├── internal/
 │   ├── config/
-│   │   └── config.go          # Configuration management
+│   │   └── config.go             # 配置管理
 │   ├── ebpfs/
-│   │   ├── gen.go             # bpf2go generation
-│   │   ├── xdp.go             # XDP lifecycle
-│   │   ├── xdp_bpfel.go       # Auto-generated (little-endian)
-│   │   ├── xdp_bpfeb.go       # Auto-generated (big-endian)
-│   │   ├── xdp_type.go        # XDP types
-│   │   └── net_type.go        # Network types
+│   │   ├── gen.go                # bpf2go 生成指令
+│   │   ├── xdp.go                # XDP 生命周期管理
+│   │   ├── xdp_bpfel.go          # 自动生成（小端序）
+│   │   ├── xdp_bpfeb.go          # 自动生成（大端序）
+│   │   ├── xdp_type.go           # XDP 类型定义
+│   │   └── net_type.go           # 网络类型定义
+│   ├── threatintel/              # 威胁情报模块
+│   │   ├── types.go              # 类型定义
+│   │   ├── fetcher.go            # 数据获取器
+│   │   ├── parser.go             # 数据解析器
+│   │   ├── cache.go              # 本地持久化
+│   │   ├── sync.go               # 内核同步
+│   │   └── intel.go              # 情报管理器
 │   ├── handles/
-│   │   ├── xdp.go             # XDP API handlers
-│   │   └── xdp_req.go         # Request structs
+│   │   ├── xdp.go                # XDP API 处理器
+│   │   ├── xdp_req.go            # 请求结构体
+│   │   └── intel.go              # 威胁情报 API 处理器
 │   └── routers/
-│       └── xdp.go             # XDP route registration
+│       └── xdp.go                # 路由注册
 ├── test/
-│   ├── README.md              # Test documentation
-│   ├── test_ipv4.py           # IPv4 packet generator
-│   └── test_ipv6.py           # IPv6 packet generator
+│   ├── README.md                  # 测试说明
+│   ├── test_ipv4.py              # IPv4 测试工具
+│   └── test_ipv6.py              # IPv6 测试工具
 ├── utils/
-│   ├── net.go                 # Network utilities
-│   └── net_test.go            # Network utilities tests
+│   ├── net.go                    # 网络工具函数
+│   └── net_test.go               # 网络工具测试
 └── scripts/
-    ├── add.sh                 # Add rule script
-    ├── del.sh                 # Delete rule script
-    ├── get.sh                 # Get rules script
-    └── monitor.sh             # Kernel monitoring script
+    ├── add.sh                     # 添加规则脚本
+    ├── del.sh                     # 删除规则脚本
+    ├── get.sh                     # 获取规则脚本
+    └── monitor.sh                 # 内核监控脚本
 ```
 
-### eBPF Map Structure
+## Threat Intelligence Module
+
+The `internal/threatintel/` module integrates external threat intelligence feeds:
+
+### Features
+
+1. **Multi-source Support**
+   - IPSum: https://github.com/stamparm/ipsum
+   - Spamhaus DROP: https://www.spamhaus.org/drop/
+   - Manual (API-added rules)
+   - Future: WAF, DDoS Detection
+
+2. **Per-Source Cron Scheduling**
+   - Each threat intel source has its own independent Cron schedule
+   - Standard 5-field Cron syntax (minute hour day month weekday)
+   - Example: IPSum updates daily at 1 AM, Spamhaus updates daily at 2 AM
+   - Powered by `github.com/robfig/cron/v3`
+
+3. **Source-Aware Rule Management**
+   - Bitmask tagging tracks rule ownership across sources
+   - No conflicts when same IP appears in multiple feeds
+   - Per-source enable/disable without affecting other sources
+   - Manual rules persist even when threat intel sources are disabled
+
+4. **Automatic Synchronization**
+   - Per-source Cron-based scheduling (flexible timing)
+   - Incremental atomic updates (no interception gap)
+   - Source-aware diff calculation
+   - Failure handling: no retry, wait for next scheduled run
+
+5. **Local Persistence**
+   - Binary gob format cache
+   - Offline startup support
+   - Cache directory: `./data/intel/`
+
+6. **High-Performance Batch Updates**
+   - Batch size configurable (default: 1000 rules)
+   - Incremental diff algorithm with source awareness
+   - Concurrent-safe operations
+
+### Configuration
+
+Add to `config.yml`:
+
+```yaml
+intel:
+  enabled: true                      # 总开关
+  persistence_dir: ./data/intel      # 持久化目录
+  batch_size: 1000                   # 批量更新大小
+  sources:
+    ipsum:
+      enabled: true
+      schedule: "0 1 * * *"          # 每天凌晨 1 点更新 (Cron 表达式)
+      url: https://raw.githubusercontent.com/stamparm/ipsum/main/ipsum.txt
+      format: ipsum
+    spamhaus:
+      enabled: false
+      schedule: "0 2 * * *"          # 每天凌晨 2 点更新
+      url: https://www.spamhaus.org/drop/drop.txt
+      format: spamhaus
+```
+
+**Cron Expression Format:**
+```
+┌───────────── 分钟 (0 - 59)
+│ ┌───────────── 小时 (0 - 23)
+│ │ ┌───────────── 日期 (1 - 31)
+│ │ │ ┌───────────── 月份 (1 - 12)
+│ │ │ │ ┌───────────── 星期 (0 - 6) (周日 = 0)
+│ │ │ │ │
+* * * * *
+```
+
+**Common Examples:**
+- `0 * * * *` - 每小时整点
+- `0 */6 * * *` - 每 6 小时
+- `0 2 * * *` - 每天凌晨 2 点
+- `0 0 * * 0` - 每周日午夜
+- `*/30 * * * *` - 每 30 分钟
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/intel/status` | Get threat intel status |
+| POST | `/api/intel/update` | Manually trigger update |
+
+### Data Format Support
+
+**IPSum Format:**
+```
+# IPsum Threat Intelligence Feed
+5.187.35.21     11
+31.59.129.85    10
+```
+
+**Spamhaus DROP Format:**
+```
+; Spamhaus DROP List
+1.10.16.0/20 ; SBL256894
+1.19.0.0/16 ; SBL434604
+```
+
+## Source Tracking and Bitmask Tagging
+
+The system implements a **Bitmask Tagging** approach to track rule ownership across multiple sources, resolving conflicts when the same IP/CIDR is added by different sources.
+
+### BlockValue Structure
+
+All eBPF maps use `struct block_value` as the value type:
+
+```c
+/* eBPF C structure (ebpfs/common.h) */
+struct block_value {
+    __u32 source_mask;  /* Source bitmask - marks which sources own this rule */
+    __u32 priority;     /* Priority (reserved for future use) */
+    __u64 expiry;       /* Expiration timestamp (reserved for TTL support) */
+} __attribute__((packed));
+```
+
+### Source Bitmask Constants
+
+Each source occupies a unique bit position:
+
+| Bit | Source | Constant | Value |
+|-----|--------|----------|-------|
+| 0 | IPSum | `SOURCE_MASK_IPSUM` | 0x01 |
+| 1 | Spamhaus | `SOURCE_MASK_SPAMHAUS` | 0x02 |
+| 2 | Manual (API) | `SOURCE_MASK_MANUAL` | 0x04 |
+| 3 | WAF (future) | `SOURCE_MASK_WAF` | 0x08 |
+| 4 | DDoS Detection (future) | `SOURCE_MASK_DDoS` | 0x10 |
+| 5-7 | Reserved | `SOURCE_MASK_RESERVED` | 0xE0 |
+
+### Conflict Resolution
+
+**Example: Same IP from multiple sources**
+```
+1. IPSum adds 1.1.1.1
+   → source_mask = 0x01
+
+2. Manual API adds 1.1.1.1
+   → source_mask = 0x05 (IPSum | Manual)
+
+3. Disable IPSum
+   → source_mask = 0x04 (Manual only)
+
+4. Delete manual rule
+   → source_mask = 0x00 → rule removed
+```
+
+**Rule deletion logic:**
+- Rule is deleted only when `source_mask == 0` (no owners)
+- Removing a source clears its bit: `new_mask = old_mask & ~source_bit`
+- If multiple sources own the rule, it persists after removing one source
+
+### Bitmask Operations
+
+Available helper functions in `internal/ebpfs/xdp_type.go`:
+
+```go
+// Convert source ID to bitmask
+mask := SourceIDToMask("ipsum")  // returns 0x01
+
+// Convert bitmask to source list
+sources := MaskToSourceIDs(0x05)  // returns ["ipsum", "manual"]
+
+// Bitwise operations
+newMask := AddSource(0x01, "manual")        // 0x01 | 0x04 = 0x05
+newMask := RemoveSource(0x05, "ipsum")      // 0x05 & ~0x01 = 0x04
+hasSource := HasSource(0x05, "manual")      // true
+isOnly := IsOnlySource(0x04, "manual")      // true
+count := GetSourceCount(0x05)               // 2
+```
+
+### Source-Aware Synchronization
+
+The threat intelligence module (`internal/threatintel/sync.go`) implements source-aware incremental sync:
+
+- `SyncToKernel(data, sourceMask)`: Syncs rules for a specific source
+- `diff(current, newData, sourceMask)`: Calculates additions/removals considering ownership
+- Only deletes rules when `current_mask == sourceMask` (sole ownership)
+- Multi-source rules trigger a warning and are preserved
+
+## eBPF Map Structure
 
 #### XDP Program Maps (`ebpfs/xdp.bpf.c`)
 
 | Map | Type | Key | Value | Purpose |
 |-----|------|-----|-------|---------|
-| `ipv4_list` | HASH | `__be32` | `__u8` | IPv4 exact match |
-| `ipv4_cidr_trie` | LPM_TRIE | `ipv4_trie_key{prefixlen, addr}` | `__u8` | IPv4 CIDR match |
-| `ipv6_list` | HASH | `in6_addr` | `__u8` | IPv6 exact match |
-| `ipv6_cidr_trie` | LPM_TRIE | `ipv6_trie_key{prefixlen, addr}` | `__u8` | IPv6 CIDR match |
+| `ipv4_list` | HASH | `__be32` | `struct block_value` | IPv4 exact match with source tracking |
+| `ipv4_cidr_trie` | LPM_TRIE | `ipv4_trie_key{prefixlen, addr}` | `struct block_value` | IPv4 CIDR match with source tracking |
+| `ipv6_list` | HASH | `in6_addr` | `struct block_value` | IPv6 exact match with source tracking |
+| `ipv6_cidr_trie` | LPM_TRIE | `ipv6_trie_key{prefixlen, addr}` | `struct block_value` | IPv6 CIDR match with source tracking |
 | `events` | PERF_EVENT_ARRAY | int | int | Event reporting |
 | `scratch` | PERCPU_ARRAY | `__u32` | `packet_info` | Per-CPU storage |
+
+**Value structure changed from `__u8` to `struct block_value` (16 bytes)** to support multi-source tracking.
 
 ### Packet Processing Flow
 
@@ -108,19 +318,6 @@ rho-aias/
 5. Return `XDP_DROP` if matched, `XDP_PASS` otherwise
 
 **XDP filters at L2/L3 only** - does NOT parse transport layer (TCP/UDP).
-
-## Configuration
-
-The application reads configuration from `config.yml`:
-
-```yaml
-server:
-  port: 8080          # HTTP server port
-ebpf:
-  interface_name: ens33  # Network interface for XDP
-```
-
-Configuration is loaded at startup via `internal/config/config.go`.
 
 ## Common Development Commands
 
@@ -281,11 +478,13 @@ All optimizations are implemented in `ebpfs/xdp.bpf.c`:
 
 ## API Endpoints
 
+### Rule Management
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/rule` | Add filtering rule |
-| DELETE | `/api/rule` | Delete rule |
-| GET | `/api/rule` | List all rules |
+| POST | `/api/rule` | Add filtering rule (sets MANUAL source bit) |
+| DELETE | `/api/rule` | Delete rule (removes MANUAL source bit) |
+| GET | `/api/rule` | List all rules with source information |
 
 **Request format:**
 ```json
@@ -294,7 +493,61 @@ All optimizations are implemented in `ebpfs/xdp.bpf.c`:
 }
 ```
 
-Supported formats:
+**Response format (GET /api/rule):**
+```json
+{
+  "rules": [
+    {
+      "key": "192.168.1.1",
+      "sources": ["ipsum", "manual"],  // Which sources own this rule
+      "value": {
+        "source_mask": 5,              // 0x01 | 0x04 = 0x05
+        "priority": 0,
+        "expiry": 0
+      }
+    }
+  ]
+}
+```
+
+### Threat Intelligence
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/intel/status` | Get threat intel status with per-source statistics |
+| POST | `/api/intel/update` | Manually trigger update for all enabled sources |
+
+**Status response format:**
+```json
+{
+  "enabled": true,
+  "last_update": "2024-01-15T10:30:00Z",
+  "total_rules": 15234,
+  "sources": {
+    "ipsum": {
+      "enabled": true,
+      "last_update": "2024-01-15T10:00:00Z",
+      "next_update": "2024-01-15T11:00:00Z",  // Per-source next run time
+      "success": true,
+      "rule_count": 15000,
+      "error": ""
+    },
+    "spamhaus": {
+      "enabled": false,
+      "last_update": "2024-01-14T02:00:00Z",
+      "next_update": "2024-01-15T02:00:00Z",  // Per-source next run time
+      "success": false,
+      "rule_count": 0,
+      "error": "source disabled"
+    }
+  }
+}
+```
+
+**Note:** Each source has its own independent `next_update` time based on its Cron schedule.
+
+### Supported Rule Formats
+
 - IPv4: `192.168.1.1`
 - IPv4 CIDR: `192.168.1.0/24`
 - IPv6: `2001:db8::1`
@@ -356,7 +609,23 @@ sudo hping3 -6 -1 2001:db8::1 --data 1473
 
 1. **Busy-wait CPU usage** in XDP `MonitorEvents()` - the `default` case causes continuous looping
 2. **MD5 used** in `utils/net.go` - should use SHA256 for security
-3. **IPv6 rules not fully implemented** in GetRule() - only returns IPv4 rules
+3. **Multi-source rule deletion** - When disabling a threat intel source, rules owned by multiple sources are preserved (not bitwise deleted). See `internal/threatintel/sync.go:99-103` for TODO.
+
+## Implementation Status
+
+### Completed (Phase 1)
+- ✅ eBPF `struct block_value` with source_mask tracking
+- ✅ Go `BlockValue` type and bitmask helper functions
+- ✅ Source-aware synchronization in threat intel module
+- ✅ Manual rules set MANUAL bit (0x04)
+- ✅ GetRule() returns source information
+
+### Planned (Phases 2-4)
+- ⏳ Central coordinator for all source synchronization
+- ⏳ API endpoints for source filtering (`GET /api/rule?source=manual`)
+- ⏳ Per-source delete operations (`DELETE /api/rule?source=ipsum`)
+- ⏳ Cache format migration (version 1 → 2)
+- ⏳ Full bitwise delete implementation for multi-source rules
 
 ## Graceful Shutdown
 
@@ -365,7 +634,8 @@ The application implements basic graceful shutdown:
 - Captures SIGINT/SIGTERM signals
 - HTTP server shuts down with 5-second timeout
 - eBPF resources cleaned up via defer
+- Threat intel manager stops scheduler
 
-See `main.go:51-67` for implementation.
+See `main.go:71-91` for implementation.
 
 **Known limitation:** `MonitorEvents()` goroutine is not properly coordinated - it relies on channel closure but may have race conditions during shutdown.

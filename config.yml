@@ -2,3 +2,21 @@ server:
   port: 8080
 ebpf:
   interface_name: ens33
+intel:
+  enabled: true
+  persistence_dir: ./data/intel
+  batch_size: 1000
+  sources:
+    ipsum:
+      enabled: true
+      schedule: "0 1 * * *"  #  每天凌晨 1 点更新
+      # url: https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt
+      # url: https://gitcode.com/gh_mirrors/ip/ipsum/blob/master/ipsum.txt
+      url: http://localhost/ipsum.txt
+      format: ipsum
+    spamhaus:
+      enabled: true
+      schedule: "0 2 * * *"  # 每天凌晨 2 点更新
+      # url: https://www.spamhaus.org/drop/drop.txt
+      url: http://localhost/drop.txt
+      format: spamhaus

@@ -11,6 +11,7 @@ import (
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/handles"
 	"rho-aias/internal/routers"
+	"rho-aias/internal/threatintel"
 	"syscall"
 	"time"
 
@@ -30,12 +31,29 @@ func main() {
 	go xdp.MonitorEvents()
 	xdpHandle := handles.NewXdpHandle(xdp)
 
+	// Initialize Intel Manager (if enabled)
+	var intelMgr *threatintel.Manager
+	if cfg.Intel.Enabled {
+		intelMgr = threatintel.NewManager(&cfg.Intel, xdp)
+		if err := intelMgr.Start(); err != nil {
+			log.Printf("Warning: Intel manager start failed: %v", err)
+		}
+		log.Println("[Main] Intelligence module initialized")
+		defer intelMgr.Stop()
+	}
+
 	// Setup router and routes
 	r := gin.Default()
 	api := r.Group("/api")
 
 	// Register XDP routes (existing)
 	routers.RegisterXdpRoutes(api, xdpHandle)
+
+	// Register Intel routes (if enabled)
+	if cfg.Intel.Enabled && intelMgr != nil {
+		intelHandle := handles.NewIntelHandle(intelMgr)
+		routers.RegisterIntelRoutes(api, intelHandle)
+	}
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
@@ -56,6 +74,8 @@ func main() {
 	// 等待信号
 	sig := <-quit
 	log.Printf("接收到信号: %v，开始优雅退出...\n", sig)
+
+	// 停止情报管理器
 
 	// ebpf由defer关闭
 	// 优雅关闭Gin服务（设置超时时间，避免无限等待）

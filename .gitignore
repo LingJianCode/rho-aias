@@ -6,3 +6,4 @@ rho-aias
 vmlinux.h
 *.log
 .claude
+data

@@ -13,4 +13,25 @@
 
 // IPv6 扩展头类型
 #define IPPROTO_FRAGMENT  44         /* IPv6 Fragment extension header */
-#define IPPROTO_ICMPV6   58         /* ICMPv6 protocol */ 
+#define IPPROTO_ICMPV6   58         /* ICMPv6 protocol */
+
+/* 黑名单规则值结构 - 支持来源追踪
+ * 用于 eBPF maps 中存储规则及其来源信息
+ * 总大小: 16 bytes (packed)
+ */
+struct block_value {
+    __u32 source_mask;  /* 来源位掩码 - 标记哪些来源拥有此规则 */
+    __u32 priority;     /* 优先级 (保留字段，用于未来扩展) */
+    __u64 expiry;       /* 过期时间戳 (保留字段，用于 TTL 支持) */
+} __attribute__((packed));
+
+/* 来源位掩码定义
+ * 每个来源占用一个 bit，支持最多 31 个来源
+ * 优先级: Manual > WAF > DDoS > Intel
+ */
+#define SOURCE_MASK_IPSUM     0x01  /* Bit 0: IPSum 威胁情报 */
+#define SOURCE_MASK_SPAMHAUS  0x02  /* Bit 1: Spamhaus 威胁情报 */
+#define SOURCE_MASK_MANUAL    0x04  /* Bit 2: 手动添加 */
+#define SOURCE_MASK_WAF       0x08  /* Bit 3: WAF (未来) */
+#define SOURCE_MASK_DDoS      0x10  /* Bit 4: DDoS 检测 (未来) */
+#define SOURCE_MASK_RESERVED  0xE0  /* Bits 5-7: 保留给未来使用 */ 
