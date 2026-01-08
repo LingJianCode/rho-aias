@@ -4,11 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**rho-aias** is a dual-layer eBPF network firewall with XDP (eXpress Data Path) packet filtering. It uses eBPF programs to intercept and filter network packets at different points in the networking stack. The system consists of:
+**rho-aias** is a high-performance eBPF network firewall with XDP (eXpress Data Path) packet filtering. It intercepts and filters network packets at the driver level (L2/L3). The system consists of:
 
-1. **eBPF XDP program** (`ebpfs/xdp.bpf.c`) - Early packet filtering at driver level
+1. **eBPF XDP program** (`ebpfs/xdp.bpf.c`) - Packet filtering at driver level
 2. **Go userspace controller** - Manages eBPF lifecycle and provides REST API
 3. **Gin HTTP server** - REST API for rule management
+4. **Configuration system** - Port and interface configurable via `config.yml`
 
 ### Architecture
 
@@ -27,18 +28,58 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │  Go Userspace (internal/ebpfs/)                              │   │
 │  │  - xdp.go: XDP lifecycle and rule management                 │   │
-│  │  - tc.go: TC lifecycle and rule management                   │   │
 │  │  - Loaded via bpf2go from C sources                          │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              ↓                                       │
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │  HTTP API (internal/handles/, internal/routers/)             │   │
-│  │  XDP Routes:                                                 │   │
-│  │  - POST   /api/rule  - Add XDP rule                          │   │
-│  │  - DELETE /api/rule  - Delete XDP rule                       │   │
-│  │  - GET    /api/rule  - List XDP rules                        │   │
+│  │  Routes:                                                     │   │
+│  │  - POST   /api/rule  - Add rule                              │   │
+│  │  - DELETE /api/rule  - Delete rule                           │   │
+│  │  - GET    /api/rule  - List rules                            │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
+```
+
+## Project Structure
+
+```
+rho-aias/
+├── main.go                    # Main entry point
+├── config.yml                 # Configuration file (port, interface)
+├── go.mod                     # Go module dependencies
+├── Makefile                   # Build scripts
+├── ebpfs/                     # eBPF C source
+│   ├── xdp.bpf.c              # XDP program
+│   ├── common.h               # Common constants
+│   └── vmlinux.h              # Kernel headers (generated)
+├── internal/
+│   ├── config/
+│   │   └── config.go          # Configuration management
+│   ├── ebpfs/
+│   │   ├── gen.go             # bpf2go generation
+│   │   ├── xdp.go             # XDP lifecycle
+│   │   ├── xdp_bpfel.go       # Auto-generated (little-endian)
+│   │   ├── xdp_bpfeb.go       # Auto-generated (big-endian)
+│   │   ├── xdp_type.go        # XDP types
+│   │   └── net_type.go        # Network types
+│   ├── handles/
+│   │   ├── xdp.go             # XDP API handlers
+│   │   └── xdp_req.go         # Request structs
+│   └── routers/
+│       └── xdp.go             # XDP route registration
+├── test/
+│   ├── README.md              # Test documentation
+│   ├── test_ipv4.py           # IPv4 packet generator
+│   └── test_ipv6.py           # IPv6 packet generator
+├── utils/
+│   ├── net.go                 # Network utilities
+│   └── net_test.go            # Network utilities tests
+└── scripts/
+    ├── add.sh                 # Add rule script
+    ├── del.sh                 # Delete rule script
+    ├── get.sh                 # Get rules script
+    └── monitor.sh             # Kernel monitoring script
 ```
 
 ### eBPF Map Structure
@@ -51,9 +92,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `ipv4_cidr_trie` | LPM_TRIE | `ipv4_trie_key{prefixlen, addr}` | `__u8` | IPv4 CIDR match |
 | `ipv6_list` | HASH | `in6_addr` | `__u8` | IPv6 exact match |
 | `ipv6_cidr_trie` | LPM_TRIE | `ipv6_trie_key{prefixlen, addr}` | `__u8` | IPv6 CIDR match |
-| `events` | PERF_EVENT_ARRAY | int | int | Send matched packets to userspace |
-| `scratch` | PERCPU_ARRAY | `__u32` | `packet_info` | Per-CPU temporary storage |
-
+| `events` | PERF_EVENT_ARRAY | int | int | Event reporting |
+| `scratch` | PERCPU_ARRAY | `__u32` | `packet_info` | Per-CPU storage |
 
 ### Packet Processing Flow
 
@@ -65,10 +105,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - IPv4: Drop non-first fragments, validate header length
    - IPv6: Skip extension headers (max 8), drop fragment continuation
 4. Match source IP against eBPF maps (exact match → CIDR match)
-5. Report matched packets via perf event buffer
-6. Return `XDP_DROP` if matched, `XDP_PASS` otherwise
+5. Return `XDP_DROP` if matched, `XDP_PASS` otherwise
 
 **XDP filters at L2/L3 only** - does NOT parse transport layer (TCP/UDP).
+
+## Configuration
+
+The application reads configuration from `config.yml`:
+
+```yaml
+server:
+  port: 8080          # HTTP server port
+ebpf:
+  interface_name: ens33  # Network interface for XDP
+```
+
+Configuration is loaded at startup via `internal/config/config.go`.
 
 ## Common Development Commands
 
@@ -89,8 +141,8 @@ make run
 make clean
 
 # Run packet generator tests
-make test
-# or: python3 test/packet_generator.py <target_ip> all
+sudo python3 test/test_ipv4.py <target_ip> all
+sudo python3 test/test_ipv6.py <target_ip> all
 
 # Generate vmlinux.h (if missing/needs update)
 bpftool btf dump file /sys/kernel/btf/vmlinux format c > ebpfs/vmlinux.h
@@ -105,8 +157,6 @@ The eBPF C code is compiled to Go using `cilium/ebpf/cmd/bpf2go`. This is config
 ```
 
 After modifying `ebpfs/xdp.bpf.c`, run `make gen` to regenerate:
-
-**XDP generates:**
 - `internal/ebpfs/xdp_bpfel.go` (little-endian)
 - `internal/ebpfs/xdp_bpfeb.go` (big-endian)
 - `xdpObjects` struct with XDP program and maps
@@ -120,7 +170,7 @@ The program tries XDP attachment modes in order of performance:
 2. **driver** - Good performance (driver-level)
 3. **generic** - Fallback (kernel-level, lower performance)
 
-See `internal/ebpfs/xdp.go:54-75`.
+See `internal/ebpfs/xdp.go:53-75`.
 
 ### IP Address Byte Encoding
 
@@ -144,7 +194,7 @@ This is because the LPM trie key's prefixlen field is stored in host byte order 
 
 ### Perf Event Monitoring
 
-The `MonitorEvents()` goroutine reads from the perf event buffer. Note: it has a **busy-wait issue** with the `default` case in the select statement that should be fixed - see `internal/ebpfs/xdp.go:99-128`.
+The `MonitorEvents()` goroutine reads from the perf event buffer. Note: it has a **busy-wait issue** with the `default` case in the select statement that should be fixed - see `internal/ebpfs/xdp.go:99-129`.
 
 ## XDP Performance Optimizations
 
@@ -158,7 +208,7 @@ Compiler hints for better CPU branch prediction:
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 ```
 
-- `LIKELY(match_type == MATCH_BY_PASS)`: Most packets pass through, hint the compiler
+- `LIKELY(match_type == MATCH_BY_PASS)`: Most packets pass through
 - `UNLIKELY(!pkt_info)`: Scratch map lookup rarely fails
 
 ### Reduced Memory Operations
@@ -231,13 +281,11 @@ All optimizations are implemented in `ebpfs/xdp.bpf.c`:
 
 ## API Endpoints
 
-### XDP Rules (L2/L3 Filtering)
-
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/rule` | Add XDP filtering rule |
-| DELETE | `/api/rule` | Delete XDP rule |
-| GET | `/api/rule` | List all XDP rules |
+| POST | `/api/rule` | Add filtering rule |
+| DELETE | `/api/rule` | Delete rule |
+| GET | `/api/rule` | List all rules |
 
 **Request format:**
 ```json
@@ -255,7 +303,69 @@ Supported formats:
 
 **Note:** Wildcard matching uses CIDR notation (`0.0.0.0/0` or `::/0`), not plain `0.0.0.0`.
 
+## Testing Tools
+
+### IPv4 Testing (`test/test_ipv4.py`)
+
+Generates IPv4 test packets using Scapy:
+
+```bash
+# Run all IPv4 tests
+sudo python3 test/test_ipv4.py 192.168.1.1 all
+
+# Specific tests
+sudo python3 test/test_ipv4.py 192.168.1.1 ipv4_malformed_short_header
+sudo python3 test/test_ipv4.py 192.168.1.1 ipv4_malformed_oversized --mtu 1492
+```
+
+Tests include:
+- IPv4 malformed packets (short header, invalid protocol, bad version, etc.)
+- IPv4 oversized packets (fragmentation testing)
+- IPv4 zero-length packets
+
+### IPv6 Testing (`test/test_ipv6.py`)
+
+Generates IPv6 test packets using Scapy:
+
+```bash
+# Run all IPv6 tests
+sudo python3 test/test_ipv6.py ::1 all
+
+# Specific tests
+sudo python3 test/test_ipv6.py ::1 ipv6_ext_hbh
+sudo python3 test/test_ipv6.py ::1 ipv6_malformed_too_many_headers
+```
+
+Tests include:
+- IPv6 normal packets (with/without extension headers)
+- IPv6 malformed packets (too many headers, bad version, invalid fragment offset, etc.)
+- IPv6 oversized packets
+
+### Manual Testing with hping3
+
+```bash
+# IPv4 fragmentation tests
+sudo hping3 -1 192.168.1.10 --data 1473 -c 1    # ICMP fragment
+sudo hping3 -S 192.168.1.10 -p 80 --data 1473 -c 1  # TCP fragment
+
+# IPv6 fragmentation test
+sudo hping3 -6 -1 2001:db8::1 --data 1473
+```
+
 ## Known Issues
 
 1. **Busy-wait CPU usage** in XDP `MonitorEvents()` - the `default` case causes continuous looping
-4. **MD5 used** in `utils/net.go` - should use SHA256 for security
+2. **MD5 used** in `utils/net.go` - should use SHA256 for security
+3. **IPv6 rules not fully implemented** in GetRule() - only returns IPv4 rules
+
+## Graceful Shutdown
+
+The application implements basic graceful shutdown:
+
+- Captures SIGINT/SIGTERM signals
+- HTTP server shuts down with 5-second timeout
+- eBPF resources cleaned up via defer
+
+See `main.go:51-67` for implementation.
+
+**Known limitation:** `MonitorEvents()` goroutine is not properly coordinated - it relies on channel closure but may have race conditions during shutdown.
