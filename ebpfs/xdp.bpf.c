@@ -244,15 +244,25 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
         if (iph->protocol == 0 || iph->protocol > 255)
             return 1;
 
-        // 检查 IP 分片: 只丢弃非首片分片 (fragment offset > 0)
-        // 首片分片 (offset=0) 包含完整的 IP 地址信息，需要处理
-        // IP_OFFSET 是 fragment offset 字段的掩码 (13位，值为 0x1fff)
+        // IPv4 分片处理: 只处理首片分片
+        //
+        // frag_off 字段结构:
+        //   bit 0-12: Fragment Offset (以8字节为单位)
+        //   bit 13:   DF (Don't Fragment)
+        //   bit 14:   MF (More Fragments)
+        //   bit 15:   Reserved
+        //
+        // IP_OFFSET (0x1FFF) 提取 Fragment Offset 部分
+        //
+        // 分片类型:
+        //   - 首片: offset=0 (可能设置 MF)
+        //   - 后续片: offset>0 (可能设置 MF)
+        //   - 最后片: offset>0, MF=0
+        //
+        // 策略: 只处理首片 (offset=0)，丢弃后续分片
+        // 原因: 后续分片不包含完整的 IP 头信息，无法提取源 IP
         if (iph->frag_off & bpf_htons(IP_OFFSET))
             return 1;
-
-        // 注意: 首片分片如果设置了 MF (More Fragments) 标志，
-        // offset 仍为 0，所以上面的检查不会丢弃它。
-        // 只有后续分片 (offset > 0) 会被丢弃。
 
         // 填充 IPv4 地址信息
         pkt_info->src_ip = iph->saddr;
