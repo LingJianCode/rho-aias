@@ -12,6 +12,7 @@ type Config struct {
 	Ebpf        EbpfConfig          `yaml:"ebpf"`
 	Intel       IntelConfig         `yaml:"intel"`
 	GeoBlocking GeoBlockingConfig   `yaml:"geo_blocking"`
+	Manual      ManualConfig        `yaml:"manual"`
 }
 
 type ServerConfig struct {
@@ -56,6 +57,13 @@ type GeoIPSource struct {
 	Schedule string `yaml:"schedule"` // Cron 表达式
 	URL      string `yaml:"url"`      // CSV 文件 URL
 	Format   string `yaml:"format"`   // maxmind, dbip 等
+}
+
+// ManualConfig 手动规则配置
+type ManualConfig struct {
+	Enabled        bool   `yaml:"enabled"`         // 是否启用手动规则持久化
+	PersistenceDir string `yaml:"persistence_dir"` // 持久化目录
+	AutoLoad       bool   `yaml:"auto_load"`       // 启动时自动加载
 }
 
 func NewConfig(fileName string) *Config {

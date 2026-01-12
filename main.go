@@ -11,6 +11,7 @@ import (
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/geoblocking"
 	"rho-aias/internal/handles"
+	"rho-aias/internal/manual"
 	"rho-aias/internal/routers"
 	"rho-aias/internal/threatintel"
 	"syscall"
@@ -30,7 +31,32 @@ func main() {
 		panic(err)
 	}
 	go xdp.MonitorEvents()
-	manualHandle := handles.NewManualHandle(xdp)
+
+	// Initialize Manual Cache and Load Manual Rules
+	var manualCache *manual.Cache
+	if cfg.Manual.Enabled {
+		manualCache = manual.NewCache(cfg.Manual.PersistenceDir)
+
+		// Auto-load manual rules on startup
+		if cfg.Manual.AutoLoad && manualCache.Exists() {
+			cacheData, err := manualCache.Load()
+			if err != nil {
+				log.Printf("[Manual] Warning: failed to load cache: %v", err)
+			} else {
+				log.Printf("[Manual] Loading %d rules from cache...", cacheData.RuleCount())
+				loaded := 0
+				for _, entry := range cacheData.Rules {
+					if err := xdp.AddRule(entry.Value); err != nil {
+						log.Printf("[Manual] Warning: failed to add rule %s: %v", entry.Value, err)
+					} else {
+						loaded++
+					}
+				}
+				log.Printf("[Manual] Loaded %d/%d rules from cache", loaded, cacheData.RuleCount())
+			}
+		}
+	}
+	manualHandle := handles.NewManualHandle(xdp, manualCache)
 
 	// Initialize Intel Manager (if enabled)
 	var intelMgr *threatintel.Manager
