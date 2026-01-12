@@ -13,10 +13,11 @@ The system consists of:
 
 1. **eBPF XDP program** (`ebpfs/xdp.bpf.c`) - Packet filtering at driver level
 2. **Go userspace controller** - Manages eBPF lifecycle and provides REST API
-3. **Threat Intelligence module** - Auto-syncs external threat feeds
-4. **Geo-Blocking module** - Country-based IP filtering (whitelist/blacklist)
-5. **Gin HTTP server** - REST API for rule, threat intel, and geo-blocking management
-6. **Configuration system** - Port, interface, threat intel, and geo-blocking configurable via `config.yml`
+3. **Manual Rules module** - Persistent manual rule management with auto-load on startup
+4. **Threat Intelligence module** - Auto-syncs external threat feeds
+5. **Geo-Blocking module** - Country-based IP filtering (whitelist/blacklist)
+6. **Gin HTTP server** - REST API for rule, threat intel, and geo-blocking management
+7. **Configuration system** - Port, interface, threat intel, geo-blocking, and manual rules configurable via `config.yml`
 
 ### Architecture
 
@@ -58,15 +59,11 @@ The system consists of:
 │                              ↓                                       │
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │  HTTP API (internal/handles/, internal/routers/)             │   │
-│  │  Routes:                                                     │   │
-│  │  - POST   /api/rule       - Add rule                         │   │
-│  │  - DELETE /api/rule       - Delete rule                      │   │
-│  │  - GET    /api/rule       - List rules                       │   │
-│  │  - GET    /api/intel/status - Get intel status                 │   │
-│  │  - POST   /api/intel/update - Trigger update                  │   │
-│  │  - GET    /api/geoblocking/status - Get geo status            │   │
-│  │  - POST   /api/geoblocking/update - Trigger update           │   │
-│  │  - POST   /api/geoblocking/config - Update config            │   │
+│  │  Routes (RESTful /api/{module}/{action}):                   │   │
+│  │  Manual: GET/POST/DELETE /api/manual/rules                   │   │
+│  │  Intel: GET/POST /api/intel/status, /api/intel/update        │   │
+│  │  GeoBlocking: GET/POST /api/geoblocking/status,              │   │
+│  │              /api/geoblocking/update, /api/geoblocking/config  │   │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -100,6 +97,9 @@ rho-aias/
 │   │   ├── cache.go              # 本地持久化
 │   │   ├── sync.go               # 内核同步
 │   │   └── intel.go              # 情报管理器
+│   ├── manual/                   # 手动规则模块
+│   │   ├── types.go              # 类型定义
+│   │   └── cache.go              # 本地持久化
 │   ├── geoblocking/              # 地域封禁模块
 │   │   ├── types.go              # 类型定义
 │   │   ├── fetcher.go            # GeoIP 数据获取器
@@ -109,7 +109,7 @@ rho-aias/
 │   │   └── geoblocking.go       # 地域封禁管理器
 │   ├── handles/
 │   │   ├── manual.go             # 手动规则 API 处理器 (原 xdp.go)
-│   │   ├── xdp_req.go            # 请求结构体
+│   │   ├── manual_req.go         # 请求结构体
 │   │   ├── intel.go              # 威胁情报 API 处理器
 │   │   └── geoblocking.go        # 地域封禁 API 处理器
 │   └── routers/
@@ -351,6 +351,61 @@ network,registered_country_iso_code,...
 - Use `maxmind-db` format in configuration
 
 Only countries in `allowed_countries` are loaded into the kernel, reducing memory usage.
+
+## Manual Rules Module
+
+The `internal/manual/` module provides persistent manual rule management:
+
+### Features
+
+1. **Rule Persistence**
+   - Manual rules are persisted to disk using gob binary format
+   - Cache file: `./data/manual/manual_cache.bin`
+   - Rules survive server restarts
+
+2. **Auto-Load on Startup**
+   - When `auto_load: true`, rules are automatically loaded on startup
+   - Loaded rules are added to eBPF maps with MANUAL source bit (0x04)
+
+3. **RESTful API**
+   - All endpoints use `/api/manual/rules` prefix
+   - Consistent with other modules (intel, geoblocking)
+
+### Configuration
+
+Add to `config.yml`:
+
+```yaml
+manual:
+  enabled: true                  # Enable manual rule persistence
+  persistence_dir: ./data/manual  # Cache directory
+  auto_load: true                # Auto-load rules on startup
+```
+
+### Cache Data Structure
+
+```go
+type CacheData struct {
+    Version   uint32                       // Cache version
+    Timestamp int64                        // Unix timestamp
+    Rules     map[string]ManualRuleEntry  // key: value, value: entry
+}
+
+type ManualRuleEntry struct {
+    Value   string    // IP/CIDR/MAC value
+    AddedAt time.Time // When added
+    Source  string    // Always "manual"
+}
+```
+
+### Integration Points
+
+| Operation | Behavior |
+|-----------|----------|
+| Startup | Load rules from cache if `auto_load: true` |
+| POST /api/manual/rules | Add to eBPF + Save to cache |
+| DELETE /api/manual/rules | Remove from eBPF + Remove from cache |
+| GET /api/manual/rules | Return all rules from eBPF |
 
 ## Source Tracking and Bitmask Tagging
 
@@ -643,13 +698,15 @@ All optimizations are implemented in `ebpfs/xdp.bpf.c`:
 
 ## API Endpoints
 
-### Rule Management
+All API endpoints follow RESTful convention: `/api/{module}/{action}`
+
+### Manual Rules
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/rule` | Add filtering rule (sets MANUAL source bit) |
-| DELETE | `/api/rule` | Delete rule (removes MANUAL source bit) |
-| GET | `/api/rule` | List all rules with source information |
+| GET | `/api/manual/rules` | List all rules with source information |
+| POST | `/api/manual/rules` | Add filtering rule (sets MANUAL source bit) |
+| DELETE | `/api/manual/rules` | Delete rule (removes MANUAL source bit) |
 
 **Request format:**
 ```json
@@ -658,20 +715,23 @@ All optimizations are implemented in `ebpfs/xdp.bpf.c`:
 }
 ```
 
-**Response format (GET /api/rule):**
+**Response format (GET /api/manual/rules):**
 ```json
 {
-  "rules": [
-    {
-      "key": "192.168.1.1",
-      "sources": ["ipsum", "manual"],  // Which sources own this rule
-      "value": {
-        "source_mask": 5,              // 0x01 | 0x04 = 0x05
-        "priority": 0,
-        "expiry": 0
+  "message": "GetRule",
+  "data": {
+    "rules": [
+      {
+        "key": "192.168.1.1",
+        "sources": ["ipsum", "manual"],  // Which sources own this rule
+        "value": {
+          "source_mask": 5,              // 0x01 | 0x04 = 0x05
+          "priority": 0,
+          "expiry": 0
+        }
       }
-    }
-  ]
+    ]
+  }
 }
 ```
 
@@ -798,7 +858,15 @@ sudo hping3 -6 -1 2001:db8::1 --data 1473
 - ✅ **Local persistence** for offline startup
 - ✅ **File renaming**: `xdp.go` → `manual.go` (handles/routers)
 
-### Planned (Phases 3-4)
+### Completed (Phase 3 - Manual Rules & RESTful API)
+- ✅ **Manual rule persistence** with gob binary format
+- ✅ **Auto-load on startup** when `auto_load: true`
+- ✅ **RESTful API routes**: `/api/{module}/{action}` structure
+- ✅ **Manual routes**: `/api/manual/rules` (GET/POST/DELETE)
+- ✅ **GeoBlocking routes**: `/api/geoblocking/*`
+- ✅ **Intel routes**: `/api/intel/*` (unchanged)
+
+### Planned (Phases 4-5)
 - ⏳ Central coordinator for all source synchronization
 - ⏳ API endpoints for source filtering (`GET /api/rule?source=manual`)
 - ⏳ Per-source delete operations (`DELETE /api/rule?source=ipsum`)
