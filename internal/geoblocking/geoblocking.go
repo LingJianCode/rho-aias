@@ -196,9 +196,10 @@ func (m *Manager) updateSource(sourceID SourceID, source config.GeoIPSource) err
 
 	// 3. 同步到内核
 	geoConfig := &GeoConfig{
-		Enabled:          m.config.Enabled,
-		Mode:             m.config.Mode,
-		AllowedCountries: m.config.AllowedCountries,
+		Enabled:              m.config.Enabled,
+		Mode:                  m.config.Mode,
+		AllowedCountries:      m.config.AllowedCountries,
+		AllowPrivateNetworks: m.config.AllowPrivateNetworks,
 	}
 	if err := m.syncer.SyncToKernel(parsed, geoConfig); err != nil {
 		return err
@@ -232,9 +233,10 @@ func (m *Manager) loadFromCache() error {
 		log.Printf("[GeoBlocking] [%s] Loading %d rules from cache", sourceID, data.TotalCount())
 
 		geoConfig := &GeoConfig{
-			Enabled:          cacheData.Config.Enabled,
-			Mode:             cacheData.Config.Mode,
-			AllowedCountries: cacheData.Config.AllowedCountries,
+			Enabled:              cacheData.Config.Enabled,
+			Mode:                  cacheData.Config.Mode,
+			AllowedCountries:      cacheData.Config.AllowedCountries,
+			AllowPrivateNetworks: m.config.AllowPrivateNetworks, // 从当前配置读取
 		}
 		if err := m.syncer.LoadAll(&data, geoConfig); err != nil {
 			log.Printf("[GeoBlocking] [%s] Failed to load from cache: %v", sourceID, err)
@@ -285,6 +287,7 @@ func (m *Manager) saveCache() error {
 		Enabled:          m.config.Enabled,
 		Mode:             m.config.Mode,
 		AllowedCountries: m.config.AllowedCountries,
+		// 不保存 AllowPrivateNetworks 到缓存（始终从配置文件读取）
 	}
 
 	m.mu.RLock()

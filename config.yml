@@ -25,11 +25,13 @@ geo_blocking:
   mode: whitelist  # whitelist 或 blacklist
   allowed_countries:
     - CN  # 中国
+  allow_private_networks: true  # 允许私有网段绕过地域检查
   persistence_dir: ./data/geo
   batch_size: 1000
   sources:
     maxmind:
       enabled: true
       schedule: "0 3 * * *"  # 每天凌晨 3 点更新
-      url: http://localhost/geoip/maxmind-ipv4.csv  # CSV 文件 URL
-      format: maxmind
+      # url: https://github.com/P3TERX/GeoLite.mmdb/releases/download/2026.01.10/GeoLite2-Country.mmdb
+      url: http://localhost/GeoLite2-Country.mmdb  # MMDB 文件 URL
+      format: maxmind-db  # 使用 MMDB 二进制格式

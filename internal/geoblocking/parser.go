@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	"github.com/oschwald/maxminddb-golang"
 )
 
 // Parser GeoIP 数据解析器
@@ -109,14 +111,84 @@ func (p *Parser) ParseDBIP(data []byte, allowedCountries []string, source Source
 	return result, nil
 }
 
+// ParseMaxMindDB 解析 MaxMind MMDB 二进制格式
+// 使用 GeoLite2-Country.mmdb 文件进行国家级别的过滤
+// 遍历 MMDB 提取所有 (CIDR, country_code) 对
+func (p *Parser) ParseMaxMindDB(data []byte, allowedCountries []string, source SourceID) (*GeoIPData, error) {
+	// 1. 从字节数据直接创建 MMDB reader
+	db, err := maxminddb.FromBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("open mmdb from bytes failed: %w", err)
+	}
+	defer db.Close()
+
+	result := NewGeoIPData(source)
+
+	// 2. 定义用于解析 MMDB 记录的结构体
+	// GeoLite2-Country.mmdb 的数据结构
+	type countryRecord struct {
+		Country struct {
+			IsoCode string `maxminddb:"iso_code"`
+		} `maxminddb:"country"`
+		RegisteredCountry struct {
+			IsoCode string `maxminddb:"iso_code"`
+		} `maxminddb:"registered_country"`
+	}
+
+	var record countryRecord
+
+	// 3. 遍历所有网络记录
+	networks := db.Networks(maxminddb.SkipAliasedNetworks)
+	for networks.Next() {
+		// 获取网络 CIDR 和解析记录
+		network, err := networks.Network(&record)
+		if err != nil {
+			return nil, fmt.Errorf("parse network failed: %w", err)
+		}
+
+		// 获取国家代码（优先使用 country，回退到 registered_country）
+		var countryCode string
+		if record.Country.IsoCode != "" {
+			countryCode = record.Country.IsoCode
+		} else if record.RegisteredCountry.IsoCode != "" {
+			countryCode = record.RegisteredCountry.IsoCode
+		} else {
+			continue // 跳过无国家代码的记录
+		}
+
+		// 检查是否在允许列表中
+		if !p.isCountryAllowed(countryCode, allowedCountries) {
+			continue
+		}
+
+		// 只处理 IPv4 网络（跳过 IPv6）
+		if network.IP.To4() == nil {
+			continue
+		}
+
+		// 格式: "1.0.0.0/24,CN"
+		cidr := network.String()
+		result.AddCIDR(cidr + "," + countryCode)
+	}
+
+	// 4. 检查遍历过程中是否有错误
+	if err := networks.Err(); err != nil {
+		return nil, fmt.Errorf("iterate mmdb failed: %w", err)
+	}
+
+	return result, nil
+}
+
 // Parse 根据格式类型自动解析 GeoIP 数据
-// format: 支持的格式类型（"maxmind" 或 "dbip"）
+// format: 支持的格式类型（"maxmind", "maxmind-db" 或 "dbip"）
 // allowedCountries: 允许的国家代码列表
 // source: GeoIP 源标识符
 func (p *Parser) Parse(data []byte, format string, allowedCountries []string, source SourceID) (*GeoIPData, error) {
 	switch format {
 	case "maxmind":
 		return p.ParseMaxMind(data, allowedCountries, source)
+	case "maxmind-db":
+		return p.ParseMaxMindDB(data, allowedCountries, source)
 	case "dbip":
 		return p.ParseDBIP(data, allowedCountries, source)
 	default:

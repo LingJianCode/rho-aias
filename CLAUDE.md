@@ -252,18 +252,33 @@ The `internal/geoblocking/` module provides country-based IP filtering:
 
 2. **IPv4 Only**
    - Supports IPv4 CIDR matching via LPM trie
-   - Max capacity: 50,000 entries
-   - IPv6 traffic passes through (not filtered)
+   - Max capacity: 500,000 entries (for GeoLite2-Country.mmdb)
+   - IPv6 networks are filtered out during parsing (MMDB contains both IPv4 and IPv6)
+   - IPv6 traffic passes through (not filtered by geo-blocking)
 
 3. **Dual Mode Support**
    - **Whitelist**: Only allow specified countries
    - **Blacklist**: Block specified countries
 
 4. **MaxMind/DB-IP Integration**
-   - Data fetched from nginx file server (CSV format)
+   - Supports both CSV and MMDB (MaxMind DB binary) formats
+   - MMDB format uses `github.com/oschwald/maxminddb-golang`
+   - Data fetched from nginx file server
    - Per-source Cron scheduling
    - Local persistence for offline startup
    - Cache directory: `./data/geo/`
+
+5. **Private Network Bypass**
+   - Optional bypass for RFC 1918 private networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+   - Uses special country code "PN" (Private Network = 0x504E0000)
+   - Controlled by `allow_private_networks` configuration
+   - Added to whitelist during `SyncToKernel()` and `LoadAll()`
+   - **Configuration only** - not persisted in cache
+
+6. **Cache Design**
+   - Cache stores only GeoIP data (CIDR-country pairs)
+   - Configuration items (`Mode`, `AllowedCountries`, `AllowPrivateNetworks`) are read from `config.yml`
+   - Changing configuration takes effect immediately (no cache deletion needed)
 
 ### Configuration
 
@@ -271,19 +286,25 @@ Add to `config.yml`:
 
 ```yaml
 geo_blocking:
-  enabled: true                      # 总开关
-  mode: whitelist                     # whitelist 或 blacklist
+  enabled: true                          # 总开关
+  mode: whitelist                         # whitelist 或 blacklist
   allowed_countries:
-    - CN                              # 允许的国家代码
-  persistence_dir: ./data/geo         # 持久化目录
-  batch_size: 1000                    # 批量更新大小
+    - CN                                  # 允许的国家代码
+  allow_private_networks: true            # 允许私有网段绕过地域检查（RFC 1918）
+  persistence_dir: ./data/geo             # 持久化目录
+  batch_size: 1000                        # 批量更新大小
   sources:
     maxmind:
       enabled: true
-      schedule: "0 3 * * *"            # 每天凌晨 3 点
-      url: "http://nginx-server/geoip/maxmind-ipv4.csv"
-      format: maxmind
+      schedule: "0 3 * * *"                # 每天凌晨 3 点
+      url: "http://nginx-server/GeoLite2-Country.mmdb"
+      format: maxmind-db                   # maxmind (CSV) 或 maxmind-db (MMDB)
 ```
+
+**Data Format Options:**
+- `maxmind`: MaxMind CSV format (`network,registered_country_iso_code,...`)
+- `maxmind-db`: MaxMind DB binary format (MMDB) - recommended for production
+- `dbip`: DB-IP CSV format (future)
 
 ### API Endpoints
 
@@ -321,6 +342,13 @@ network,registered_country_iso_code,...
 1.0.0.0/24,CN,...
 2.0.0.0/24,US,...
 ```
+
+**MaxMind DB (MMDB) Format:**
+- Binary format for efficient lookups
+- Requires `github.com/oschwald/maxminddb-golang`
+- GeoLite2-Country.mmdb contains both IPv4 and IPv6 networks
+- IPv6 networks are automatically filtered out during parsing
+- Use `maxmind-db` format in configuration
 
 Only countries in `allowed_countries` are loaded into the kernel, reducing memory usage.
 
@@ -422,7 +450,7 @@ The threat intelligence module (`internal/threatintel/sync.go`) implements two s
 | `ipv6_list` | HASH | `in6_addr` | `struct block_value` | 10,000 | IPv6 exact match with source tracking |
 | `ipv6_cidr_trie` | LPM_TRIE | `ipv6_trie_key{prefixlen, addr}` | `struct block_value` | 10,000 | IPv6 CIDR match with source tracking |
 | `geo_config` | ARRAY | `__u32` | `struct geo_config` | 1 | Geo-blocking configuration |
-| `geo_ipv4_whitelist` | LPM_TRIE | `ipv4_trie_key{prefixlen, addr}` | `__u32` | 50,000 | IPv4 GeoIP whitelist (country code) |
+| `geo_ipv4_whitelist` | LPM_TRIE | `ipv4_trie_key{prefixlen, addr}` | `__u32` | 500,000 | IPv4 GeoIP whitelist (country code) |
 | `events` | PERF_EVENT_ARRAY | int | int | 128 | Event reporting |
 | `scratch` | PERCPU_ARRAY | `__u32` | `packet_info` | 1 | Per-CPU storage |
 
@@ -430,6 +458,7 @@ The threat intelligence module (`internal/threatintel/sync.go`) implements two s
 - IPv4 List (250K): Supports IPSum (~230K rules) + manual rules + growth
 - IPv4 CIDR Trie (10K): Supports Spamhaus (~1.5K rules) + other CIDR sources
 - IPv6 maps (10K each): Reserved for future IPv6 threat intelligence
+- Geo IPv4 Whitelist (500K): Supports GeoLite2-Country.mmdb (~500K+ networks)
 
 **Value structure changed from `__u8` to `struct block_value` (16 bytes)** to support multi-source tracking.
 
@@ -761,8 +790,11 @@ sudo hping3 -6 -1 2001:db8::1 --data 1473
 ### Completed (Phase 2 - Geo-Blocking)
 - ✅ **Geo-blocking module** with fail-open safety
 - ✅ **Delayed activation**: Only enables when data loaded successfully
-- ✅ **eBPF geo maps**: `geo_config`, `geo_ipv4_whitelist` (50K entries)
-- ✅ **MaxMind CSV parser** with country filtering
+- ✅ **eBPF geo maps**: `geo_config`, `geo_ipv4_whitelist` (500K entries)
+- ✅ **MaxMind CSV/MMDB parser** with country filtering
+- ✅ **IPv4 filter** for MMDB (excludes IPv6 networks)
+- ✅ **Private network bypass** (RFC 1918) with `allow_private_networks`
+- ✅ **Cache design fix**: Config items read from `config.yml`, not cache
 - ✅ **Local persistence** for offline startup
 - ✅ **File renaming**: `xdp.go` → `manual.go` (handles/routers)
 

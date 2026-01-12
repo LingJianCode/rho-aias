@@ -35,9 +35,10 @@ type CacheData struct {
 
 // GeoConfig 地域封禁配置
 type GeoConfig struct {
-	Enabled          bool
-	Mode             string
-	AllowedCountries []string
+	Enabled              bool
+	Mode                 string
+	AllowedCountries     []string
+	AllowPrivateNetworks bool // 允许私有网段绕过地域检查
 }
 
 // Validate 验证配置
