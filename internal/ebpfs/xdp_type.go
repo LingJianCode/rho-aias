@@ -122,3 +122,27 @@ func GetSourceCount(mask uint32) int {
 	}
 	return count
 }
+
+// ============================================
+// Geo-Blocking 相关类型
+// ============================================
+
+// GeoConfig 地域封禁配置结构 - 与 eBPF C 中的 struct geo_config 对应
+type GeoConfig struct {
+	Enabled uint32 // 地域封禁启用标志
+	Mode    uint32 // 0: whitelist, 1: blacklist
+	Padding uint32 // 对齐填充
+}
+
+// NewGeoConfig 创建新的 GeoConfig
+func NewGeoConfig(enabled bool, mode uint32) GeoConfig {
+	enabledVal := uint32(0)
+	if enabled {
+		enabledVal = 1
+	}
+	return GeoConfig{
+		Enabled: enabledVal,
+		Mode:    mode,
+		Padding: 0,
+	}
+}

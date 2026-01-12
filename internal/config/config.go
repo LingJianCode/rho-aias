@@ -8,9 +8,10 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Ebpf   EbpfConfig   `yaml:"ebpf"`
-	Intel  IntelConfig  `yaml:"intel"`
+	Server      ServerConfig        `yaml:"server"`
+	Ebpf        EbpfConfig          `yaml:"ebpf"`
+	Intel       IntelConfig         `yaml:"intel"`
+	GeoBlocking GeoBlockingConfig   `yaml:"geo_blocking"`
 }
 
 type ServerConfig struct {
@@ -35,6 +36,25 @@ type IntelSource struct {
 	Schedule string `yaml:"schedule"` // Cron 表达式 (如: "0 * * * *" 表示每小时整点)
 	URL      string `yaml:"url"`     // 数据源 URL
 	Format   string `yaml:"format"`  // 格式类型 (ipsum/spamhaus)
+}
+
+// GeoBlockingConfig 地域封禁配置
+type GeoBlockingConfig struct {
+	Enabled          bool                   `yaml:"enabled"`           // 总开关
+	Mode             string                 `yaml:"mode"`               // "whitelist" 或 "blacklist"
+	AllowedCountries []string               `yaml:"allowed_countries"`  // 允许的国家代码列表
+	PersistenceDir   string                 `yaml:"persistence_dir"`   // 持久化目录
+	BatchSize        int                    `yaml:"batch_size"`         // 批量更新大小
+	Sources          map[string]GeoIPSource `yaml:"sources"`            // GeoIP 数据源配置
+}
+
+// GeoIPSource GeoIP 数据源配置
+// 数据由外部工具下载后托管在 nginx 文件服务器
+type GeoIPSource struct {
+	Enabled  bool   `yaml:"enabled"`  // 是否启用
+	Schedule string `yaml:"schedule"` // Cron 表达式
+	URL      string `yaml:"url"`      // CSV 文件 URL
+	Format   string `yaml:"format"`   // maxmind, dbip 等
 }
 
 func NewConfig(fileName string) *Config {

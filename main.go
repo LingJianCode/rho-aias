@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/geoblocking"
 	"rho-aias/internal/handles"
 	"rho-aias/internal/routers"
 	"rho-aias/internal/threatintel"
@@ -29,7 +30,7 @@ func main() {
 		panic(err)
 	}
 	go xdp.MonitorEvents()
-	xdpHandle := handles.NewXdpHandle(xdp)
+	manualHandle := handles.NewManualHandle(xdp)
 
 	// Initialize Intel Manager (if enabled)
 	var intelMgr *threatintel.Manager
@@ -42,17 +43,34 @@ func main() {
 		defer intelMgr.Stop()
 	}
 
+	// Initialize Geo-Blocking Manager (if enabled)
+	var geoMgr *geoblocking.Manager
+	if cfg.GeoBlocking.Enabled {
+		geoMgr = geoblocking.NewManager(&cfg.GeoBlocking, xdp)
+		if err := geoMgr.Start(); err != nil {
+			log.Printf("Warning: Geo-blocking manager start failed: %v", err)
+		}
+		log.Println("[Main] Geo-blocking module initialized")
+		defer geoMgr.Stop()
+	}
+
 	// Setup router and routes
 	r := gin.Default()
 	api := r.Group("/api")
 
-	// Register XDP routes (existing)
-	routers.RegisterXdpRoutes(api, xdpHandle)
+	// Register Manual routes (existing)
+	routers.RegisterManualRoutes(api, manualHandle)
 
 	// Register Intel routes (if enabled)
 	if cfg.Intel.Enabled && intelMgr != nil {
 		intelHandle := handles.NewIntelHandle(intelMgr)
 		routers.RegisterIntelRoutes(api, intelHandle)
+	}
+
+	// Register Geo-Blocking routes (if enabled)
+	if cfg.GeoBlocking.Enabled && geoMgr != nil {
+		geoHandle := handles.NewGeoBlockingHandle(geoMgr)
+		routers.RegisterGeoBlockingRoutes(api, geoHandle)
 	}
 
 	server := &http.Server{

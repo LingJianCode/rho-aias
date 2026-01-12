@@ -43,6 +43,7 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MATCH_BY_IP6_EXACT  3    // Match IPv6 address exactly
 #define MATCH_BY_IP6_CIDR   4    // Match IPv6 address by CIDR block
 #define MATCH_BY_MAC        5    // Match MAC address exactly
+#define MATCH_BY_GEO_BLOCK  6    // Match by geo-blocking rule
 
 // Maximum number of entries in each map
 // 威胁情报数据量: IPSum ~230K, Spamhaus ~1.5K
@@ -153,6 +154,63 @@ struct {
     __uint(max_entries, 128);
 } events SEC(".maps");
 
+// Geo-blocking configuration map
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, __u32);
+    __type(value, struct geo_config);
+    __uint(max_entries, 1);
+} geo_config SEC(".maps");
+
+// Geo-blocking state structure
+struct geo_config {
+    __u32 enabled;        /* Geo-blocking enabled flag */
+    __u32 mode;           /* 0: whitelist, 1: blacklist */
+    __u32 padding;        /* Alignment padding */
+} __attribute__((packed));
+
+// IPv4 GeoIP whitelist LPM trie
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __type(key, struct ipv4_trie_key);
+    __type(value, __u32);  /* Country code as value */
+    __uint(max_entries, 50000);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} geo_ipv4_whitelist SEC(".maps");
+
+/* 检查数据包是否匹配地域封禁规则
+ * @pi: 包含已解析数据包信息的结构体
+ * 返回值: 1=通过, 0=阻断
+ */
+static __always_inline int check_geo_blocking(struct packet_info *pi) {
+    __u32 key = 0;
+    struct geo_config *config = bpf_map_lookup_elem(&geo_config, &key);
+
+    // Early exit if geo-blocking disabled
+    if (UNLIKELY(!config || !config->enabled))
+        return 1;  // Pass
+
+    // Only process IPv4 packets (IPv6 暂不处理)
+    if (pi->eth_proto == ETH_P_IP) {
+        // Check IPv4 against whitelist
+        struct ipv4_trie_key v4_key = {
+            .prefixlen = DEFAULT_IPV4_PREFIX,
+            .addr = pi->src_ip
+        };
+        __u32 *country = bpf_map_lookup_elem(&geo_ipv4_whitelist, &v4_key);
+
+        if (config->mode == 0) {  // Whitelist mode
+            // Block if country not found
+            return (country != NULL);
+        } else {  // Blacklist mode
+            // Block if country found
+            return (country == NULL);
+        }
+    }
+
+    // Pass for IPv6 or non-IP packets
+    return 1;
+}
 
 /* 检查数据包是否匹配配置的过滤规则
  * @pi: 包含已解析数据包信息的结构体
@@ -410,6 +468,15 @@ int xdp_prog(struct xdp_md *ctx)
     }
 
 submit:
+    // Geo-blocking check (before rule matching for early drop)
+    {
+        int geo_result = check_geo_blocking(pkt_info);
+        if (UNLIKELY(!geo_result)) {
+            pkt_info->match_type = MATCH_BY_GEO_BLOCK;
+            return XDP_DROP;
+        }
+    }
+
     // 检查是否匹配过滤规则
     match_type = match_by_rule(pkt_info);
     pkt_info->match_type = match_type;
