@@ -40,12 +40,13 @@ type IntelSource struct {
 
 // GeoBlockingConfig 地域封禁配置
 type GeoBlockingConfig struct {
-	Enabled          bool                   `yaml:"enabled"`           // 总开关
-	Mode             string                 `yaml:"mode"`               // "whitelist" 或 "blacklist"
-	AllowedCountries []string               `yaml:"allowed_countries"`  // 允许的国家代码列表
-	PersistenceDir   string                 `yaml:"persistence_dir"`   // 持久化目录
-	BatchSize        int                    `yaml:"batch_size"`         // 批量更新大小
-	Sources          map[string]GeoIPSource `yaml:"sources"`            // GeoIP 数据源配置
+	Enabled              bool                   `yaml:"enabled"`               // 总开关
+	Mode                 string                 `yaml:"mode"`                  // "whitelist" 或 "blacklist"
+	AllowedCountries     []string               `yaml:"allowed_countries"`     // 允许的国家代码列表
+	AllowPrivateNetworks bool                   `yaml:"allow_private_networks"` // 允许私有网段绕过地域检查
+	PersistenceDir       string                 `yaml:"persistence_dir"`       // 持久化目录
+	BatchSize            int                    `yaml:"batch_size"`            // 批量更新大小
+	Sources              map[string]GeoIPSource `yaml:"sources"`               // GeoIP 数据源配置
 }
 
 // GeoIPSource GeoIP 数据源配置

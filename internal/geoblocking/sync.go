@@ -63,7 +63,14 @@ func (s *Syncer) SyncToKernel(data *GeoIPData, config *GeoConfig) error {
 		log.Printf("[GeoSyncer] Added %d rules", len(toAdd))
 	}
 
-	// 5. 只有成功加载规则才启用地域过滤
+	// 5. 如果配置允许，添加私有网段到白名单
+	if config.AllowPrivateNetworks {
+		if err := s.addPrivateNetworks(); err != nil {
+			return fmt.Errorf("add private networks failed: %w", err)
+		}
+	}
+
+	// 6. 只有成功加载规则才启用地域过滤
 	if data.TotalCount() > 0 {
 		mode := uint32(0) // whitelist
 		if config.Mode == "blacklist" {
@@ -163,6 +170,13 @@ func (s *Syncer) LoadAll(data *GeoIPData, config *GeoConfig) error {
 		log.Printf("[GeoSyncer] Loaded %d rules from cache", len(data.IPv4CIDR))
 	}
 
+	// 如果配置允许，添加私有网段
+	if config.AllowPrivateNetworks {
+		if err := s.addPrivateNetworks(); err != nil {
+			log.Printf("[GeoSyncer] Warning: add private networks failed: %v", err)
+		}
+	}
+
 	// 同样逻辑：有规则才启用地域过滤
 	if data.TotalCount() > 0 {
 		mode := uint32(0) // whitelist
@@ -218,4 +232,28 @@ func cidrToLPMKey(cidrWithCountry string) (uint32, []byte, error) {
 	}
 
 	return uint32(ones), ip, nil
+}
+
+// addPrivateNetworks 添加私有网段到 GeoIP whitelist
+// 使用特殊国家代码 "PN" (Private Network)
+// RFC 1918 私有地址范围:
+// - 10.0.0.0/8    (10.0.0.0 - 10.255.255.255)
+// - 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+// - 192.168.0.0/16 (192.168.0.0 - 192.168.255.255)
+func (s *Syncer) addPrivateNetworks() error {
+	// RFC 1918 私有地址范围
+	privateNetworks := []string{
+		"10.0.0.0/8,PN",
+		"172.16.0.0/12,PN",
+		"192.168.0.0/16,PN",
+	}
+
+	for _, cidrWithCountry := range privateNetworks {
+		if err := s.xdp.AddGeoIPRule(cidrWithCountry); err != nil {
+			return fmt.Errorf("add private network %s failed: %w", cidrWithCountry, err)
+		}
+	}
+
+	log.Printf("[GeoSyncer] Added private networks to whitelist")
+	return nil
 }

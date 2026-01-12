@@ -174,7 +174,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
     __type(key, struct ipv4_trie_key);
     __type(value, __u32);  /* Country code as value */
-    __uint(max_entries, 50000);
+    __uint(max_entries, 500000);  /* GeoLite2-Country.mmdb has ~500K+ networks */
     __uint(map_flags, BPF_F_NO_PREALLOC);
 } geo_ipv4_whitelist SEC(".maps");
 

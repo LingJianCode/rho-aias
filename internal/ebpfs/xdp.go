@@ -422,6 +422,12 @@ func (x *Xdp) BatchAddGeoIPRules(cidrs []string) error {
 			continue
 		}
 
+		// 只处理 IPv4 网络（跳过 IPv6）
+		if ipNet.IP.To4() == nil {
+			log.Printf("[GeoBlocking] Skipping non-IPv4 network: %s", cidr)
+			continue
+		}
+
 		// 创建 LPM trie key
 		var key IPv4TrieKey
 		copy(key.Addr[:], ipNet.IP.To4())
