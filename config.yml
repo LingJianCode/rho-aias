@@ -20,3 +20,16 @@ intel:
       # url: https://www.spamhaus.org/drop/drop.txt
       url: http://localhost/drop.txt
       format: spamhaus
+geo_blocking:
+  enabled: true
+  mode: whitelist  # whitelist 或 blacklist
+  allowed_countries:
+    - CN  # 中国
+  persistence_dir: ./data/geo
+  batch_size: 1000
+  sources:
+    maxmind:
+      enabled: true
+      schedule: "0 3 * * *"  # 每天凌晨 3 点更新
+      url: http://localhost/geoip/maxmind-ipv4.csv  # CSV 文件 URL
+      format: maxmind

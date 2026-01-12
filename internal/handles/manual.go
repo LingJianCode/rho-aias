@@ -8,15 +8,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type XdpHandle struct {
+// ManualHandle 手动规则管理 API 处理器
+type ManualHandle struct {
 	xdp *ebpfs.Xdp
 }
 
-func NewXdpHandle(xdp *ebpfs.Xdp) *XdpHandle {
-	return &XdpHandle{xdp: xdp}
+// NewManualHandle 创建新的手动规则处理器
+func NewManualHandle(xdp *ebpfs.Xdp) *ManualHandle {
+	return &ManualHandle{xdp: xdp}
 }
 
-func (x *XdpHandle) AddRule(c *gin.Context) {
+// AddRule 添加过滤规则
+func (m *ManualHandle) AddRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -26,7 +29,7 @@ func (x *XdpHandle) AddRule(c *gin.Context) {
 		return
 	}
 	log.Println(req)
-	err := x.xdp.AddRule(req.Value)
+	err := m.xdp.AddRule(req.Value)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"code":    500,
@@ -40,7 +43,8 @@ func (x *XdpHandle) AddRule(c *gin.Context) {
 	})
 }
 
-func (x *XdpHandle) DelRule(c *gin.Context) {
+// DelRule 删除过滤规则
+func (m *ManualHandle) DelRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -50,7 +54,7 @@ func (x *XdpHandle) DelRule(c *gin.Context) {
 		return
 	}
 	log.Println(req)
-	err := x.xdp.DeleteRule(req.Value)
+	err := m.xdp.DeleteRule(req.Value)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"code":    500,
@@ -64,8 +68,9 @@ func (x *XdpHandle) DelRule(c *gin.Context) {
 	})
 }
 
-func (x *XdpHandle) GetRule(c *gin.Context) {
-	res, err := x.xdp.GetRule()
+// GetRule 获取所有规则
+func (m *ManualHandle) GetRule(c *gin.Context) {
+	res, err := m.xdp.GetRule()
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"code":    500,

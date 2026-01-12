@@ -14,8 +14,9 @@ The system consists of:
 1. **eBPF XDP program** (`ebpfs/xdp.bpf.c`) - Packet filtering at driver level
 2. **Go userspace controller** - Manages eBPF lifecycle and provides REST API
 3. **Threat Intelligence module** - Auto-syncs external threat feeds
-4. **Gin HTTP server** - REST API for rule and threat intel management
-5. **Configuration system** - Port, interface, and threat intel configurable via `config.yml`
+4. **Geo-Blocking module** - Country-based IP filtering (whitelist/blacklist)
+5. **Gin HTTP server** - REST API for rule, threat intel, and geo-blocking management
+6. **Configuration system** - Port, interface, threat intel, and geo-blocking configurable via `config.yml`
 
 ### Architecture
 
@@ -47,6 +48,15 @@ The system consists of:
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              ↓                                       │
 │  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Geo-Blocking (internal/geoblocking/)                        │   │
+│  │  - geoblocking.go: Geo-blocking manager and scheduler        │   │
+│  │  - fetcher.go: Fetches GeoIP CSV from nginx                   │   │
+│  │  - parser.go: Parses MaxMind/DB-IP formats                   │   │
+│  │  - sync.go: Atomic sync to kernel eBPF maps                  │   │
+│  │  - cache.go: Local persistence for offline startup             │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                              ↓                                       │
+│  ┌─────────────────────────────────────────────────────────────┐   │
 │  │  HTTP API (internal/handles/, internal/routers/)             │   │
 │  │  Routes:                                                     │   │
 │  │  - POST   /api/rule       - Add rule                         │   │
@@ -54,6 +64,9 @@ The system consists of:
 │  │  - GET    /api/rule       - List rules                       │   │
 │  │  - GET    /api/intel/status - Get intel status                 │   │
 │  │  - POST   /api/intel/update - Trigger update                  │   │
+│  │  - GET    /api/geoblocking/status - Get geo status            │   │
+│  │  - POST   /api/geoblocking/update - Trigger update           │   │
+│  │  - POST   /api/geoblocking/config - Update config            │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -87,12 +100,22 @@ rho-aias/
 │   │   ├── cache.go              # 本地持久化
 │   │   ├── sync.go               # 内核同步
 │   │   └── intel.go              # 情报管理器
+│   ├── geoblocking/              # 地域封禁模块
+│   │   ├── types.go              # 类型定义
+│   │   ├── fetcher.go            # GeoIP 数据获取器
+│   │   ├── parser.go             # GeoIP 数据解析器
+│   │   ├── cache.go              # 本地持久化
+│   │   ├── sync.go               # 内核同步
+│   │   └── geoblocking.go       # 地域封禁管理器
 │   ├── handles/
-│   │   ├── xdp.go                # XDP API 处理器
+│   │   ├── manual.go             # 手动规则 API 处理器 (原 xdp.go)
 │   │   ├── xdp_req.go            # 请求结构体
-│   │   └── intel.go              # 威胁情报 API 处理器
+│   │   ├── intel.go              # 威胁情报 API 处理器
+│   │   └── geoblocking.go        # 地域封禁 API 处理器
 │   └── routers/
-│       └── xdp.go                # 路由注册
+│       ├── manual.go             # 手动规则路由注册 (原 xdp.go)
+│       ├── intel.go              # 威胁情报路由注册
+│       └── geoblocking.go        # 地域封禁路由注册
 ├── test/
 │   ├── README.md                  # 测试说明
 │   ├── test_ipv4.py              # IPv4 测试工具
@@ -215,6 +238,92 @@ intel:
 1.19.0.0/16 ; SBL434604
 ```
 
+## Geo-Blocking Module
+
+The `internal/geoblocking/` module provides country-based IP filtering:
+
+### Features
+
+1. **Fail-Open Safety**
+   - Whitelist mode only activates when data is successfully loaded (`TotalCount() > 0`)
+   - Prevents network outage if GeoIP data fetch fails
+   - Initial state: `enabled=0` → Pass all (waiting for data)
+   - Data loaded successfully: `enabled=1` → Filter normally
+
+2. **IPv4 Only**
+   - Supports IPv4 CIDR matching via LPM trie
+   - Max capacity: 50,000 entries
+   - IPv6 traffic passes through (not filtered)
+
+3. **Dual Mode Support**
+   - **Whitelist**: Only allow specified countries
+   - **Blacklist**: Block specified countries
+
+4. **MaxMind/DB-IP Integration**
+   - Data fetched from nginx file server (CSV format)
+   - Per-source Cron scheduling
+   - Local persistence for offline startup
+   - Cache directory: `./data/geo/`
+
+### Configuration
+
+Add to `config.yml`:
+
+```yaml
+geo_blocking:
+  enabled: true                      # 总开关
+  mode: whitelist                     # whitelist 或 blacklist
+  allowed_countries:
+    - CN                              # 允许的国家代码
+  persistence_dir: ./data/geo         # 持久化目录
+  batch_size: 1000                    # 批量更新大小
+  sources:
+    maxmind:
+      enabled: true
+      schedule: "0 3 * * *"            # 每天凌晨 3 点
+      url: "http://nginx-server/geoip/maxmind-ipv4.csv"
+      format: maxmind
+```
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/geoblocking/status` | Get geo-blocking status |
+| POST | `/api/geoblocking/update` | Manually trigger GeoIP update |
+| POST | `/api/geoblocking/config` | Update configuration (mode, countries) |
+
+**Status response format:**
+```json
+{
+  "enabled": true,              // 实际是否在过滤（数据已加载）
+  "mode": "whitelist",
+  "allowed_countries": ["CN"],
+  "last_update": "2024-01-15T10:00:00Z",
+  "total_rules": 15000,
+  "sources": {
+    "maxmind": {
+      "enabled": true,
+      "last_update": "2024-01-15T10:00:00Z",
+      "success": true,
+      "rule_count": 15000,
+      "error": ""
+    }
+  }
+}
+```
+
+### Data Format
+
+**MaxMind CSV Format:**
+```
+network,registered_country_iso_code,...
+1.0.0.0/24,CN,...
+2.0.0.0/24,US,...
+```
+
+Only countries in `allowed_countries` are loaded into the kernel, reducing memory usage.
+
 ## Source Tracking and Bitmask Tagging
 
 The system implements a **Bitmask Tagging** approach to track rule ownership across multiple sources, resolving conflicts when the same IP/CIDR is added by different sources.
@@ -312,6 +421,8 @@ The threat intelligence module (`internal/threatintel/sync.go`) implements two s
 | `ipv4_cidr_trie` | LPM_TRIE | `ipv4_trie_key{prefixlen, addr}` | `struct block_value` | 10,000 | IPv4 CIDR match with source tracking |
 | `ipv6_list` | HASH | `in6_addr` | `struct block_value` | 10,000 | IPv6 exact match with source tracking |
 | `ipv6_cidr_trie` | LPM_TRIE | `ipv6_trie_key{prefixlen, addr}` | `struct block_value` | 10,000 | IPv6 CIDR match with source tracking |
+| `geo_config` | ARRAY | `__u32` | `struct geo_config` | 1 | Geo-blocking configuration |
+| `geo_ipv4_whitelist` | LPM_TRIE | `ipv4_trie_key{prefixlen, addr}` | `__u32` | 50,000 | IPv4 GeoIP whitelist (country code) |
 | `events` | PERF_EVENT_ARRAY | int | int | 128 | Event reporting |
 | `scratch` | PERCPU_ARRAY | `__u32` | `packet_info` | 1 | Per-CPU storage |
 
@@ -647,7 +758,15 @@ sudo hping3 -6 -1 2001:db8::1 --data 1473
 - ✅ **Expanded eBPF map capacities** (250K IPv4 rules, 10K CIDR rules)
 - ✅ **Fixed deadlock in loadFromCache()** (non-reentrant lock issue)
 
-### Planned (Phases 2-4)
+### Completed (Phase 2 - Geo-Blocking)
+- ✅ **Geo-blocking module** with fail-open safety
+- ✅ **Delayed activation**: Only enables when data loaded successfully
+- ✅ **eBPF geo maps**: `geo_config`, `geo_ipv4_whitelist` (50K entries)
+- ✅ **MaxMind CSV parser** with country filtering
+- ✅ **Local persistence** for offline startup
+- ✅ **File renaming**: `xdp.go` → `manual.go` (handles/routers)
+
+### Planned (Phases 3-4)
 - ⏳ Central coordinator for all source synchronization
 - ⏳ API endpoints for source filtering (`GET /api/rule?source=manual`)
 - ⏳ Per-source delete operations (`DELETE /api/rule?source=ipsum`)
