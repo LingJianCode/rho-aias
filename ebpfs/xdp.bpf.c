@@ -94,7 +94,7 @@ struct {
     __type(key, __be32);
     __type(value, struct block_value);
     __uint(max_entries, MAX_IPV4_LIST_ENTRIES);
-} ipv4_list SEC(".maps");
+} block_ipv4_list SEC(".maps");
 
 /* LPM (Longest Prefix Match) Trie key for IPv4 CIDR matching
  * Used with BPF_MAP_TYPE_LPM_TRIE map
@@ -111,7 +111,7 @@ struct {
     __type(value, struct block_value);
     __uint(max_entries, MAX_IPV4_CIDR_ENTRIES);
     __uint(map_flags, BPF_F_NO_PREALLOC);
-} ipv4_cidr_trie SEC(".maps");
+} block_ipv4_cidr_trie SEC(".maps");
 
 // IPv6 exact match hash table
 struct {
@@ -119,7 +119,7 @@ struct {
     __type(key, struct in6_addr);
     __type(value, struct block_value);
     __uint(max_entries, MAX_IPV6_LIST_ENTRIES);
-} ipv6_list SEC(".maps");
+} block_ipv6_list SEC(".maps");
 
 /* LPM (Longest Prefix Match) Trie key for IPv6 CIDR matching
  * Used with BPF_MAP_TYPE_LPM_TRIE map
@@ -136,7 +136,7 @@ struct {
     __type(value, struct block_value);
     __uint(max_entries, MAX_IPV6_CIDR_ENTRIES);
     __uint(map_flags, BPF_F_NO_PREALLOC);
-} ipv6_cidr_trie SEC(".maps");
+} block_ipv6_cidr_trie SEC(".maps");
 
 // Scratch map for storing packet information
 struct {
@@ -227,7 +227,7 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
     if (pi->eth_proto == ETH_P_IP) {
         // Try exact match first
         // bpf_printk("match_by_rule IP: %d\n", pi->src_ip);
-        struct block_value *ipv4_value = bpf_map_lookup_elem(&ipv4_list, &pi->src_ip);
+        struct block_value *ipv4_value = bpf_map_lookup_elem(&block_ipv4_list, &pi->src_ip);
         if (ipv4_value && ipv4_value->source_mask != 0) return MATCH_BY_IP4_EXACT;
 
         // Then try CIDR match using LPM Trie
@@ -235,14 +235,14 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
             .prefixlen = DEFAULT_IPV4_PREFIX,
             .addr = pi->src_ip
         };
-        struct block_value *ipv4_cidr_value = bpf_map_lookup_elem(&ipv4_cidr_trie, &v4_key);
+        struct block_value *ipv4_cidr_value = bpf_map_lookup_elem(&block_ipv4_cidr_trie, &v4_key);
         if (ipv4_cidr_value && ipv4_cidr_value->source_mask != 0) return MATCH_BY_IP4_CIDR;
 
     } else if (pi->eth_proto == ETH_P_IPV6) {
         // Try exact match first - 直接使用 src_ipv6 数组，避免 memset
         struct in6_addr ipv6_addr;
         __builtin_memcpy(&ipv6_addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(ipv6_addr.in6_u.u6_addr32));
-        struct block_value *ipv6_value = bpf_map_lookup_elem(&ipv6_list, &ipv6_addr);
+        struct block_value *ipv6_value = bpf_map_lookup_elem(&block_ipv6_list, &ipv6_addr);
         if (ipv6_value && ipv6_value->source_mask != 0) return MATCH_BY_IP6_EXACT;
 
         // Then try CIDR match using LPM Trie - 直接初始化 LPM key
@@ -250,7 +250,7 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
             .prefixlen = DEFAULT_IPV6_PREFIX,
         };
         __builtin_memcpy(&v6_key.addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(v6_key.addr.in6_u.u6_addr32));
-        struct block_value *ipv6_cidr_value = bpf_map_lookup_elem(&ipv6_cidr_trie, &v6_key);
+        struct block_value *ipv6_cidr_value = bpf_map_lookup_elem(&block_ipv6_cidr_trie, &v6_key);
         if (ipv6_cidr_value && ipv6_cidr_value->source_mask != 0) return MATCH_BY_IP6_CIDR;
     }
     return MATCH_BY_PASS;
