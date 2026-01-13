@@ -11,7 +11,6 @@ import (
 	"rho-aias/utils"
 	"strings"
 
-	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
@@ -139,27 +138,27 @@ func (x *Xdp) updateMap(iptype utils.IPType, value []byte, blockValue BlockValue
 	switch iptype {
 	case utils.IPTypeIPv4:
 		if add {
-			err = x.objects.Ipv4List.Put(value, blockValue)
+			err = x.objects.BlockIpv4List.Put(value, blockValue)
 		} else {
-			err = x.objects.Ipv4List.Delete(value)
+			err = x.objects.BlockIpv4List.Delete(value)
 		}
 	case utils.IPTypeIPV4CIDR:
 		if add {
-			err = x.objects.Ipv4CidrTrie.Put(value, blockValue)
+			err = x.objects.BlockIpv4CidrTrie.Put(value, blockValue)
 		} else {
-			err = x.objects.Ipv4CidrTrie.Delete(value)
+			err = x.objects.BlockIpv4CidrTrie.Delete(value)
 		}
 	case utils.IPTypeIPv6:
 		if add {
-			err = x.objects.Ipv6List.Put(value, blockValue)
+			err = x.objects.BlockIpv6List.Put(value, blockValue)
 		} else {
-			err = x.objects.Ipv6List.Delete(value)
+			err = x.objects.BlockIpv6List.Delete(value)
 		}
 	case utils.IPTypeIPv6CIDR:
 		if add {
-			err = x.objects.Ipv6CidrTrie.Put(value, blockValue)
+			err = x.objects.BlockIpv6CidrTrie.Put(value, blockValue)
 		} else {
-			err = x.objects.Ipv6CidrTrie.Delete(value)
+			err = x.objects.BlockIpv6CidrTrie.Delete(value)
 		}
 	default:
 		return fmt.Errorf("unsupported match type: %v", iptype)
@@ -216,7 +215,7 @@ func (x *Xdp) GetRule() ([]Rule, error) {
 
 // ipv4List 获取 IPv4 精确匹配规则列表
 func (x *Xdp) ipv4List() ([]Rule, error) {
-	iter := x.objects.Ipv4List.Iterate()
+	iter := x.objects.BlockIpv4List.Iterate()
 	var key []byte
 	var value BlockValue
 	var res []Rule
@@ -236,7 +235,7 @@ func (x *Xdp) ipv4List() ([]Rule, error) {
 
 // ipv4TrieKey 获取 IPv4 CIDR 规则列表
 func (x *Xdp) ipv4TrieKey() ([]Rule, error) {
-	iter := x.objects.Ipv4CidrTrie.Iterate()
+	iter := x.objects.BlockIpv4CidrTrie.Iterate()
 	var key IPv4TrieKey
 	var value BlockValue
 	var res []Rule
@@ -293,46 +292,18 @@ func (x *Xdp) BatchAddRules(values []string, sourceMask uint32) error {
 
 	// 批量更新 IPv4 精确匹配
 	if len(ipv4ExactKeys) > 0 {
-		if err := x.batchUpdateMap(x.objects.Ipv4List, ipv4ExactKeys, ipv4ExactValues); err != nil {
-			return fmt.Errorf("batch update IPv4 exact match failed: %w", err)
+		for i, key := range ipv4ExactKeys {
+			if err := x.objects.BlockIpv4List.Put(key, ipv4ExactValues[i]); err != nil {
+				return fmt.Errorf("put IPv4 exact key %v failed: %w", key, err)
+			}
 		}
 	}
 
 	// 批量更新 IPv4 CIDR
 	if len(ipv4CIDRKeys) > 0 {
-		if err := x.batchUpdateMap(x.objects.Ipv4CidrTrie, ipv4CIDRKeys, ipv4CIDRValues); err != nil {
-			return fmt.Errorf("batch update IPv4 CIDR failed: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// batchUpdateMap 通用批量更新方法
-func (x *Xdp) batchUpdateMap(m interface{}, keys, values interface{}) error {
-	// 使用迭代器方式批量更新
-	// 由于 cilium/ebpf 的 BatchUpdate API 比较复杂，这里使用循环方式
-	// 虽然不是真正的批量，但比每次单独创建请求要高效
-
-	// 使用 *ebpf.Map 的通用 Put(key, value interface{}) 方法
-	emap, ok := m.(*ebpf.Map)
-	if !ok {
-		return fmt.Errorf("map type assertion failed: expected *ebpf.Map")
-	}
-
-	switch v := keys.(type) {
-	case [][4]byte:
-		vals := values.([]BlockValue)
-		for i, key := range v {
-			if err := emap.Put(key, vals[i]); err != nil {
-				return fmt.Errorf("put key %v failed: %w", key, err)
-			}
-		}
-	case []IPv4TrieKey:
-		vals := values.([]BlockValue)
-		for i, key := range v {
-			if err := emap.Put(key, vals[i]); err != nil {
-				return fmt.Errorf("put key %v failed: %w", key, err)
+		for i, key := range ipv4CIDRKeys {
+			if err := x.objects.BlockIpv4CidrTrie.Put(key, ipv4CIDRValues[i]); err != nil {
+				return fmt.Errorf("put IPv4 CIDR key %v failed: %w", key, err)
 			}
 		}
 	}
