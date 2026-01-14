@@ -779,6 +779,50 @@ All API endpoints follow RESTful convention: `/api/{module}/{action}`
 
 **Note:** Wildcard matching uses CIDR notation (`0.0.0.0/0` or `::/0`), not plain `0.0.0.0`.
 
+## Quick Testing Scripts
+
+The `scripts/` directory provides shell scripts for quick manual rule testing:
+
+### add.sh - Add Manual Rule
+
+```bash
+# Add a rule to block an IP
+./scripts/add.sh
+
+# Example: Blocks 192.168.110.138
+curl --location --request POST 'http://192.168.110.139:8080/api/manual/rules' \
+ --header 'Content-Type: application/json' \
+ --data-raw '{
+     "value": "192.168.110.138"
+ }'
+```
+
+### del.sh - Delete Manual Rule
+
+```bash
+# Delete a rule
+./scripts/del.sh
+
+# Example: Removes 192.168.110.138 from blocklist
+curl --location --request DELETE 'http://192.168.110.139:8080/api/manual/rules' \
+ --header 'Content-Type: application/json' \
+ --data-raw '{
+     "value": "192.168.110.138"
+ }'
+```
+
+### get.sh - List All Rules
+
+```bash
+# Get all current rules with source information
+./scripts/get.sh
+
+# Returns JSON with rules, sources, and bitmask info
+curl 'http://192.168.110.139:8080/api/manual/rules' | jq
+```
+
+**Note:** These scripts use a hardcoded IP address (`192.168.110.139`). Modify them to match your server's address.
+
 ## Testing Tools
 
 ### IPv4 Testing (`test/test_ipv4.py`)
