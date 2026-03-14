@@ -100,32 +100,43 @@ func (x *Xdp) GetLinkType() string {
 func (x *Xdp) MonitorEvents() {
 	log.Println("MonitorEvents")
 	for {
+		// 检查 done 通道（非阻塞）
 		select {
 		case <-x.done:
 			log.Println("MonitorEvents exit...")
 			return
 		default:
-			record, err := x.reader.Read()
-			if err != nil {
-				if err == perf.ErrClosed {
-					log.Printf("perf event reader closed, trying to restart eBPF")
-					x.Close()
-					if err := x.Start(); err != nil {
-						log.Fatalf("failed to restart eBPF: %s", err.Error())
-					} else {
-						log.Printf("eBPF restarted successfully")
-					}
-					return
-				}
-				continue
-			}
-			var pi PacketInfo
-			if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &pi); err != nil {
-				log.Println(err.Error())
-				continue
-			}
-			log.Println(pi.SrcIP, pi.MatchType)
 		}
+
+		// 阻塞式读取 perf 事件
+		record, err := x.reader.Read()
+		if err != nil {
+			if err == perf.ErrClosed {
+				log.Printf("perf event reader closed, trying to restart eBPF")
+				x.Close()
+				if err := x.Start(); err != nil {
+					log.Fatalf("failed to restart eBPF: %s", err.Error())
+				} else {
+					log.Printf("eBPF restarted successfully")
+				}
+				return
+			}
+			// 其他错误，检查 done 后继续
+			select {
+			case <-x.done:
+				log.Println("MonitorEvents exit after error...")
+				return
+			default:
+				continue
+			}
+		}
+
+		var pi PacketInfo
+		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &pi); err != nil {
+			log.Printf("Failed to parse packet info: %v", err)
+			continue
+		}
+		log.Printf("Blocked packet - Src: %s, MatchType: %d", pi.SrcIP, pi.MatchType)
 	}
 }
 

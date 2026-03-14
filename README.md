@@ -21,8 +21,6 @@
 | IPSum | 第三方威胁情报源（~23万条规则） | ✅ 已实现 |
 | Spamhaus DROP | 国际知名垃圾邮件黑名单 | ✅ 已实现 |
 | Geo-Blocking | 基于国家/地区的地域封禁 | ✅ 已实现 |
-| WAF | Web 应用防火墙检测 | ⏳ 计划中 |
-| DDoS 检测 | DDoS 攻击自动识别 | ⏳ 计划中 |
 
 ## 架构设计
 
@@ -357,6 +355,10 @@ sudo python3 test/test_ipv6.py <target_ip> ipv6_ext_hbh
 ## 许可证
 
 Dual MIT/GPL
+
+## 已知问题
+
+目前没有已知问题。
 
 ## 贡献
 
