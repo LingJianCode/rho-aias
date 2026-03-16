@@ -15,6 +15,20 @@ import (
 	"gorm.io/gorm"
 )
 
+// ValidPermissions 定义有效的权限白名单
+var ValidPermissions = map[string]bool{
+	"firewall:read":  true,
+	"firewall:write": true,
+	"intel:read":     true,
+	"intel:write":    true,
+	"geo:read":       true,
+	"geo:write":      true,
+	"blocklog:read":  true,
+	"blocklog:clear": true,
+	"api_key:manage": true,
+	"admin:*":        true,
+}
+
 // APIKeyService API Key 服务
 type APIKeyService struct {
 	db       *gorm.DB
@@ -48,6 +62,13 @@ type CreateAPIKeyResponse struct {
 
 // CreateAPIKey 创建 API Key
 func (s *APIKeyService) CreateAPIKey(userID uint, req CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
+	// 验证权限有效性
+	for _, perm := range req.Permissions {
+		if !ValidPermissions[perm] {
+			return nil, fmt.Errorf("invalid permission: %s", perm)
+		}
+	}
+
 	// 生成 Key
 	key, hash, err := apikey.GenerateKey()
 	if err != nil {
@@ -60,49 +81,62 @@ func (s *APIKeyService) CreateAPIKey(userID uint, req CreateAPIKeyRequest) (*Cre
 		return nil, fmt.Errorf("failed to marshal permissions: %w", err)
 	}
 
-	// 创建数据库记录
-	apiKeyRecord := &models.APIKey{
-		Name:        req.Name,
-		Key:         hash,
-		KeyPrefix:   key[:16], // 保存前缀用于显示
-		UserID:      userID,
-		Permissions: string(permissionsJSON),
-		Active:      true,
+	// 构造响应函数（用于事务内构造）
+	var response *CreateAPIKeyResponse
+
+	// 使用事务保证原子性
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// 创建数据库记录
+		apiKeyRecord := &models.APIKey{
+			Name:        req.Name,
+			Key:         hash,
+			KeyPrefix:   key[:16], // 保存前缀用于显示
+			UserID:      userID,
+			Permissions: string(permissionsJSON),
+			Active:      true,
+		}
+
+		// 设置过期时间
+		if req.ExpiresDays > 0 {
+			expiresAt := time.Now().AddDate(0, 0, req.ExpiresDays)
+			apiKeyRecord.ExpiresAt = &expiresAt
+		}
+
+		// 保存到数据库
+		if err := tx.Create(apiKeyRecord).Error; err != nil {
+			return fmt.Errorf("failed to save api key: %w", err)
+		}
+
+		// 添加 Casbin 权限策略
+		if err := s.enforcer.AddAPIKeyPermissions(hash, req.Permissions); err != nil {
+			// 事务会自动回滚
+			return fmt.Errorf("failed to add permissions: %w", err)
+		}
+
+		// 构造响应
+		var expiresAtStr *string
+		if apiKeyRecord.ExpiresAt != nil {
+			str := apiKeyRecord.ExpiresAt.Format(time.RFC3339)
+			expiresAtStr = &str
+		}
+
+		response = &CreateAPIKeyResponse{
+			ID:          apiKeyRecord.ID,
+			Name:        apiKeyRecord.Name,
+			Key:         key, // 返回明文，仅此一次
+			Permissions: req.Permissions,
+			ExpiresAt:   expiresAtStr,
+			CreatedAt:   apiKeyRecord.CreatedAt.Format(time.RFC3339),
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
-	// 设置过期时间
-	if req.ExpiresDays > 0 {
-		expiresAt := time.Now().AddDate(0, 0, req.ExpiresDays)
-		apiKeyRecord.ExpiresAt = &expiresAt
-	}
-
-	// 保存到数据库
-	if err := s.db.Create(apiKeyRecord).Error; err != nil {
-		return nil, fmt.Errorf("failed to save api key: %w", err)
-	}
-
-	// 添加 Casbin 权限策略
-	if err := s.enforcer.AddAPIKeyPermissions(hash, req.Permissions); err != nil {
-		// 回滚数据库记录
-		s.db.Delete(apiKeyRecord)
-		return nil, fmt.Errorf("failed to add permissions: %w", err)
-	}
-
-	// 构造响应
-	var expiresAtStr *string
-	if apiKeyRecord.ExpiresAt != nil {
-		str := apiKeyRecord.ExpiresAt.Format(time.RFC3339)
-		expiresAtStr = &str
-	}
-
-	return &CreateAPIKeyResponse{
-		ID:          apiKeyRecord.ID,
-		Name:        apiKeyRecord.Name,
-		Key:         key, // 返回明文，仅此一次
-		Permissions: req.Permissions,
-		ExpiresAt:   expiresAtStr,
-		CreatedAt:   apiKeyRecord.CreatedAt.Format(time.RFC3339),
-	}, nil
+	return response, nil
 }
 
 // ListAPIKeys 列出用户的 API Keys
