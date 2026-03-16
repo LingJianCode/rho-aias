@@ -1,10 +1,12 @@
 package handles
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
 	"rho-aias/internal/middleware"
+	"rho-aias/internal/models"
 	"rho-aias/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -13,12 +15,14 @@ import (
 // APIKeyHandle API Key 处理器
 type APIKeyHandle struct {
 	apiKeyService *services.APIKeyService
+	auditService  *services.AuditService
 }
 
 // NewAPIKeyHandle 创建 API Key 处理器
-func NewAPIKeyHandle(apiKeyService *services.APIKeyService) *APIKeyHandle {
+func NewAPIKeyHandle(apiKeyService *services.APIKeyService, auditService *services.AuditService) *APIKeyHandle {
 	return &APIKeyHandle{
 		apiKeyService: apiKeyService,
+		auditService:  auditService,
 	}
 }
 
@@ -29,6 +33,8 @@ func (h *APIKeyHandle) CreateAPIKey(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
+
+	username, _ := middleware.GetUsername(c)
 
 	var req services.CreateAPIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -41,6 +47,22 @@ func (h *APIKeyHandle) CreateAPIKey(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 记录审计日志
+	detail, _ := json.Marshal(map[string]interface{}{
+		"name":        resp.Name,
+		"permissions": resp.Permissions,
+	})
+	_ = h.auditService.Log(services.LogRequest{
+		UserID:     userID,
+		Username:   username,
+		Action:     models.ActionCreateAPIKey,
+		Resource:   models.ResourceAPIKey,
+		ResourceID: strconv.FormatUint(uint64(resp.ID), 10),
+		Detail:     string(detail),
+		IP:         c.ClientIP(),
+		UserAgent:  c.GetHeader("User-Agent"),
+	})
 
 	c.JSON(http.StatusCreated, resp)
 }
@@ -70,6 +92,8 @@ func (h *APIKeyHandle) RevokeAPIKey(c *gin.Context) {
 		return
 	}
 
+	username, _ := middleware.GetUsername(c)
+
 	keyIDStr := c.Param("id")
 	keyID, err := strconv.ParseUint(keyIDStr, 10, 32)
 	if err != nil {
@@ -85,6 +109,17 @@ func (h *APIKeyHandle) RevokeAPIKey(c *gin.Context) {
 		}
 		return
 	}
+
+	// 记录审计日志
+	_ = h.auditService.Log(services.LogRequest{
+		UserID:     userID,
+		Username:   username,
+		Action:     models.ActionRevokeAPIKey,
+		Resource:   models.ResourceAPIKey,
+		ResourceID: keyIDStr,
+		IP:         c.ClientIP(),
+		UserAgent:  c.GetHeader("User-Agent"),
+	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "api key revoked successfully"})
 }
