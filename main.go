@@ -10,6 +10,7 @@ import (
 	"rho-aias/internal/auth/captcha"
 	"rho-aias/internal/auth/jwt"
 	"rho-aias/internal/blocklog"
+	"rho-aias/internal/casbin"
 	"rho-aias/internal/config"
 	"rho-aias/internal/database"
 	"rho-aias/internal/ebpfs"
@@ -95,11 +96,14 @@ func main() {
 
 	// Initialize Authentication (if enabled)
 	var (
-		db           *database.Database
-		authService  *services.AuthService
-		userService  *services.UserService
-		authHandle   *handles.AuthHandle
-		captchaStore *captcha.MemoryStore
+		db             *database.Database
+		authService    *services.AuthService
+		userService    *services.UserService
+		apiKeyService  *services.APIKeyService
+		authHandle     *handles.AuthHandle
+		apiKeyHandle   *handles.APIKeyHandle
+		captchaStore   *captcha.MemoryStore
+		casbinEnforcer *casbin.Enforcer
 	)
 	if cfg.Auth.Enabled {
 		// Initialize database
@@ -118,8 +122,19 @@ func main() {
 			log.Fatalf("Failed to migrate database: %v", err)
 		}
 
+		// Initialize Casbin
+		casbinEnforcer, err = casbin.NewEnforcer(db.DB)
+		if err != nil {
+			log.Fatalf("Failed to initialize casbin: %v", err)
+		}
+
+		// Initialize default policies
+		if err := casbinEnforcer.InitDefaultPolicies(); err != nil {
+			log.Printf("Warning: failed to initialize default policies: %v", err)
+		}
+
 		// Initialize default admin
-		if err := db.InitDefaultUser(); err != nil {
+		if err := db.InitDefaultUser(casbinEnforcer); err != nil {
 			log.Printf("Warning: failed to initialize default user: %v", err)
 		}
 
@@ -141,6 +156,7 @@ func main() {
 
 		authService = services.NewAuthService(db.DB, jwtService)
 		userService = services.NewUserService(db.DB)
+		apiKeyService = services.NewAPIKeyService(db.DB, casbinEnforcer)
 
 		// Initialize captcha
 		captchaStore = captcha.NewMemoryStore()
@@ -150,6 +166,7 @@ func main() {
 		)
 
 		authHandle = handles.NewAuthHandle(authService, userService, captchaService)
+		apiKeyHandle = handles.NewAPIKeyHandle(apiKeyService)
 
 		log.Println("[Main] Authentication module initialized")
 	}
@@ -160,43 +177,44 @@ func main() {
 
 	// Register Auth routes (if enabled)
 	if cfg.Auth.Enabled && authHandle != nil {
-		routers.RegisterAuthRoutes(api, authHandle, authService)
+		routers.RegisterAuthRoutes(api, authHandle, authService, apiKeyService, casbinEnforcer)
 	}
 
 	// Register protected routes
-	if cfg.Auth.Enabled && authService != nil {
-		// Apply authentication middleware to protected routes
-		protectedAPI := api.Group("")
-		routers.ApplyAuthMiddleware(protectedAPI, authService)
+	if cfg.Auth.Enabled && authService != nil && apiKeyService != nil && casbinEnforcer != nil {
+		// Register API Key management routes
+		if apiKeyHandle != nil {
+			routers.RegisterAPIKeyRoutes(api, apiKeyHandle, casbinEnforcer, authService, apiKeyService)
+		}
 
-		// Register protected routes
-		routers.RegisterManualRoutes(protectedAPI, manualHandle)
-		routers.RegisterBlockLogRoutes(protectedAPI, blockLogHandle)
+		// Register protected routes with Casbin middleware
+		routers.RegisterManualRoutes(api, manualHandle, casbinEnforcer, authService, apiKeyService)
+		routers.RegisterBlockLogRoutes(api, blockLogHandle, casbinEnforcer, authService, apiKeyService)
 
 		// Register Intel routes (if enabled)
 		if cfg.Intel.Enabled && intelMgr != nil {
 			intelHandle := handles.NewIntelHandle(intelMgr)
-			routers.RegisterIntelRoutes(protectedAPI, intelHandle)
+			routers.RegisterIntelRoutes(api, intelHandle, casbinEnforcer, authService, apiKeyService)
 		}
 
 		// Register Geo-Blocking routes (if enabled)
 		if cfg.GeoBlocking.Enabled && geoMgr != nil {
 			geoHandle := handles.NewGeoBlockingHandle(geoMgr)
-			routers.RegisterGeoBlockingRoutes(protectedAPI, geoHandle)
+			routers.RegisterGeoBlockingRoutes(api, geoHandle, casbinEnforcer, authService, apiKeyService)
 		}
 	} else {
 		// No authentication, register routes directly
-		routers.RegisterManualRoutes(api, manualHandle)
-		routers.RegisterBlockLogRoutes(api, blockLogHandle)
+		routers.RegisterManualRoutes(api, manualHandle, nil, nil, nil)
+		routers.RegisterBlockLogRoutes(api, blockLogHandle, nil, nil, nil)
 
 		if cfg.Intel.Enabled && intelMgr != nil {
 			intelHandle := handles.NewIntelHandle(intelMgr)
-			routers.RegisterIntelRoutes(api, intelHandle)
+			routers.RegisterIntelRoutes(api, intelHandle, nil, nil, nil)
 		}
 
 		if cfg.GeoBlocking.Enabled && geoMgr != nil {
 			geoHandle := handles.NewGeoBlockingHandle(geoMgr)
-			routers.RegisterGeoBlockingRoutes(api, geoHandle)
+			routers.RegisterGeoBlockingRoutes(api, geoHandle, nil, nil, nil)
 		}
 	}
 
