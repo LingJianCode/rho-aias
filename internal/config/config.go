@@ -13,6 +13,7 @@ type Config struct {
 	Intel       IntelConfig         `yaml:"intel"`
 	GeoBlocking GeoBlockingConfig   `yaml:"geo_blocking"`
 	Manual      ManualConfig        `yaml:"manual"`
+	Auth        AuthConfig          `yaml:"auth"`
 }
 
 type ServerConfig struct {
@@ -33,10 +34,10 @@ type IntelConfig struct {
 
 // IntelSource 单个情报源配置
 type IntelSource struct {
-	Enabled  bool   `yaml:"enabled"` // 是否启用
+	Enabled  bool   `yaml:"enabled"`  // 是否启用
 	Schedule string `yaml:"schedule"` // Cron 表达式 (如: "0 * * * *" 表示每小时整点)
-	URL      string `yaml:"url"`     // 数据源 URL
-	Format   string `yaml:"format"`  // 格式类型 (ipsum/spamhaus)
+	URL      string `yaml:"url"`      // 数据源 URL
+	Format   string `yaml:"format"`   // 格式类型 (ipsum/spamhaus)
 }
 
 // GeoBlockingConfig 地域封禁配置
@@ -66,6 +67,17 @@ type ManualConfig struct {
 	AutoLoad       bool   `yaml:"auto_load"`       // 启动时自动加载
 }
 
+// AuthConfig 认证配置
+type AuthConfig struct {
+	Enabled         bool   `yaml:"enabled"`          // 是否启用认证
+	JWTSecret       string `yaml:"jwt_secret"`       // JWT 密钥（建议从环境变量读取）
+	JWTIssuer       string `yaml:"jwt_issuer"`       // JWT 签发者
+	TokenDuration   int    `yaml:"token_duration"`   // Token 有效期（分钟）
+	DatabasePath    string `yaml:"database_path"`    // 数据库路径
+	CaptchaEnabled  bool   `yaml:"captcha_enabled"`  // 是否启用验证码
+	CaptchaDuration int    `yaml:"captcha_duration"` // 验证码有效期（分钟）
+}
+
 func NewConfig(fileName string) *Config {
 	// 打开 YAML 文件
 	file, err := os.Open(fileName)
@@ -85,5 +97,14 @@ func NewConfig(fileName string) *Config {
 	if err != nil {
 		panic(fmt.Sprintf("Error decoding YAML:%e", err))
 	}
+
+	// 设置默认值
+	if config.Auth.TokenDuration == 0 {
+		config.Auth.TokenDuration = 1440 // 默认 24 小时
+	}
+	if config.Auth.CaptchaDuration == 0 {
+		config.Auth.CaptchaDuration = 5 // 默认 5 分钟
+	}
+
 	return &config
 }

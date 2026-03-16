@@ -7,13 +7,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"rho-aias/internal/auth/captcha"
+	"rho-aias/internal/auth/jwt"
 	"rho-aias/internal/blocklog"
 	"rho-aias/internal/config"
+	"rho-aias/internal/database"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/geoblocking"
 	"rho-aias/internal/handles"
 	"rho-aias/internal/manual"
 	"rho-aias/internal/routers"
+	"rho-aias/internal/services"
 	"rho-aias/internal/threatintel"
 	"syscall"
 	"time"
@@ -89,26 +93,111 @@ func main() {
 		defer geoMgr.Stop()
 	}
 
+	// Initialize Authentication (if enabled)
+	var (
+		db           *database.Database
+		authService  *services.AuthService
+		userService  *services.UserService
+		authHandle   *handles.AuthHandle
+		captchaStore *captcha.MemoryStore
+	)
+	if cfg.Auth.Enabled {
+		// Initialize database
+		dbPath := cfg.Auth.DatabasePath
+		if dbPath == "" {
+			dbPath = "./data/auth.db"
+		}
+		db, err = database.NewDatabase(dbPath)
+		if err != nil {
+			log.Fatalf("Failed to initialize database: %v", err)
+		}
+		defer db.Close()
+
+		// Auto migrate
+		if err := db.AutoMigrate(); err != nil {
+			log.Fatalf("Failed to migrate database: %v", err)
+		}
+
+		// Initialize default admin
+		if err := db.InitDefaultUser(); err != nil {
+			log.Printf("Warning: failed to initialize default user: %v", err)
+		}
+
+		// Initialize services
+		jwtSecret := cfg.Auth.JWTSecret
+		if jwtSecret == "" {
+			jwtSecret = os.Getenv("JWT_SECRET")
+			if jwtSecret == "" {
+				jwtSecret = "default-secret-change-me" // 生产环境必须设置
+				log.Println("[Auth] Warning: using default JWT secret, please set in config or env")
+			}
+		}
+
+		jwtService := jwt.NewJWTService(
+			jwtSecret,
+			time.Duration(cfg.Auth.TokenDuration)*time.Minute,
+			cfg.Auth.JWTIssuer,
+		)
+
+		authService = services.NewAuthService(db.DB, jwtService)
+		userService = services.NewUserService(db.DB)
+
+		// Initialize captcha
+		captchaStore = captcha.NewMemoryStore()
+		captchaService := captcha.NewCaptchaService(
+			captchaStore,
+			time.Duration(cfg.Auth.CaptchaDuration)*time.Minute,
+		)
+
+		authHandle = handles.NewAuthHandle(authService, userService, captchaService)
+
+		log.Println("[Main] Authentication module initialized")
+	}
+
 	// Setup router and routes
 	r := gin.Default()
 	api := r.Group("/api")
 
-	// Register Manual routes (existing)
-	routers.RegisterManualRoutes(api, manualHandle)
-
-	// Register Block Log routes
-	routers.RegisterBlockLogRoutes(api, blockLogHandle)
-
-	// Register Intel routes (if enabled)
-	if cfg.Intel.Enabled && intelMgr != nil {
-		intelHandle := handles.NewIntelHandle(intelMgr)
-		routers.RegisterIntelRoutes(api, intelHandle)
+	// Register Auth routes (if enabled)
+	if cfg.Auth.Enabled && authHandle != nil {
+		routers.RegisterAuthRoutes(api, authHandle, authService)
 	}
 
-	// Register Geo-Blocking routes (if enabled)
-	if cfg.GeoBlocking.Enabled && geoMgr != nil {
-		geoHandle := handles.NewGeoBlockingHandle(geoMgr)
-		routers.RegisterGeoBlockingRoutes(api, geoHandle)
+	// Register protected routes
+	if cfg.Auth.Enabled && authService != nil {
+		// Apply authentication middleware to protected routes
+		protectedAPI := api.Group("")
+		routers.ApplyAuthMiddleware(protectedAPI, authService)
+
+		// Register protected routes
+		routers.RegisterManualRoutes(protectedAPI, manualHandle)
+		routers.RegisterBlockLogRoutes(protectedAPI, blockLogHandle)
+
+		// Register Intel routes (if enabled)
+		if cfg.Intel.Enabled && intelMgr != nil {
+			intelHandle := handles.NewIntelHandle(intelMgr)
+			routers.RegisterIntelRoutes(protectedAPI, intelHandle)
+		}
+
+		// Register Geo-Blocking routes (if enabled)
+		if cfg.GeoBlocking.Enabled && geoMgr != nil {
+			geoHandle := handles.NewGeoBlockingHandle(geoMgr)
+			routers.RegisterGeoBlockingRoutes(protectedAPI, geoHandle)
+		}
+	} else {
+		// No authentication, register routes directly
+		routers.RegisterManualRoutes(api, manualHandle)
+		routers.RegisterBlockLogRoutes(api, blockLogHandle)
+
+		if cfg.Intel.Enabled && intelMgr != nil {
+			intelHandle := handles.NewIntelHandle(intelMgr)
+			routers.RegisterIntelRoutes(api, intelHandle)
+		}
+
+		if cfg.GeoBlocking.Enabled && geoMgr != nil {
+			geoHandle := handles.NewGeoBlockingHandle(geoMgr)
+			routers.RegisterGeoBlockingRoutes(api, geoHandle)
+		}
 	}
 
 	server := &http.Server{
