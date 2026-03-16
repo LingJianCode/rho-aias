@@ -5,9 +5,10 @@ import (
 	"log"
 
 	"rho-aias/internal/auth/password"
+	"rho-aias/internal/casbin"
 	"rho-aias/internal/models"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/go-sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -31,6 +32,11 @@ func NewDatabase(dsn string) (*Database, error) {
 		log.Printf("Warning: failed to enable WAL mode: %v", err)
 	}
 
+	// 配置同步模式
+	if err := db.Exec("PRAGMA synchronous=NORMAL").Error; err != nil {
+		log.Printf("Warning: failed to set synchronous mode: %v", err)
+	}
+
 	return &Database{db}, nil
 }
 
@@ -43,7 +49,7 @@ func (db *Database) AutoMigrate() error {
 }
 
 // InitDefaultUser 初始化默认管理员用户
-func (db *Database) InitDefaultUser() error {
+func (db *Database) InitDefaultUser(enforcer *casbin.Enforcer) error {
 	// 检查是否存在管理员
 	var count int64
 	db.Model(&models.User{}).Where("role = ?", "admin").Count(&count)
@@ -62,6 +68,11 @@ func (db *Database) InitDefaultUser() error {
 
 	if err := db.Create(admin).Error; err != nil {
 		return fmt.Errorf("failed to create default admin: %w", err)
+	}
+
+	// 为管理员分配角色
+	if err := enforcer.AssignRoleToUser(admin.ID, "admin"); err != nil {
+		log.Printf("Warning: failed to assign admin role: %v", err)
 	}
 
 	log.Println("[Database] Default admin user created: admin / admin123")
