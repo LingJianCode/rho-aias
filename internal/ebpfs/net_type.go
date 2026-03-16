@@ -13,6 +13,7 @@ const (
 	MatchByIP6Exact MatchType = 3
 	MatchByIP6CIDR  MatchType = 4
 	MatchByMAC      MatchType = 5
+	MatchByGeoBlock MatchType = 6 // 地域封禁匹配
 )
 
 type MatchRule struct {

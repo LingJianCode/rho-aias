@@ -2,6 +2,7 @@ package handles
 
 import (
 	"net/http"
+	"strconv"
 
 	"rho-aias/internal/blocklog"
 
@@ -134,12 +135,5 @@ func (h *BlockLogHandle) GetBlockedCountries(c *gin.Context) {
 }
 
 func parseInt(s string) (int, error) {
-	var result int
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			break
-		}
-		result = result*10 + int(c-'0')
-	}
-	return result, nil
+	return strconv.Atoi(s)
 }
