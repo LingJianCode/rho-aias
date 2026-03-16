@@ -109,9 +109,36 @@ func (m *ManualHandle) GetRule(c *gin.Context) {
 		})
 		return
 	}
+
+	// 检查是否需要按来源筛选
+	source := c.Query("source")
+	if source != "" {
+		var filtered []ebpfs.Rule
+		for _, r := range res {
+			for _, s := range r.Sources {
+				if s == source {
+					filtered = append(filtered, r)
+					break
+				}
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message": "GetRule",
+			"data": gin.H{
+				"source": source,
+				"total":  len(filtered),
+				"rules":  filtered,
+			},
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "GetRule",
-		"data":    res,
+		"data": gin.H{
+			"total": len(res),
+			"rules": res,
+		},
 	})
 }
 
