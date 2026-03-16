@@ -3,6 +3,7 @@
 package blocklog
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -179,20 +180,15 @@ func (bl *BlockLog) GetStats() Stats {
 
 // getTopIPs 获取被阻断最多的 IP
 func getTopIPs(ipCounts map[string]int, limit int) []IPCount {
-	// 使用简单的排序算法
 	ips := make([]IPCount, 0, len(ipCounts))
 	for ip, count := range ipCounts {
 		ips = append(ips, IPCount{IP: ip, Count: count})
 	}
 
-	// 按计数降序排序
-	for i := 0; i < len(ips); i++ {
-		for j := i + 1; j < len(ips); j++ {
-			if ips[j].Count > ips[i].Count {
-				ips[i], ips[j] = ips[j], ips[i]
-			}
-		}
-	}
+	// 使用 sort.Slice 按计数降序排序
+	sort.Slice(ips, func(i, j int) bool {
+		return ips[i].Count > ips[j].Count
+	})
 
 	if len(ips) > limit {
 		ips = ips[:limit]
@@ -208,14 +204,10 @@ func getTopCountries(countryCounts map[string]int, limit int) []CountryCount {
 		countries = append(countries, CountryCount{Country: country, Count: count})
 	}
 
-	// 按计数降序排序
-	for i := 0; i < len(countries); i++ {
-		for j := i + 1; j < len(countries); j++ {
-			if countries[j].Count > countries[i].Count {
-				countries[i], countries[j] = countries[j], countries[i]
-			}
-		}
-	}
+	// 使用 sort.Slice 按计数降序排序
+	sort.Slice(countries, func(i, j int) bool {
+		return countries[i].Count > countries[j].Count
+	})
 
 	if len(countries) > limit {
 		countries = countries[:limit]

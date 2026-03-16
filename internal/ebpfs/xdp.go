@@ -189,7 +189,7 @@ func matchTypeToString(mt MatchType) string {
 		return "ip6_cidr"
 	case MatchByMAC:
 		return "mac"
-	case 6: // MATCH_BY_GEO_BLOCK
+	case MatchByGeoBlock:
 		return "geo_block"
 	default:
 		return "unknown"
