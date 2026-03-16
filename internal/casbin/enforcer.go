@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/casbin/casbin/v2"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
@@ -62,8 +63,8 @@ func (e *Enforcer) InitDefaultPolicies() error {
 	log.Println("[Casbin] Initializing default policies...")
 
 	// 添加默认角色权限
-	// role:admin 拥有所有权限
-	if _, err := e.AddPolicy("role:admin", "*", "allow"); err != nil {
+	// role:admin 拥有所有权限（使用通配符）
+	if _, err := e.AddPolicy("role:admin", "*", "*"); err != nil {
 		return fmt.Errorf("failed to add admin policy: %w", err)
 	}
 
@@ -124,11 +125,20 @@ func (e *Enforcer) GetUserRole(userID uint) string {
 }
 
 // AddAPIKeyPermissions 为 API Key 添加权限
+// 权限格式为 "resource:action"，如 "firewall:read"
 func (e *Enforcer) AddAPIKeyPermissions(keyHash string, permissions []string) error {
 	subject := fmt.Sprintf("apikey:%s", keyHash)
 
 	for _, perm := range permissions {
-		if _, err := e.AddPolicy(subject, perm, "allow"); err != nil {
+		// 解析权限格式 "resource:action"
+		parts := strings.Split(perm, ":")
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid permission format: %s, expected 'resource:action'", perm)
+		}
+
+		// 添加策略：(subject, obj, act)
+		// obj 为完整权限标识（如 firewall:read），act 为操作类型（如 read）
+		if _, err := e.AddPolicy(subject, perm, parts[1]); err != nil {
 			return fmt.Errorf("failed to add api key permission: %w", err)
 		}
 	}
