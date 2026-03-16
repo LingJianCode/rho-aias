@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
 	"rho-aias/internal/auth/jwt"
+	"rho-aias/internal/casbin"
 	"rho-aias/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -17,16 +19,37 @@ const (
 	ContextKeyUsername = "username"
 	// ContextKeyUserRole 用户角色上下文键
 	ContextKeyUserRole = "user_role"
+	// ContextKeySubject Casbin Subject 上下文键
+	ContextKeySubject = "sub"
+	// ContextKeyAuthType 认证类型上下文键
+	ContextKeyAuthType = "auth_type"
 )
 
-// AuthMiddleware JWT 认证中间件
-func AuthMiddleware(authService *services.AuthService) gin.HandlerFunc {
+// AuthMiddleware 统一认证中间件（支持 JWT 和 API Key）
+func AuthMiddleware(authService *services.AuthService, apiKeyService *services.APIKeyService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 从 Header 获取 token
+		// 1. 尝试 API Key 认证
+		apiKey := c.GetHeader("X-API-Key")
+		if apiKey != "" {
+			// 验证 API Key
+			keyRecord, err := apiKeyService.ValidateAPIKey(apiKey)
+			if err == nil {
+				// API Key 认证成功
+				c.Set(ContextKeyUserID, keyRecord.UserID)
+				c.Set(ContextKeySubject, fmt.Sprintf("apikey:%s", keyRecord.Key))
+				c.Set(ContextKeyAuthType, "api_key")
+				c.Set(ContextKeyUserRole, "api_key") // API Key 没有角色概念
+				c.Next()
+				return
+			}
+			// API Key 无效，继续尝试 JWT
+		}
+
+		// 2. 尝试 JWT 认证
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "missing authorization header",
+				"error": "missing authorization",
 			})
 			c.Abort()
 			return
@@ -61,10 +84,47 @@ func AuthMiddleware(authService *services.AuthService) gin.HandlerFunc {
 			return
 		}
 
-		// 将用户信息存入上下文
+		// JWT 认证成功
 		c.Set(ContextKeyUserID, claims.UserID)
 		c.Set(ContextKeyUsername, claims.Username)
 		c.Set(ContextKeyUserRole, claims.Role)
+		c.Set(ContextKeySubject, fmt.Sprintf("user:%d", claims.UserID))
+		c.Set(ContextKeyAuthType, "jwt")
+
+		c.Next()
+	}
+}
+
+// CasbinMiddleware Casbin 权限校验中间件
+func CasbinMiddleware(enforcer *casbin.Enforcer, obj string, act string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 从上下文获取 subject
+		sub, exists := c.Get(ContextKeySubject)
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "unauthorized",
+			})
+			c.Abort()
+			return
+		}
+
+		// 执行权限校验
+		allowed, err := enforcer.Enforce(sub, obj, act)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "failed to check permission",
+			})
+			c.Abort()
+			return
+		}
+
+		if !allowed {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "permission denied",
+			})
+			c.Abort()
+			return
+		}
 
 		c.Next()
 	}

@@ -1,6 +1,7 @@
 package routers
 
 import (
+	"rho-aias/internal/casbin"
 	"rho-aias/internal/handles"
 	"rho-aias/internal/middleware"
 	"rho-aias/internal/services"
@@ -9,7 +10,7 @@ import (
 )
 
 // RegisterAuthRoutes 注册认证路由
-func RegisterAuthRoutes(group *gin.RouterGroup, authHandle *handles.AuthHandle, authService *services.AuthService) {
+func RegisterAuthRoutes(group *gin.RouterGroup, authHandle *handles.AuthHandle, authService *services.AuthService, apiKeyService *services.APIKeyService, enforcer *casbin.Enforcer) {
 	auth := group.Group("/auth")
 	{
 		// 公开路由（无需认证）
@@ -20,15 +21,10 @@ func RegisterAuthRoutes(group *gin.RouterGroup, authHandle *handles.AuthHandle, 
 
 		// 需要认证的路由
 		protected := auth.Group("")
-		protected.Use(middleware.AuthMiddleware(authService))
+		protected.Use(middleware.AuthMiddleware(authService, apiKeyService))
 		{
 			protected.GET("/me", authHandle.GetCurrentUser)
 			protected.PUT("/password", authHandle.ChangePassword)
 		}
 	}
-}
-
-// ApplyAuthMiddleware 为需要认证的路由组应用认证中间件
-func ApplyAuthMiddleware(group *gin.RouterGroup, authService *services.AuthService) {
-	group.Use(middleware.AuthMiddleware(authService))
 }
