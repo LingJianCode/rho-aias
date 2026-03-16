@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"rho-aias/utils"
 	"strings"
@@ -16,6 +17,9 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 )
 
+// BlockLogCallback 阻断日志回调函数类型
+type BlockLogCallback func(srcIP, dstIP, matchType, ruleSource, countryCode string, packetSize uint32)
+
 type Xdp struct {
 	InterfaceName string
 	objects       *xdpObjects
@@ -23,12 +27,18 @@ type Xdp struct {
 	reader        *perf.Reader
 	done          chan struct{}
 	linkType      string
+	callback      BlockLogCallback // 阻断事件回调
 }
 
 func NewXdp(interface_name string) *Xdp {
 	return &Xdp{
 		InterfaceName: interface_name,
 	}
+}
+
+// SetCallback 设置阻断事件回调函数
+func (x *Xdp) SetCallback(callback BlockLogCallback) {
+	x.callback = callback
 }
 
 func (x *Xdp) Start() error {
@@ -136,8 +146,61 @@ func (x *Xdp) MonitorEvents() {
 			log.Printf("Failed to parse packet info: %v", err)
 			continue
 		}
-		log.Printf("Blocked packet - Src: %s, MatchType: %d", pi.SrcIP, pi.MatchType)
+
+		// 解析 IP 地址
+		srcIP := formatIP(pi.SrcIP, pi.SrcIPv6, pi.EthProto)
+		dstIP := formatIP(pi.DstIP, pi.DstIPv6, pi.EthProto)
+		matchTypeStr := matchTypeToString(pi.MatchType)
+
+		log.Printf("Blocked packet - Src: %s, MatchType: %s", srcIP, matchTypeStr)
+
+		// 触发回调
+		if x.callback != nil {
+			// 根据 matchType 确定规则来源
+			ruleSource := getRuleSourceFromMatchType(pi.MatchType)
+			countryCode := "" // geo_block 时需要额外处理
+			x.callback(srcIP, dstIP, matchTypeStr, ruleSource, countryCode, pi.PktSize)
+		}
 	}
+}
+
+// formatIP 格式化 IP 地址
+func formatIP(ipv4 [4]byte, ipv6 [16]byte, ethProto uint16) string {
+	if ethProto == 0x0800 { // ETH_P_IP
+		addr := netip.AddrFrom4(ipv4)
+		return addr.String()
+	} else if ethProto == 0x86DD { // ETH_P_IPV6
+		addr := netip.AddrFrom16(ipv6)
+		return addr.String()
+	}
+	return ""
+}
+
+// matchTypeToString 将匹配类型转换为字符串
+func matchTypeToString(mt MatchType) string {
+	switch mt {
+	case MatchByIP4Exact:
+		return "ip4_exact"
+	case MatchByIP4CIDR:
+		return "ip4_cidr"
+	case MatchByIP6Exact:
+		return "ip6_exact"
+	case MatchByIP6CIDR:
+		return "ip6_cidr"
+	case MatchByMAC:
+		return "mac"
+	case 6: // MATCH_BY_GEO_BLOCK
+		return "geo_block"
+	default:
+		return "unknown"
+	}
+}
+
+// getRuleSourceFromMatchType 根据匹配类型获取规则来源
+// 注意：这只是默认值，实际来源应该从 eBPF map 中查询
+func getRuleSourceFromMatchType(mt MatchType) string {
+	// 默认返回 unknown，实际应用中需要查询 eBPF map 获取精确来源
+	return "unknown"
 }
 
 // updateMap 更新内核 map - 支持来源掩码
