@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"rho-aias/internal/blocklog"
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/geoblocking"
@@ -58,6 +59,14 @@ func main() {
 	}
 	manualHandle := handles.NewManualHandle(xdp, manualCache)
 
+	// Initialize Block Log
+	blockLog := blocklog.NewBlockLog(10000) // 最多保留 10000 条记录
+	xdp.SetCallback(func(srcIP, dstIP, matchType, ruleSource, countryCode string, packetSize uint32) {
+		record := blocklog.CreateRecord(srcIP, dstIP, matchType, ruleSource, countryCode, packetSize)
+		blockLog.AddRecord(record)
+	})
+	blockLogHandle := handles.NewBlockLogHandle(blockLog)
+
 	// Initialize Intel Manager (if enabled)
 	var intelMgr *threatintel.Manager
 	if cfg.Intel.Enabled {
@@ -86,6 +95,9 @@ func main() {
 
 	// Register Manual routes (existing)
 	routers.RegisterManualRoutes(api, manualHandle)
+
+	// Register Block Log routes
+	routers.RegisterBlockLogRoutes(api, blockLogHandle)
 
 	// Register Intel routes (if enabled)
 	if cfg.Intel.Enabled && intelMgr != nil {
