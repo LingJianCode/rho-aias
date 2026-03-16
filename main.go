@@ -100,8 +100,11 @@ func main() {
 		authService    *services.AuthService
 		userService    *services.UserService
 		apiKeyService  *services.APIKeyService
+		auditService   *services.AuditService
 		authHandle     *handles.AuthHandle
 		apiKeyHandle   *handles.APIKeyHandle
+		userHandle     *handles.UserHandle
+		auditHandle    *handles.AuditHandle
 		captchaStore   *captcha.MemoryStore
 		casbinEnforcer *casbin.Enforcer
 	)
@@ -157,6 +160,7 @@ func main() {
 		authService = services.NewAuthService(db.DB, jwtService)
 		userService = services.NewUserService(db.DB)
 		apiKeyService = services.NewAPIKeyService(db.DB, casbinEnforcer)
+		auditService = services.NewAuditService(db.DB)
 
 		// Initialize captcha
 		captchaStore = captcha.NewMemoryStore()
@@ -166,7 +170,9 @@ func main() {
 		)
 
 		authHandle = handles.NewAuthHandle(authService, userService, captchaService)
-		apiKeyHandle = handles.NewAPIKeyHandle(apiKeyService)
+		apiKeyHandle = handles.NewAPIKeyHandle(apiKeyService, auditService)
+		userHandle = handles.NewUserHandle(userService, auditService, casbinEnforcer)
+		auditHandle = handles.NewAuditHandle(auditService)
 
 		log.Println("[Main] Authentication module initialized")
 	}
@@ -185,6 +191,16 @@ func main() {
 		// Register API Key management routes
 		if apiKeyHandle != nil {
 			routers.RegisterAPIKeyRoutes(api, apiKeyHandle, casbinEnforcer, authService, apiKeyService)
+		}
+
+		// Register User management routes
+		if userHandle != nil {
+			routers.RegisterUserRoutes(api, userHandle, casbinEnforcer, authService, apiKeyService)
+		}
+
+		// Register Audit log routes
+		if auditHandle != nil {
+			routers.RegisterAuditRoutes(api, auditHandle, casbinEnforcer, authService, apiKeyService)
 		}
 
 		// Register protected routes with Casbin middleware

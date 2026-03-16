@@ -116,9 +116,9 @@ Database tables:
 
 ## Future Enhancements
 
-- [ ] API Key authentication for automation
-- [ ] Casbin-based RBAC
-- [ ] Audit logging
+- [x] API Key authentication for automation
+- [x] Casbin-based RBAC
+- [x] Audit logging
 - [ ] Rate limiting
 - [ ] Password strength validation
 - [ ] Two-factor authentication
