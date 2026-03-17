@@ -399,6 +399,103 @@ func (x *Xdp) BatchDeleteRules(values []string) error {
 	return nil
 }
 
+// UpdateRuleSourceMask 更新规则的来源掩码（按位删除某个来源）
+// value: IP/CIDR/MAC 地址
+// removeMask: 要移除的来源位掩码
+// 返回: 更新后的掩码, 规则是否存在, 错误
+func (x *Xdp) UpdateRuleSourceMask(value string, removeMask uint32) (newMask uint32, exists bool, err error) {
+	bytes, iptype, err := utils.ParseValueToBytes(value)
+	if err != nil {
+		return 0, false, err
+	}
+
+	// 根据 IP 类型查询当前规则值
+	var currentMask uint32
+	switch iptype {
+	case utils.IPTypeIPv4:
+		var key [4]byte
+		copy(key[:], bytes)
+		var blockValue BlockValue
+		if err := x.objects.BlockIpv4List.Lookup(&key, &blockValue); err != nil {
+			return 0, false, nil // 规则不存在
+		}
+		currentMask = blockValue.SourceMask
+	case utils.IPTypeIPV4CIDR:
+		var key IPv4TrieKey
+		copy(key.Addr[:], bytes[4:])
+		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
+		var blockValue BlockValue
+		if err := x.objects.BlockIpv4CidrTrie.Lookup(&key, &blockValue); err != nil {
+			return 0, false, nil // 规则不存在
+		}
+		currentMask = blockValue.SourceMask
+	case utils.IPTypeIPv6:
+		var key [16]byte
+		copy(key[:], bytes)
+		var blockValue BlockValue
+		if err := x.objects.BlockIpv6List.Lookup(&key, &blockValue); err != nil {
+			return 0, false, nil // 规则不存在
+		}
+		currentMask = blockValue.SourceMask
+	case utils.IPTypeIPv6CIDR:
+		var key IPv6TrieKey
+		copy(key.Addr[:], bytes[16:])
+		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:16])
+		var blockValue BlockValue
+		if err := x.objects.BlockIpv6CidrTrie.Lookup(&key, &blockValue); err != nil {
+			return 0, false, nil // 规则不存在
+		}
+		currentMask = blockValue.SourceMask
+	default:
+		return 0, false, fmt.Errorf("unsupported IP type: %v", iptype)
+	}
+
+	// 计算新掩码: newMask = oldMask &^ removeMask
+	newMask = currentMask &^ removeMask
+
+	// 如果新掩码为 0，删除规则
+	if newMask == 0 {
+		if err := x.DeleteRule(value); err != nil {
+			return 0, true, fmt.Errorf("delete rule failed: %w", err)
+		}
+		return 0, true, nil
+	}
+
+	// 否则用新掩码更新规则
+	newBlockValue := NewBlockValue(newMask)
+	if err := x.updateMap(iptype, bytes, newBlockValue, true); err != nil {
+		return currentMask, true, fmt.Errorf("update rule failed: %w", err)
+	}
+
+	return newMask, true, nil
+}
+
+// BatchUpdateRuleSourceMask 批量更新规则的来源掩码
+// values: 要更新的规则列表
+// removeMask: 要移除的来源位掩码
+// 返回: 需要删除的规则列表（掩码变为 0 的规则），更新失败的错误
+func (x *Xdp) BatchUpdateRuleSourceMask(values []string, removeMask uint32) ([]string, error) {
+	var toDelete []string
+	var errs []error
+
+	for _, value := range values {
+		newMask, exists, err := x.UpdateRuleSourceMask(value, removeMask)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("update %s failed: %w", value, err))
+			continue
+		}
+		if exists && newMask == 0 {
+			// 掩码变为 0，规则已被删除
+			toDelete = append(toDelete, value)
+		}
+	}
+
+	if len(errs) > 0 {
+		return toDelete, fmt.Errorf("batch update failed with %d errors, first: %v", len(errs), errs[0])
+	}
+	return toDelete, nil
+}
+
 // ============================================
 // Geo-Blocking 相关方法
 // ============================================
