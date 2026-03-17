@@ -3,9 +3,7 @@ package utils
 import (
 	"archive/tar"
 	"compress/gzip"
-	"crypto/md5"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -104,12 +102,6 @@ func IsValidIPv4(ip string) bool {
 
 func IsValidIPv6(ip string) bool {
 	return net.ParseIP(ip) != nil && net.ParseIP(ip).To4() == nil
-}
-
-func MD5(data string) string {
-	hash := md5.New()
-	hash.Write([]byte(data))
-	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func GenerateUUID() string {
