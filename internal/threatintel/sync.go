@@ -40,13 +40,13 @@ func (s *Syncer) SyncToKernel(data *IntelData, sourceMask uint32) error {
 		return fmt.Errorf("get current rules failed: %w", err)
 	}
 
-	// 2. 计算差异（需要新增和删除的规则）
-	toAdd, toRemove := s.diff(currentRules, data, sourceMask)
+	// 2. 计算差异（需要新增、删除和更新掩码的规则）
+	toAdd, toRemove, toUpdateMask := s.diff(currentRules, data, sourceMask)
 
-	log.Printf("[Syncer] Current: %d, New: %d, ToAdd: %d, ToRemove: %d",
-		len(currentRules), data.TotalCount(), len(toAdd), len(toRemove))
+	log.Printf("[Syncer] Current: %d, New: %d, ToAdd: %d, ToRemove: %d, ToUpdateMask: %d",
+		len(currentRules), data.TotalCount(), len(toAdd), len(toRemove), len(toUpdateMask))
 
-	// 3. 批量删除需要移除的规则
+	// 3. 批量删除需要移除的规则（仅单源拥有）
 	if len(toRemove) > 0 {
 		if err := s.batchDelete(toRemove); err != nil {
 			return fmt.Errorf("batch delete failed: %w", err)
@@ -54,7 +54,15 @@ func (s *Syncer) SyncToKernel(data *IntelData, sourceMask uint32) error {
 		log.Printf("[Syncer] Removed %d rules", len(toRemove))
 	}
 
-	// 4. 批量添加需要新增的规则
+	// 4. 批量更新掩码（多源共有规则，按位删除当前来源）
+	if len(toUpdateMask) > 0 {
+		if _, err := s.xdp.BatchUpdateRuleSourceMask(toUpdateMask, sourceMask); err != nil {
+			return fmt.Errorf("batch update mask failed: %w", err)
+		}
+		log.Printf("[Syncer] Updated mask for %d rules (removed source 0x%x)", len(toUpdateMask), sourceMask)
+	}
+
+	// 5. 批量添加需要新增的规则
 	if len(toAdd) > 0 {
 		if err := s.batchAdd(toAdd, sourceMask); err != nil {
 			return fmt.Errorf("batch add failed: %w", err)
@@ -66,9 +74,9 @@ func (s *Syncer) SyncToKernel(data *IntelData, sourceMask uint32) error {
 }
 
 // diff 计算当前规则和新威胁情报数据的差异
-// 返回需要添加和需要删除的规则列表
+// 返回需要添加、需要删除和需要更新掩码的规则列表
 // sourceMask: 来源掩码，用于判断规则是否仅由当前来源拥有
-func (s *Syncer) diff(current []ebpfs.Rule, newData *IntelData, sourceMask uint32) (toAdd, toRemove []string) {
+func (s *Syncer) diff(current []ebpfs.Rule, newData *IntelData, sourceMask uint32) (toAdd, toRemove, toUpdateMask []string) {
 	// 构建当前规则的集合（仅包含当前来源的规则）
 	currentSet := make(map[string]bool)
 	for _, r := range current {
@@ -87,26 +95,24 @@ func (s *Syncer) diff(current []ebpfs.Rule, newData *IntelData, sourceMask uint3
 		newSet[cidr] = true
 	}
 
-	// 找出需要删除的规则（在当前内核中但不在新数据中）
-	// 注意：只有当规则仅由当前来源拥有时才删除
+	// 找出需要删除或更新掩码的规则（在当前内核中但不在新数据中）
 	for k := range currentSet {
 		if !newSet[k] {
-			// 检查是否可以删除（仅当前来源拥有）
-			shouldRemove := true
+			// 查找规则的完整信息
 			for _, r := range current {
 				if r.Key == k {
-					// 如果规则有其他来源拥有，则只移除当前来源的位
-					if r.Value.SourceMask&sourceMask != 0 && r.Value.SourceMask != sourceMask {
-						shouldRemove = false
-						// TODO: 这里需要实现按位删除的逻辑
-						// 当前简化为不删除，等待完整的 bitmask 操作实现
-						log.Printf("[Syncer] Rule %s owned by multiple sources (mask: 0x%x), skipping removal", k, r.Value.SourceMask)
+					// 检查是否可以删除（仅当前来源拥有）
+					if r.Value.SourceMask == sourceMask {
+						// 只有当前来源拥有，直接删除
+						toRemove = append(toRemove, k)
+					} else if r.Value.SourceMask&sourceMask != 0 {
+						// 多源共有规则，按位删除当前来源
+						toUpdateMask = append(toUpdateMask, k)
+						log.Printf("[Syncer] Rule %s owned by multiple sources (mask: 0x%x), will remove source bit 0x%x",
+							k, r.Value.SourceMask, sourceMask)
 					}
 					break
 				}
-			}
-			if shouldRemove {
-				toRemove = append(toRemove, k)
 			}
 		}
 	}
@@ -118,7 +124,7 @@ func (s *Syncer) diff(current []ebpfs.Rule, newData *IntelData, sourceMask uint3
 		}
 	}
 
-	return toAdd, toRemove
+	return toAdd, toRemove, toUpdateMask
 }
 
 // batchAdd 批量添加规则到内核 eBPF map
