@@ -21,9 +21,10 @@ type BlockRecord struct {
 
 // BlockLog 阻断日志管理器
 type BlockLog struct {
-	mu      sync.RWMutex
-	records []BlockRecord
-	maxSize int // 最大记录数
+	mu         sync.RWMutex
+	records    []BlockRecord
+	maxSize    int           // 最大记录数
+	asyncWriter *AsyncWriter // 异步文件写入器
 }
 
 // NewBlockLog 创建新的阻断日志管理器
@@ -32,6 +33,20 @@ func NewBlockLog(maxSize int) *BlockLog {
 		records: make([]BlockRecord, 0, maxSize),
 		maxSize: maxSize,
 	}
+}
+
+// NewBlockLogWithPersistence 创建带持久化的阻断日志管理器
+func NewBlockLogWithPersistence(maxSize int, config Config) (*BlockLog, error) {
+	bl := NewBlockLog(maxSize)
+
+	// 创建异步写入器
+	asyncWriter, err := NewAsyncWriter(config)
+	if err != nil {
+		return nil, err
+	}
+	bl.asyncWriter = asyncWriter
+
+	return bl, nil
 }
 
 // AddRecord 添加阻断记录
@@ -45,6 +60,14 @@ func (bl *BlockLog) AddRecord(record BlockRecord) {
 	}
 
 	bl.records = append(bl.records, record)
+
+	// 异步写入文件（Write 是非阻塞的，可以安全地在锁内调用）
+	if bl.asyncWriter != nil {
+		if err := bl.asyncWriter.Write(record); err != nil {
+			// 异步写入失败不影响内存记录，仅记录日志
+			// 由于当前实现 Write 总是返回 nil，此处日志仅用于未来扩展
+		}
+	}
 }
 
 // GetRecords 获取阻断记录
@@ -222,6 +245,22 @@ func (bl *BlockLog) Clear() {
 	defer bl.mu.Unlock()
 
 	bl.records = make([]BlockRecord, 0, bl.maxSize)
+}
+
+// Close 关闭阻断日志管理器（停止异步写入器）
+func (bl *BlockLog) Close() error {
+	if bl.asyncWriter != nil {
+		return bl.asyncWriter.Stop()
+	}
+	return nil
+}
+
+// Flush 刷新缓冲区到磁盘
+func (bl *BlockLog) Flush() error {
+	if bl.asyncWriter != nil {
+		return bl.asyncWriter.Flush()
+	}
+	return nil
 }
 
 // Count 获取记录总数

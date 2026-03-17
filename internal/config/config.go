@@ -14,6 +14,7 @@ type Config struct {
 	GeoBlocking GeoBlockingConfig   `yaml:"geo_blocking"`
 	Manual      ManualConfig        `yaml:"manual"`
 	Auth        AuthConfig          `yaml:"auth"`
+	BlockLog    BlockLogConfig      `yaml:"blocklog"`
 }
 
 type ServerConfig struct {
@@ -78,6 +79,15 @@ type AuthConfig struct {
 	CaptchaDuration int    `yaml:"captcha_duration"` // 验证码有效期（分钟）
 }
 
+// BlockLogConfig 阻断日志配置
+type BlockLogConfig struct {
+	Enabled         bool   `yaml:"enabled"`           // 是否启用文件持久化
+	LogDir          string `yaml:"log_dir"`           // 日志目录
+	MemoryCacheSize int    `yaml:"memory_cache_size"` // 内存缓存大小（用于实时查询）
+	BufferSize      int    `yaml:"buffer_size"`       // 异步写入缓冲区大小
+	FlushInterval   int    `yaml:"flush_interval"`    // 刷盘间隔（秒）
+}
+
 func NewConfig(fileName string) *Config {
 	// 打开 YAML 文件
 	file, err := os.Open(fileName)
@@ -104,6 +114,20 @@ func NewConfig(fileName string) *Config {
 	}
 	if config.Auth.CaptchaDuration == 0 {
 		config.Auth.CaptchaDuration = 5 // 默认 5 分钟
+	}
+
+	// BlockLog 默认值
+	if config.BlockLog.LogDir == "" {
+		config.BlockLog.LogDir = "./logs/blocklog"
+	}
+	if config.BlockLog.MemoryCacheSize == 0 {
+		config.BlockLog.MemoryCacheSize = 10000
+	}
+	if config.BlockLog.BufferSize == 0 {
+		config.BlockLog.BufferSize = 1000
+	}
+	if config.BlockLog.FlushInterval == 0 {
+		config.BlockLog.FlushInterval = 5 // 默认 5 秒
 	}
 
 	return &config

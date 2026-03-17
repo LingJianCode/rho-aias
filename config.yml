@@ -49,3 +49,11 @@ auth:
   database_path: "./data/auth.db"  # 数据库路径
   captcha_enabled: true            # 是否启用验证码
   captcha_duration: 5              # 验证码有效期（分钟）
+
+# 阻断日志配置
+blocklog:
+  enabled: true                    # 是否启用文件持久化
+  log_dir: "./logs/blocklog"       # 日志目录（按小时分割，格式：YYYY-MM-DD_HH.jsonl）
+  memory_cache_size: 10000         # 内存缓存大小（用于实时查询）
+  buffer_size: 1000                # 异步写入缓冲区大小
+  flush_interval: 5                # 刷盘间隔（秒）
