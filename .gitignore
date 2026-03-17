@@ -7,3 +7,4 @@ vmlinux.h
 *.log
 .claude
 data
+*.out

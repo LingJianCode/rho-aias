@@ -1,1 +1,0 @@
-curl 'http://192.168.110.139:8080/api/manual/rules' | jq
