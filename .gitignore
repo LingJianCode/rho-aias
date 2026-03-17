@@ -8,3 +8,4 @@ vmlinux.h
 .claude
 data
 *.out
+__pycache__
