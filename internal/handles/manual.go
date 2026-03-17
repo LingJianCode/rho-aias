@@ -39,10 +39,10 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 	}
 	log.Println("[Manual] Add rule:", req.Value)
 
-	// 1. 添加到 eBPF map
+	//1. 添加到 eBPF map
 	err := m.xdp.AddRule(req.Value)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
 			"message": err.Error(),
 		})
@@ -75,10 +75,10 @@ func (m *ManualHandle) DelRule(c *gin.Context) {
 	}
 	log.Println("[Manual] Delete rule:", req.Value)
 
-	// 1. 从 eBPF map 删除
+	//1. 从 eBPF map 删除
 	err := m.xdp.DeleteRule(req.Value)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
 			"message": err.Error(),
 		})

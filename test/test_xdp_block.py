@@ -50,7 +50,9 @@ class RhoAiasProcess:
             logger.error(f"Binary not found: {self.binary_path}")
             return False
         
-        # 创建临时配置文件
+        # 创建临时配置文件 - 使用 /tmp/config.yml
+        config_dir = "/tmp"
+        config_file = os.path.join(config_dir, "config.yml")
         config_content = f"""server:
   port: {self.api_port}
 ebpf:
@@ -64,15 +66,16 @@ manual:
 auth:
   enabled: false
 """
-        with open(self.config_path, 'w') as f:
+        with open(config_file, 'w') as f:
             f.write(config_content)
-        
+
         logger.info(f"Starting rho-aias on interface {self.interface}...")
-        
+
         try:
+            # 在配置文件所在目录运行程序，这样 main.go 可以找到 config.yml
             self.process = subprocess.Popen(
                 [self.binary_path],
-                env={**os.environ, "config.yml": self.config_path},
+                cwd=config_dir,  # 设置工作目录为 /tmp
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 preexec_fn=os.setsid
@@ -109,8 +112,9 @@ auth:
                 self.process = None
         
         # 清理配置文件
-        if os.path.exists(self.config_path):
-            os.remove(self.config_path)
+        config_file = os.path.join("/tmp", "config.yml")
+        if os.path.exists(config_file):
+            os.remove(config_file)
 
 
 class APIClient:
@@ -184,7 +188,7 @@ class TestXDPIpBlocking(unittest.TestCase):
     
     def setUp(self):
         """每个测试前的准备工作"""
-        self.env = TestEnvironment("rho_xdp_test")
+        self.env = TestEnvironment("rho_xdt")  # 短前缀以避免接口名超过15字符限制
         self.rho_process: Optional[RhoAiasProcess] = None
         
         # 设置网络环境
@@ -218,7 +222,7 @@ class TestXDPIpBlocking(unittest.TestCase):
         """测试 IPv4 精确匹配阻断"""
         # 启动 rho-aias (绑定到 veth0)
         self.assertTrue(
-            self._start_rho_on_veth("rho_xdp_test_veth0"),
+            self._start_rho_on_veth("rho_xdt_veth0"),
             "Failed to start rho-aias"
         )
         
@@ -257,7 +261,7 @@ class TestXDPIpBlocking(unittest.TestCase):
         """测试 IPv4 CIDR 阻断"""
         # 启动 rho-aias
         self.assertTrue(
-            self._start_rho_on_veth("rho_xdp_test_veth0"),
+            self._start_rho_on_veth("rho_xdt_veth0"),
             "Failed to start rho-aias"
         )
         
@@ -291,7 +295,7 @@ class TestXDPIpBlocking(unittest.TestCase):
         """测试多条规则"""
         # 启动 rho-aias
         self.assertTrue(
-            self._start_rho_on_veth("rho_xdp_test_veth0"),
+            self._start_rho_on_veth("rho_xdt_veth0"),
             "Failed to start rho-aias"
         )
         
@@ -327,7 +331,7 @@ class TestXDPIpBlocking(unittest.TestCase):
         """测试规则 API 持久性"""
         # 启动 rho-aias
         self.assertTrue(
-            self._start_rho_on_veth("rho_xdp_test_veth0"),
+            self._start_rho_on_veth("rho_xdt_veth0"),
             "Failed to start rho-aias"
         )
         
@@ -354,7 +358,7 @@ class TestXDPIpBlocking(unittest.TestCase):
         """测试无效规则处理"""
         # 启动 rho-aias
         self.assertTrue(
-            self._start_rho_on_veth("rho_xdp_test_veth0"),
+            self._start_rho_on_veth("rho_xdt_veth0"),
             "Failed to start rho-aias"
         )
         
@@ -378,7 +382,7 @@ class TestEnvironmentSetup(unittest.TestCase):
     def setUp(self):
         if os.geteuid() != 0:
             self.skipTest("This test requires root privileges")
-        self.env = TestEnvironment("rho_env_test")
+        self.env = TestEnvironment("rho_et")  # 短前缀以避免接口名超过15字符限制
     
     def tearDown(self):
         self.env.cleanup()
