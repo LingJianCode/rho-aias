@@ -17,6 +17,16 @@ func NewBlockValue(sourceMask uint32) BlockValue {
 	}
 }
 
+// NewBlockValueWithPreserve 创建新的 BlockValue，保留原有的 Priority 和 Expiry
+// 用于更新掩码时保持规则的其他属性
+func NewBlockValueWithPreserve(sourceMask uint32, priority uint32, expiry uint64) BlockValue {
+	return BlockValue{
+		SourceMask: sourceMask,
+		Priority:   priority,
+		Expiry:     expiry,
+	}
+}
+
 // 来源位掩码常量
 // 每个来源占用一个 bit，支持最多 31 个来源
 // 优先级: Manual > WAF > DDoS > Intel
