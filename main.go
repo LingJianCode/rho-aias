@@ -65,7 +65,29 @@ func main() {
 	manualHandle := handles.NewManualHandle(xdp, manualCache)
 
 	// Initialize Block Log
-	blockLog := blocklog.NewBlockLog(10000) // 最多保留 10000 条记录
+	var blockLog *blocklog.BlockLog
+	if cfg.BlockLog.Enabled {
+		// 启用持久化
+		blockLogConfig := blocklog.Config{
+			Enabled:         cfg.BlockLog.Enabled,
+			LogDir:          cfg.BlockLog.LogDir,
+			MemoryCacheSize: cfg.BlockLog.MemoryCacheSize,
+			BufferSize:      cfg.BlockLog.BufferSize,
+			FlushInterval:   time.Duration(cfg.BlockLog.FlushInterval) * time.Second,
+		}
+		var err error
+		blockLog, err = blocklog.NewBlockLogWithPersistence(cfg.BlockLog.MemoryCacheSize, blockLogConfig)
+		if err != nil {
+			log.Fatalf("Failed to initialize block log with persistence: %v", err)
+		}
+		log.Printf("[Main] Block log initialized with persistence enabled, log dir: %s", cfg.BlockLog.LogDir)
+	} else {
+		// 不启用持久化
+		blockLog = blocklog.NewBlockLog(10000)
+		log.Println("[Main] Block log initialized without persistence")
+	}
+	defer blockLog.Close()
+
 	xdp.SetCallback(func(srcIP, dstIP, matchType, ruleSource, countryCode string, packetSize uint32) {
 		record := blocklog.CreateRecord(srcIP, dstIP, matchType, ruleSource, countryCode, packetSize)
 		blockLog.AddRecord(record)
