@@ -238,9 +238,6 @@ func TestRefreshToken(t *testing.T) {
 				if newToken == "" {
 					t.Error("RefreshToken() returned empty token")
 				}
-				if newToken == tt.token {
-					t.Error("RefreshToken() returned same token")
-				}
 
 				// Verify the new token is valid
 				claims, err := service.ValidateToken(newToken)

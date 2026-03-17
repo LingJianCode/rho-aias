@@ -1,9 +1,8 @@
 APP := rho-aias
 GO ?= go
 BPF_GEN_DIR := ./internal/ebpfs
-TEST_DIR := ./test
 
-.PHONY: all gen build run clean test help
+.PHONY: all gen build run clean test coverage help
 
 all: gen build
 
@@ -26,12 +25,15 @@ clean:
 	rm -vf $(APP) $(BPF_GEN_DIR)/*_bpfeb.go $(BPF_GEN_DIR)/*_bpfel.go $(BPF_GEN_DIR)/*.o
 
 test:
-	@echo "==> Running tests"
-	python3 $(TEST_DIR)/packet_generator.py 192.168.110.139 all
+	@echo "==> Testing"
+	$(GO) test -v ./...
 
 help:
 	@echo "Targets:"
-	@echo "  make all    - 编译"
-	@echo "  make run    - 运行"
-	@echo "  make clean  - 清理"
-	@echo "  make test   - 测试"
+	@echo "  make all       - 生成并编译"
+	@echo "  make gen       - 生成 eBPF Go 代码"
+	@echo "  make build     - 编译程序"
+	@echo "  make run       - 运行程序（需要 root）"
+	@echo "  make clean     - 清理构建产物"
+	@echo "  make test      - 运行单元测试"
+

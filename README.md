@@ -12,6 +12,7 @@
 - **RESTful API**：提供完整的 HTTP API 进行规则管理
 - **持久化存储**：规则自动持久化到本地，支持离线启动
 - **Cron 定时任务**：支持独立的定时更新调度
+- **认证与授权**：JWT 认证、验证码、API Key、Casbin RBAC 权限控制
 
 ### 规则来源
 
@@ -63,10 +64,14 @@
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │  HTTP API (internal/handles/, internal/routers/)             │   │
 │  │  路由 (RESTful /api/{module}/{action}):                      │   │
-│  │  手动规则: GET/POST/DELETE /api/manual/rules                 │   │
+│  │  认证: /api/auth/*                                            │   │
+│  │  手动规则: GET/POST/DELETE /api/manual/rules                  │   │
 │  │  情报: GET/POST /api/intel/status, /api/intel/update         │   │
-│  │  地域封禁: GET/POST /api/geoblocking/status,                  │   │
-│  │              /api/geoblocking/update, /api/geoblocking/config  │   │
+│  │  地域封禁: GET/POST /api/geoblocking/*                        │   │
+│  │  阻断日志: GET/DELETE /api/blocklog/*                         │   │
+│  │  用户管理: GET/POST/PUT/DELETE /api/users/*                  │   │
+│  │  API Key: GET/POST/DELETE /api/api-keys/*                    │   │
+│  │  审计日志: GET/POST /api/audit/*                             │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -78,27 +83,36 @@ rho-aias/
 ├── main.go                       # 主程序入口
 ├── config.yml                    # 配置文件（端口、网卡、威胁情报）
 ├── go.mod                        # Go 模块依赖
-├── Makefile                      # 构建脚本
+├── makefile                      # 构建脚本
 ├── ebpfs/                        # eBPF C 源码
 │   ├── xdp.bpf.c                 # XDP 程序
 │   ├── common.h                  # 公共常量定义
 │   └── vmlinux.h                 # 内核头文件（自动生成）
 ├── internal/
-│   ├── config/
-│   │   └── config.go             # 配置管理
-│   ├── ebpfs/
+│   ├── auth/                     # 认证模块
+│   │   ├── jwt/                  # JWT 服务
+│   │   ├── captcha/              # 验证码服务
+│   │   ├── apikey/               # API Key 认证
+│   │   └── password/             # 密码加密
+│   ├── blocklog/                 # 阻断日志模块
+│   ├── casbin/                   # Casbin RBAC 权限管理
+│   ├── config/                   # 配置管理
+│   ├── database/                 # SQLite 数据库
+│   ├── ebpfs/                    # eBPF Go 封装
 │   │   ├── gen.go                # bpf2go 生成指令
 │   │   ├── xdp.go                # XDP 生命周期管理
 │   │   ├── xdp_type.go           # XDP 类型定义
 │   │   └── net_type.go           # 网络类型定义
-│   ├── threatintel/              # 威胁情报模块
-│   ├── manual/                   # 手动规则模块
 │   ├── geoblocking/              # 地域封禁模块
 │   ├── handles/                  # API 处理器
-│   └── routers/                  # 路由注册
-├── test/                         # 测试工具
-├── utils/                        # 工具函数
-└── scripts/                      # 快速脚本
+│   ├── manual/                   # 手动规则模块
+│   ├── middleware/               # HTTP 中间件
+│   ├── models/                   # 数据模型
+│   ├── routers/                  # 路由注册
+│   ├── services/                 # 业务逻辑服务
+│   └── threatintel/              # 威胁情报模块
+├── config/                       # 配置示例
+└── utils/                        # 工具函数
 ```
 
 ## 快速开始
@@ -133,6 +147,16 @@ server:
   port: 8080                    # HTTP API 端口
 ebpf:
   interface_name: ens33         # 网络接口名称
+
+# 认证配置
+auth:
+  enabled: true                    # 是否启用认证
+  jwt_secret: ""                   # JWT 密钥，建议从环境变量 JWT_SECRET 读取
+  jwt_issuer: "rho-aias"           # JWT 签发者
+  token_duration: 1440             # Token 有效期（分钟），默认 24 小时
+  database_path: "./data/auth.db"  # 数据库路径
+  captcha_enabled: true            # 是否启用验证码
+  captcha_duration: 5              # 验证码有效期（分钟）
 
 # 威胁情报配置
 intel:
@@ -183,13 +207,48 @@ sudo ./rho-aias
 
 ## API 接口
 
+### 认证 API
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/auth/captcha` | 获取验证码 | 公开 |
+| POST | `/api/auth/login` | 用户登录 | 公开 |
+| POST | `/api/auth/refresh` | 刷新 Token | 公开 |
+| POST | `/api/auth/logout` | 用户登出 | 公开 |
+| GET | `/api/auth/me` | 获取当前用户信息 | 需认证 |
+| PUT | `/api/auth/password` | 修改密码 | 需认证 |
+
+**默认凭证：** 首次启动时自动创建管理员账户：
+- 用户名：`admin`
+- 密码：`admin123`
+
+> ⚠️ **重要：** 首次登录后请立即修改默认密码！
+
+**登录示例：**
+
+```bash
+# 1. 获取验证码
+curl http://localhost:8080/api/auth/captcha
+# 返回: {"captcha_id": "xxx", "image": "data:image/png;base64,..."}
+
+# 2. 登录
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin123", "captcha_id": "xxx", "captcha_answer": "abcd"}'
+# 返回: {"token": "eyJhbGciOiJIUzI1NiIs...", "user": {...}, "expires_at": "..."}
+
+# 3. 访问受保护的 API
+curl http://localhost:8080/api/manual/rules \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
+
 ### 手动规则 API
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/manual/rules` | 获取所有规则及来源信息 |
-| POST | `/api/manual/rules` | 添加过滤规则 |
-| DELETE | `/api/manual/rules` | 删除规则 |
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/manual/rules` | 获取所有规则 | firewall:read |
+| POST | `/api/manual/rules` | 添加过滤规则 | firewall:write |
+| DELETE | `/api/manual/rules` | 删除规则 | firewall:write |
 
 **请求示例：**
 
@@ -197,23 +256,26 @@ sudo ./rho-aias
 # 添加规则
 curl -X POST http://localhost:8080/api/manual/rules \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
   -d '{"value": "192.168.1.1"}'
 
 # 获取规则
-curl http://localhost:8080/api/manual/rules
+curl http://localhost:8080/api/manual/rules \
+  -H "Authorization: Bearer <token>"
 
 # 删除规则
 curl -X DELETE http://localhost:8080/api/manual/rules \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
   -d '{"value": "192.168.1.1"}'
 ```
 
 ### 威胁情报 API
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/intel/status` | 获取威胁情报状态 |
-| POST | `/api/intel/update` | 手动触发更新 |
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/intel/status` | 获取威胁情报状态 | intel:read |
+| POST | `/api/intel/update` | 手动触发更新 | intel:write |
 
 **状态响应示例：**
 
@@ -243,11 +305,47 @@ curl -X DELETE http://localhost:8080/api/manual/rules \
 
 ### 地域封禁 API
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/geoblocking/status` | 获取地域封禁状态 |
-| POST | `/api/geoblocking/update` | 手动触发 GeoIP 更新 |
-| POST | `/api/geoblocking/config` | 更新配置（模式、国家） |
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/geoblocking/status` | 获取地域封禁状态 | geo:read |
+| POST | `/api/geoblocking/update` | 手动触发 GeoIP 更新 | geo:write |
+| POST | `/api/geoblocking/config` | 更新配置（模式、国家） | geo:write |
+
+### 阻断日志 API
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/blocklog/records` | 获取阻断记录列表 | blocklog:read |
+| GET | `/api/blocklog/stats` | 获取阻断统计 | blocklog:read |
+| GET | `/api/blocklog/blocked-ips` | 获取阻断 IP 列表 | blocklog:read |
+| GET | `/api/blocklog/blocked-countries` | 获取阻断国家列表 | blocklog:read |
+| DELETE | `/api/blocklog/records` | 清除所有阻断记录 | blocklog:clear |
+
+### 用户管理 API
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/users` | 获取用户列表 | admin:* |
+| POST | `/api/users` | 创建用户 | admin:* |
+| GET | `/api/users/:id` | 获取用户详情 | admin:* |
+| PUT | `/api/users/:id` | 更新用户 | admin:* |
+| DELETE | `/api/users/:id` | 删除用户 | admin:* |
+
+### API Key 管理 API
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/api-keys` | 获取 API Key 列表 | api_key:manage |
+| POST | `/api/api-keys` | 创建 API Key | api_key:manage |
+| DELETE | `/api/api-keys/:id` | 吊销 API Key | api_key:manage |
+
+### 审计日志 API
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/audit/logs` | 获取审计日志列表 | admin:* |
+| GET | `/api/audit/logs/:id` | 获取单条审计日志 | admin:* |
+| POST | `/api/audit/clean` | 清理旧审计日志 | admin:* |
 
 ## 规则格式
 
@@ -280,24 +378,6 @@ curl -X DELETE http://localhost:8080/api/manual/rules \
 - `0 0 * * 0` - 每周日午夜
 - `*/30 * * * *` - 每 30 分钟
 
-## 快速脚本
-
-项目提供了一组快速脚本用于手动规则管理：
-
-```bash
-# 添加规则
-./scripts/add.sh
-
-# 删除规则
-./scripts/del.sh
-
-# 获取所有规则
-./scripts/get.sh
-
-# 内核监控
-./scripts/monitor.sh
-```
-
 ## 性能优化
 
 XDP eBPF 程序经过多项性能优化：
@@ -326,40 +406,48 @@ make run
 # 清理
 make clean
 
+# 运行单元测试
+go test -v -coverprofile=coverage.out ./...
+
+# 查看测试覆盖率
+go tool cover -html=coverage.out
+
 # 生成 vmlinux.h
 bpftool btf dump file /sys/kernel/btf/vmlinux format c > ebpfs/vmlinux.h
 ```
 
-## 测试工具
+## 测试
 
-### IPv4 测试
+项目包含单元测试，覆盖核心模块：
 
+- `utils/net_test.go` - 网络工具测试
+- `internal/threatintel/*_test.go` - 威胁情报模块测试
+- `internal/geoblocking/*_test.go` - 地域封禁模块测试
+- `internal/auth/*_test.go` - 认证模块测试
+- `internal/manual/*_test.go` - 手动规则模块测试
+- `internal/blocklog/blocklog_test.go` - 阻断日志模块测试
+- `internal/middleware/auth_test.go` - 中间件测试
+
+**运行测试：**
 ```bash
-# 运行所有 IPv4 测试
-sudo python3 test/test_ipv4.py <target_ip> all
-
-# 特定测试
-sudo python3 test/test_ipv4.py <target_ip> ipv4_malformed_short_header
+go test -v ./...
 ```
 
-### IPv6 测试
+## 安全建议
 
-```bash
-# 运行所有 IPv6 测试
-sudo python3 test/test_ipv6.py <target_ip> all
+1. **JWT Secret**：生产环境务必设置强密钥：
+   ```bash
+   export JWT_SECRET="your-strong-secret-key-here"
+   ```
 
-# 特定测试
-sudo python3 test/test_ipv6.py <target_ip> ipv6_ext_hbh
-```
+2. **默认密码**：首次登录后立即修改默认管理员密码
 
-## 许可证
+3. **HTTPS**：生产环境建议使用 HTTPS
 
-Dual MIT/GPL
+4. **Token 存储**：客户端应安全存储 Token
 
 ## 已知问题
 
-目前没有已知问题。
-
-## 贡献
-
-欢迎提交 Issue 和 Pull Request！
+1. **Busy-wait CPU 使用**：XDP `MonitorEvents()` 中的 `default` case 会导致持续轮询
+2. **MD5 安全问题**：`utils/net.go` 中使用 MD5，建议改用 SHA256
+3. **多源规则删除**：禁用威胁情报源时，多源共有规则不会按位删除
