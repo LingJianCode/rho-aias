@@ -1,7 +1,8 @@
 package captcha
 
 import (
-	"encoding/base64"
+	"image/color"
+	"strings"
 	"sync"
 	"time"
 
@@ -98,7 +99,7 @@ func NewCaptchaService(store CaptchaStore, ttl time.Duration) *CaptchaService {
 		ShowLineOptions: base64Captcha.OptionShowSlimeLine | base64Captcha.OptionShowHollowLine,
 		Length:          4,
 		Source:          "1234567890qwertyuioplkjhgfdsazxcvbnm",
-		BgColor:         &base64Captcha.Color{R: 240, G: 240, B: 246},
+		BgColor:         &color.RGBA{R: 240, G: 240, B: 246, A: 255},
 		Fonts:           []string{"wqy-microhei.ttc"},
 	}
 
@@ -127,7 +128,7 @@ func (s *CaptchaService) Generate() (string, string, error) {
 	}
 
 	// 转换为 base64
-	base64Img := base64.StdEncoding.EncodeToString(item.EncodeB64string())
+	base64Img := item.EncodeB64string()
 
 	return id, "data:image/png;base64," + base64Img, nil
 }
@@ -143,7 +144,7 @@ func (s *CaptchaService) Verify(id, answer string) bool {
 	defer s.store.Delete(id)
 
 	// 不区分大小写
-	return storedAnswer == answer || storedAnswer == answer
+	return strings.EqualFold(storedAnswer, answer)
 }
 
 // VerifyCaseSensitive 区分大小写验证

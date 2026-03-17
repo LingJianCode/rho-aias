@@ -8,7 +8,7 @@ import (
 	"rho-aias/internal/casbin"
 	"rho-aias/internal/models"
 
-	"github.com/glebarez/go-sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )

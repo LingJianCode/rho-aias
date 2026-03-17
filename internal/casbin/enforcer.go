@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/casbin/casbin/v2"
+	"github.com/casbin/casbin/v2/model"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"gorm.io/gorm"
 )
@@ -35,7 +36,11 @@ func NewEnforcer(db *gorm.DB) (*Enforcer, error) {
 	}
 
 	// 创建执行器
-	enforcer, err := casbin.NewEnforcer(casbin.NewModel(string(modelData)), adapter)
+	m, err := model.NewModelFromString(string(modelData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create casbin model: %w", err)
+	}
+	enforcer, err := casbin.NewEnforcer(m, adapter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create casbin enforcer: %w", err)
 	}
@@ -54,7 +59,10 @@ func NewEnforcer(db *gorm.DB) (*Enforcer, error) {
 // InitDefaultPolicies 初始化默认策略
 func (e *Enforcer) InitDefaultPolicies() error {
 	// 检查是否已有策略
-	policies := e.GetPolicy()
+	policies, err := e.GetPolicy()
+	if err != nil {
+		return fmt.Errorf("failed to get policies: %w", err)
+	}
 	if len(policies) > 0 {
 		log.Println("[Casbin] Policies already exist, skip initialization")
 		return nil
@@ -112,8 +120,8 @@ func (e *Enforcer) AssignRoleToUser(userID uint, role string) error {
 // GetUserRole 获取用户角色
 func (e *Enforcer) GetUserRole(userID uint) string {
 	subject := fmt.Sprintf("user:%d", userID)
-	roles := e.GetRolesForUser(subject)
-	if len(roles) == 0 {
+	roles, err := e.GetRolesForUser(subject)
+	if err != nil || len(roles) == 0 {
 		return "user"
 	}
 	// 返回第一个角色（去掉 role: 前缀）

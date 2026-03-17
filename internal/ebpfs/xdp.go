@@ -148,8 +148,8 @@ func (x *Xdp) MonitorEvents() {
 		}
 
 		// 解析 IP 地址
-		srcIP := formatIP(pi.SrcIP, pi.SrcIPv6, pi.EthProto)
-		dstIP := formatIP(pi.DstIP, pi.DstIPv6, pi.EthProto)
+		srcIP := formatIP(pi.SrcIP, pi.SrcIPv6, uint16(pi.EthProto))
+		dstIP := formatIP(pi.DstIP, pi.DstIPv6, uint16(pi.EthProto))
 		matchTypeStr := matchTypeToString(pi.MatchType)
 
 		log.Printf("Blocked packet - Src: %s, MatchType: %s", srcIP, matchTypeStr)
