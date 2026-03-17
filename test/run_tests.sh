@@ -95,6 +95,7 @@ cleanup() {
     
     # 删除临时配置
     rm -f /tmp/rho_test_config.yml
+    rm -f /tmp/config.yml
     
     log_info "清理完成"
 }

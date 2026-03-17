@@ -87,9 +87,10 @@ class VethPair:
         """创建 veth pair"""
         # 先删除可能存在的旧设备
         self._run_cmd(f"ip link del {self.name}", check=False)
-        
+
         # 创建 veth pair
-        if not self._run_cmd(f"ip link add {self.name} type veth peer name {self.peer}"):
+        # 正确的语法是: ip link add <name> type veth peer <peer>
+        if not self._run_cmd(f"ip link add {self.name} type veth peer {self.peer}"):
             return False
         
         # 将 peer 移动到目标 namespace
@@ -154,8 +155,11 @@ class VethPair:
 
 class TestEnvironment:
     """测试环境管理类"""
-    
-    def __init__(self, prefix: str = "rho_test"):
+
+    def __init__(self, prefix: str = "rho_t"):
+        """prefix: 接口名称前缀（最大9个字符，因为接口名限制15字，_vethX占6字）"""
+        if len(prefix) > 9:
+            logger.warning(f"Prefix '{prefix}' is too long, may exceed interface name limit (15 chars)")
         self.prefix = prefix
         self.ns1: Optional[NetNS] = None
         self.ns2: Optional[NetNS] = None
