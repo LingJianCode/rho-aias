@@ -448,6 +448,5 @@ go test -v ./...
 
 ## 已知问题
 
-1. **Busy-wait CPU 使用**：XDP `MonitorEvents()` 中的 `default` case 会导致持续轮询
-2. **MD5 安全问题**：`utils/net.go` 中使用 MD5，建议改用 SHA256
-3. **多源规则删除**：禁用威胁情报源时，多源共有规则不会按位删除
+1. **MD5 安全问题**：`utils/net.go` 中使用 MD5，建议改用 SHA256
+2. **多源规则删除**：禁用威胁情报源时，多源共有规则不会按位删除
