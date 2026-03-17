@@ -1,0 +1,11 @@
+$:
+  vscode:
+    - docker:
+        image: docker.cnb.cool/lingjiancode/docker-builder/cc-dev-env:latest
+      runner:
+        cpus: 16
+      services:
+        - vscode
+        - docker
+      imports: https://cnb.cool/LingJianCode/key/-/blob/main/volcengine/envs.yml
+      
