@@ -78,11 +78,14 @@ func (s *Syncer) SyncToKernel(data *IntelData, sourceMask uint32) error {
 // sourceMask: 来源掩码，用于判断规则是否仅由当前来源拥有
 func (s *Syncer) diff(current []ebpfs.Rule, newData *IntelData, sourceMask uint32) (toAdd, toRemove, toUpdateMask []string) {
 	// 构建当前规则的集合（仅包含当前来源的规则）
+	// 同时构建规则键到完整规则信息的映射，避免后续双重循环
 	currentSet := make(map[string]bool)
+	currentRuleMap := make(map[string]ebpfs.Rule)
 	for _, r := range current {
 		// 只处理当前来源拥有的规则
 		if r.Value.SourceMask&sourceMask != 0 {
 			currentSet[r.Key] = true
+			currentRuleMap[r.Key] = r
 		}
 	}
 
@@ -96,22 +99,20 @@ func (s *Syncer) diff(current []ebpfs.Rule, newData *IntelData, sourceMask uint3
 	}
 
 	// 找出需要删除或更新掩码的规则（在当前内核中但不在新数据中）
+	// 优化：使用 map 查找替代双重循环，O(n+m) 替代 O(n*m)
 	for k := range currentSet {
 		if !newSet[k] {
-			// 查找规则的完整信息
-			for _, r := range current {
-				if r.Key == k {
-					// 检查是否可以删除（仅当前来源拥有）
-					if r.Value.SourceMask == sourceMask {
-						// 只有当前来源拥有，直接删除
-						toRemove = append(toRemove, k)
-					} else if r.Value.SourceMask&sourceMask != 0 {
-						// 多源共有规则，按位删除当前来源
-						toUpdateMask = append(toUpdateMask, k)
-						log.Printf("[Syncer] Rule %s owned by multiple sources (mask: 0x%x), will remove source bit 0x%x",
-							k, r.Value.SourceMask, sourceMask)
-					}
-					break
+			// 使用 map 查找规则的完整信息，避免双重循环
+			if r, ok := currentRuleMap[k]; ok {
+				// 检查是否可以删除（仅当前来源拥有）
+				if r.Value.SourceMask == sourceMask {
+					// 只有当前来源拥有，直接删除
+					toRemove = append(toRemove, k)
+				} else if r.Value.SourceMask&sourceMask != 0 {
+					// 多源共有规则，按位删除当前来源
+					toUpdateMask = append(toUpdateMask, k)
+					log.Printf("[Syncer] Rule %s owned by multiple sources (mask: 0x%x), will remove source bit 0x%x",
+						k, r.Value.SourceMask, sourceMask)
 				}
 			}
 		}
