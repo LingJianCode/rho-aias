@@ -227,7 +227,12 @@ func main() {
 	}
 
 	// Setup router and routes
-	r := gin.Default()
+	// Set Gin mode based on log level
+	if cfg.Log.Level != "debug" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	r := gin.New()
+	r.Use(logger.GinLogger(), logger.GinRecovery())
 	api := r.Group("/api")
 
 	// Register Auth routes (if enabled)
