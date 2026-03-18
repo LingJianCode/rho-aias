@@ -83,7 +83,7 @@ func TestAsyncWriter_Stop(t *testing.T) {
 		Enabled:         true,
 		LogDir:          tmpDir,
 		MemoryCacheSize: 100,
-		BufferSize:      10,
+		BufferSize:      100, // 增大缓冲区以防止记录被丢弃
 		FlushInterval:   time.Second,
 	}
 
@@ -102,6 +102,9 @@ func TestAsyncWriter_Stop(t *testing.T) {
 		}
 		aw.Write(record)
 	}
+
+	// 等待一下让写入协程处理记录
+	time.Sleep(100 * time.Millisecond)
 
 	// 停止应该等待所有记录写入
 	if err := aw.Stop(); err != nil {

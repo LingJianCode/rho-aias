@@ -113,9 +113,9 @@ func TestFileWriter_HourlyRotation(t *testing.T) {
 	}
 
 	filename := files[0].Name()
-	expectedPattern := "2006-01-02_15.jsonl"
-	// 简单检查文件名格式
-	if len(filename) != 16 || filename[4] != '-' || filename[7] != '-' || filename[10] != '_' || filename[13] != '.' {
+	// 简单检查文件名格式 (YYYY-MM-DD_HH.jsonl)
+	// 长度应为 19: 4(年)+1(分隔)+2(月)+1(分隔)+2(日)+1(下划线)+2(小时)+1(点)+5(.jsonl)=19
+	if len(filename) != 19 || filename[4] != '-' || filename[7] != '-' || filename[10] != '_' || filename[13] != '.' {
 		t.Errorf("Unexpected filename format: %s (expected pattern like YYYY-MM-DD_HH.jsonl)", filename)
 	}
 }
@@ -148,7 +148,12 @@ func TestFileWriter_MultipleRecords(t *testing.T) {
 	}
 
 	// 验证记录数量
-	file, err := os.Open(filepath.Join(tmpDir, fw.GetCurrentFilePath()))
+	// 使用目录中的第一个文件，因为 GetCurrentFilePath() 返回完整路径
+	files, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to read directory: %v", err)
+	}
+	file, err := os.Open(filepath.Join(tmpDir, files[0].Name()))
 	if err != nil {
 		t.Fatalf("Failed to open file: %v", err)
 	}
