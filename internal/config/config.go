@@ -9,12 +9,22 @@ import (
 
 type Config struct {
 	Server      ServerConfig        `yaml:"server"`
+	Log         LogConfig           `yaml:"log"`
 	Ebpf        EbpfConfig          `yaml:"ebpf"`
 	Intel       IntelConfig         `yaml:"intel"`
 	GeoBlocking GeoBlockingConfig   `yaml:"geo_blocking"`
 	Manual      ManualConfig        `yaml:"manual"`
 	Auth        AuthConfig          `yaml:"auth"`
 	BlockLog    BlockLogConfig      `yaml:"blocklog"`
+}
+
+// LogConfig 日志配置
+type LogConfig struct {
+	Level         string `yaml:"level"`          // 日志级别: debug/info/warn/error
+	Format        string `yaml:"format"`         // 输出格式: console/json
+	OutputDir     string `yaml:"output_dir"`     // 日志目录
+	MaxAgeDays    int    `yaml:"max_age_days"`   // 日志保留天数
+	RotationHours int    `yaml:"rotation_hours"` // 按小时分割
 }
 
 type ServerConfig struct {
@@ -114,6 +124,23 @@ func NewConfig(fileName string) *Config {
 	}
 	if config.Auth.CaptchaDuration == 0 {
 		config.Auth.CaptchaDuration = 5 // 默认 5 分钟
+	}
+
+	// Log 默认值
+	if config.Log.Level == "" {
+		config.Log.Level = "info"
+	}
+	if config.Log.Format == "" {
+		config.Log.Format = "console"
+	}
+	if config.Log.OutputDir == "" {
+		config.Log.OutputDir = "./logs"
+	}
+	if config.Log.MaxAgeDays == 0 {
+		config.Log.MaxAgeDays = 30
+	}
+	if config.Log.RotationHours == 0 {
+		config.Log.RotationHours = 1
 	}
 
 	// BlockLog 默认值

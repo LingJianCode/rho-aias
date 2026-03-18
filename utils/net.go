@@ -6,13 +6,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"rho-aias/internal/logger"
 
 	"github.com/google/uuid"
 )
@@ -64,7 +65,7 @@ func IsLocalIP(ip string) bool {
 func GetDefaultInterface() string {
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		log.Fatal("Failed to get network interfaces:", err)
+		logger.Fatalf("[Utils] Failed to get network interfaces: %v", err)
 		return ""
 	}
 	for _, iface := range interfaces {
@@ -82,7 +83,7 @@ func GetDefaultInterface() string {
 			}
 		}
 	}
-	log.Fatal("No suitable network interface found")
+	logger.Fatal("[Utils] No suitable network interface found")
 	return ""
 }
 

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +16,7 @@ import (
 	"rho-aias/internal/geoblocking"
 	"rho-aias/internal/handles"
 	"rho-aias/internal/kernel"
+	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
 	"rho-aias/internal/routers"
 	"rho-aias/internal/services"
@@ -31,23 +31,37 @@ func main() {
 	// Check kernel version before initializing eBPF/XDP
 	result, err := kernel.CheckAndValidate()
 	if err != nil {
-		log.Fatalf("[Kernel] %v", err)
-	}
-
-	// Log kernel version info (reusing the result from CheckAndValidate)
-	log.Printf("[Kernel] Detected kernel version: %s", result.CurrentVersion)
-	if !result.MeetsRecommended {
-		log.Printf("[Kernel] Warning: kernel version %s is below recommended version %s",
-			result.CurrentVersion, result.RecommendedVersion)
+		// 初始化日志前无法记录，直接 panic
+		panic(fmt.Sprintf("[Kernel] %v", err))
 	}
 
 	cfg := config.NewConfig("config.yml")
-	log.Println(cfg)
+
+	// Initialize logger
+	if err := logger.Init(&logger.Config{
+		Level:         cfg.Log.Level,
+		Format:        cfg.Log.Format,
+		OutputDir:     cfg.Log.OutputDir,
+		MaxAgeDays:    cfg.Log.MaxAgeDays,
+		RotationHours: cfg.Log.RotationHours,
+	}); err != nil {
+		panic(fmt.Sprintf("Failed to initialize logger: %v", err))
+	}
+	defer logger.Close()
+
+	// Log kernel version info
+	logger.Infof("[Kernel] Detected kernel version: %s", result.CurrentVersion)
+	if !result.MeetsRecommended {
+		logger.Warnf("[Kernel] kernel version %s is below recommended version %s",
+			result.CurrentVersion, result.RecommendedVersion)
+	}
+
+	logger.Infof("%s", cfg)
 	// Initialize XDP (existing functionality)
 	xdp := ebpfs.NewXdp(cfg.Ebpf.InterfaceName)
 	defer xdp.Close()
 	if err := xdp.Start(); err != nil {
-		panic(err)
+		logger.Fatalf("[XDP] Failed to start: %v", err)
 	}
 	go xdp.MonitorEvents()
 
@@ -60,18 +74,18 @@ func main() {
 		if cfg.Manual.AutoLoad && manualCache.Exists() {
 			cacheData, err := manualCache.Load()
 			if err != nil {
-				log.Printf("[Manual] Warning: failed to load cache: %v", err)
+				logger.Warnf("[Manual] Failed to load cache: %v", err)
 			} else {
-				log.Printf("[Manual] Loading %d rules from cache...", cacheData.RuleCount())
+				logger.Infof("[Manual] Loading %d rules from cache...", cacheData.RuleCount())
 				loaded := 0
 				for _, entry := range cacheData.Rules {
 					if err := xdp.AddRule(entry.Value); err != nil {
-						log.Printf("[Manual] Warning: failed to add rule %s: %v", entry.Value, err)
+						logger.Warnf("[Manual] Failed to add rule %s: %v", entry.Value, err)
 					} else {
 						loaded++
 					}
 				}
-				log.Printf("[Manual] Loaded %d/%d rules from cache", loaded, cacheData.RuleCount())
+				logger.Infof("[Manual] Loaded %d/%d rules from cache", loaded, cacheData.RuleCount())
 			}
 		}
 	}
@@ -91,13 +105,13 @@ func main() {
 		var err error
 		blockLog, err = blocklog.NewBlockLogWithPersistence(cfg.BlockLog.MemoryCacheSize, blockLogConfig)
 		if err != nil {
-			log.Fatalf("Failed to initialize block log with persistence: %v", err)
+			logger.Fatalf("[BlockLog] Failed to initialize with persistence: %v", err)
 		}
-		log.Printf("[Main] Block log initialized with persistence enabled, log dir: %s", cfg.BlockLog.LogDir)
+		logger.Infof("[Main] Block log initialized with persistence enabled, log dir: %s", cfg.BlockLog.LogDir)
 	} else {
 		// 不启用持久化
 		blockLog = blocklog.NewBlockLog(10000)
-		log.Println("[Main] Block log initialized without persistence")
+		logger.Info("[Main] Block log initialized without persistence")
 	}
 	defer blockLog.Close()
 
@@ -112,9 +126,9 @@ func main() {
 	if cfg.Intel.Enabled {
 		intelMgr = threatintel.NewManager(&cfg.Intel, xdp)
 		if err := intelMgr.Start(); err != nil {
-			log.Printf("Warning: Intel manager start failed: %v", err)
+			logger.Warnf("[Main] Intel manager start failed: %v", err)
 		}
-		log.Println("[Main] Intelligence module initialized")
+		logger.Info("[Main] Intelligence module initialized")
 		defer intelMgr.Stop()
 	}
 
@@ -123,9 +137,9 @@ func main() {
 	if cfg.GeoBlocking.Enabled {
 		geoMgr = geoblocking.NewManager(&cfg.GeoBlocking, xdp)
 		if err := geoMgr.Start(); err != nil {
-			log.Printf("Warning: Geo-blocking manager start failed: %v", err)
+			logger.Warnf("[Main] Geo-blocking manager start failed: %v", err)
 		}
-		log.Println("[Main] Geo-blocking module initialized")
+		logger.Info("[Main] Geo-blocking module initialized")
 		defer geoMgr.Stop()
 	}
 
@@ -151,29 +165,29 @@ func main() {
 		}
 		db, err = database.NewDatabase(dbPath)
 		if err != nil {
-			log.Fatalf("Failed to initialize database: %v", err)
+			logger.Fatalf("[Auth] Failed to initialize database: %v", err)
 		}
 		defer db.Close()
 
 		// Auto migrate
 		if err := db.AutoMigrate(); err != nil {
-			log.Fatalf("Failed to migrate database: %v", err)
+			logger.Fatalf("[Auth] Failed to migrate database: %v", err)
 		}
 
 		// Initialize Casbin
 		casbinEnforcer, err = casbin.NewEnforcer(db.DB)
 		if err != nil {
-			log.Fatalf("Failed to initialize casbin: %v", err)
+			logger.Fatalf("[Auth] Failed to initialize casbin: %v", err)
 		}
 
 		// Initialize default policies
 		if err := casbinEnforcer.InitDefaultPolicies(); err != nil {
-			log.Printf("Warning: failed to initialize default policies: %v", err)
+			logger.Warnf("[Auth] Failed to initialize default policies: %v", err)
 		}
 
 		// Initialize default admin
 		if err := db.InitDefaultUser(casbinEnforcer); err != nil {
-			log.Printf("Warning: failed to initialize default user: %v", err)
+			logger.Warnf("[Auth] Failed to initialize default user: %v", err)
 		}
 
 		// Initialize services
@@ -182,7 +196,7 @@ func main() {
 			jwtSecret = os.Getenv("JWT_SECRET")
 			if jwtSecret == "" {
 				jwtSecret = "default-secret-change-me" // 生产环境必须设置
-				log.Println("[Auth] Warning: using default JWT secret, please set in config or env")
+				logger.Warn("[Auth] Using default JWT secret, please set in config or env")
 			}
 		}
 
@@ -209,7 +223,7 @@ func main() {
 		userHandle = handles.NewUserHandle(userService, auditService, casbinEnforcer)
 		auditHandle = handles.NewAuditHandle(auditService)
 
-		log.Println("[Main] Authentication module initialized")
+		logger.Info("[Main] Authentication module initialized")
 	}
 
 	// Setup router and routes
@@ -283,10 +297,10 @@ func main() {
 	}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Gin服务启动失败: %v", err)
+			logger.Fatalf("[Server] Gin服务启动失败: %v", err)
 		}
 	}()
-	log.Printf("Gin服务已启动，监听端口: %d\n", cfg.Server.Port)
+	logger.Infof("[Server] Gin服务已启动，监听端口: %d", cfg.Server.Port)
 
 	// ----------优雅退出处理----------
 	// 创建信号通道
@@ -295,7 +309,7 @@ func main() {
 
 	// 等待信号
 	sig := <-quit
-	log.Printf("接收到信号: %v，开始优雅退出...\n", sig)
+	logger.Infof("[Main] 接收到信号: %v，开始优雅退出...", sig)
 
 	// 停止情报管理器
 
@@ -304,6 +318,10 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Gin服务优雅关闭失败: %v", err)
+		logger.Fatalf("[Server] Gin服务优雅关闭失败: %v", err)
 	}
+	logger.Info("[Main] 服务已关闭")
+
+	// Sync logger before exit
+	_ = logger.Sync()
 }

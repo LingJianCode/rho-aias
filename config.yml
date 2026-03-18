@@ -1,5 +1,14 @@
 server:
   port: 8080
+
+# 日志配置
+log:
+  level: info           # 日志级别: debug/info/warn/error
+  format: console       # 输出格式: console/json
+  output_dir: ./logs    # 日志目录
+  max_age_days: 30      # 日志保留天数
+  rotation_hours: 1     # 按小时分割
+
 ebpf:
   interface_name: ens33
 intel:

@@ -2,9 +2,10 @@
 package blocklog
 
 import (
-	"log"
 	"sync"
 	"time"
+
+	"rho-aias/internal/logger"
 )
 
 const (
@@ -85,7 +86,7 @@ func (aw *AsyncWriter) Write(record BlockRecord) error {
 	case aw.recordCh <- record:
 	default:
 		// 通道满了，丢弃记录（避免阻塞）
-		log.Printf("[BlockLog] Warning: channel full (size=%d), dropping record: srcIP=%s, matchType=%s, timestamp=%d",
+		logger.Warnf("[BlockLog] Channel full (size=%d), dropping record: srcIP=%s, matchType=%s, timestamp=%d",
 			cap(aw.recordCh), record.SrcIP, record.MatchType, record.Timestamp)
 	}
 
@@ -170,7 +171,7 @@ func (aw *AsyncWriter) writeBatch(records []BlockRecord) {
 
 	for _, record := range records {
 		if err := aw.fileWriter.Write(record); err != nil {
-			log.Printf("[BlockLog] Error writing record: %v", err)
+			logger.Errorf("[BlockLog] Error writing record: %v", err)
 		}
 	}
 }

@@ -1,9 +1,9 @@
 package handles
 
 import (
-	"log"
 	"net/http"
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/logger"
 
 	"github.com/gin-gonic/gin"
 )
@@ -64,7 +64,7 @@ func (h *EventHandle) SetEventConfig(c *gin.Context) {
 
 	// 设置新配置
 	if err := h.xdp.SetEventConfig(enabled, sampleRate); err != nil {
-		log.Printf("[Event] Failed to set event config: %v", err)
+		logger.Errorf("[Event] Failed to set event config: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
 			"message": "设置配置失败: " + err.Error(),
@@ -72,7 +72,7 @@ func (h *EventHandle) SetEventConfig(c *gin.Context) {
 		return
 	}
 
-	log.Printf("[Event] Event config updated: enabled=%v, sample_rate=%d", enabled, sampleRate)
+	logger.Infof("[Event] Event config updated: enabled=%v, sample_rate=%d", enabled, sampleRate)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    200,

@@ -1,10 +1,10 @@
 package handles
 
 import (
-	"log"
 	"net/http"
 
 	"rho-aias/internal/geoblocking"
+	"rho-aias/internal/logger"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,7 +33,7 @@ func (h *GeoBlockingHandle) GetStatus(c *gin.Context) {
 
 // TriggerUpdate 手动触发 GeoIP 更新
 func (h *GeoBlockingHandle) TriggerUpdate(c *gin.Context) {
-	log.Println("[API] Geo-Blocking manual update triggered")
+	logger.Info("[API] Geo-Blocking manual update triggered")
 
 	if err := h.manager.TriggerUpdate(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

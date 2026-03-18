@@ -1,9 +1,9 @@
 package handles
 
 import (
-	"log"
 	"net/http"
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
 
 	"github.com/gin-gonic/gin"
@@ -37,7 +37,7 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 		})
 		return
 	}
-	log.Println("[Manual] Add rule:", req.Value)
+	logger.Infof("[Manual] Add rule: %s", req.Value)
 
 	//1. 添加到 eBPF map
 	err := m.xdp.AddRule(req.Value)
@@ -52,7 +52,7 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 	// 2. 保存到缓存（如果启用了持久化）
 	if m.cache != nil {
 		if err := m.saveRuleToCache(req.Value); err != nil {
-			log.Printf("[Manual] Warning: failed to save rule to cache: %v", err)
+			logger.Warnf("[Manual] Failed to save rule to cache: %v", err)
 			// 不影响 API 响应，因为 eBPF 已经添加成功
 		}
 	}
@@ -73,7 +73,7 @@ func (m *ManualHandle) DelRule(c *gin.Context) {
 		})
 		return
 	}
-	log.Println("[Manual] Delete rule:", req.Value)
+	logger.Infof("[Manual] Delete rule: %s", req.Value)
 
 	//1. 从 eBPF map 删除
 	err := m.xdp.DeleteRule(req.Value)
@@ -88,7 +88,7 @@ func (m *ManualHandle) DelRule(c *gin.Context) {
 	// 2. 从缓存删除（如果启用了持久化）
 	if m.cache != nil {
 		if err := m.removeRuleFromCache(req.Value); err != nil {
-			log.Printf("[Manual] Warning: failed to remove rule from cache: %v", err)
+			logger.Warnf("[Manual] Failed to remove rule from cache: %v", err)
 			// 不影响 API 响应，因为 eBPF 已经删除成功
 		}
 	}
