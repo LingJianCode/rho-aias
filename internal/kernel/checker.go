@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -77,7 +78,17 @@ var (
 var kernelVersionRegex = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)`)
 
 // GetKernelVersion reads and parses the kernel version from /proc/version.
+// Returns an error if running on non-Linux systems.
 func GetKernelVersion() (Version, error) {
+	// Check if running on Linux
+	if runtime.GOOS != "linux" {
+		return Version{}, fmt.Errorf(
+			"unsupported operating system: %s.\n"+
+				"This application requires Linux (kernel 4.18+) for eBPF/XDP support.\n"+
+				"macOS, Windows, and other operating systems are not supported.",
+			runtime.GOOS)
+	}
+
 	data, err := os.ReadFile("/proc/version")
 	if err != nil {
 		return Version{}, fmt.Errorf("failed to read /proc/version: %w", err)
@@ -104,14 +115,14 @@ func ParseKernelVersion(content string) (Version, error) {
 		return parseVersionMatches(matches)
 	}
 
-	return Version{}, fmt.Errorf("could not parse kernel version from: %s", content)
+	return Version{}, fmt.Errorf("could not parse kernel version from content: %q (expected format: 'Linux version X.Y.Z')", content)
 }
 
 // parseVersionString parses a version string like "5.15.0-91-generic".
 func parseVersionString(s string) (Version, error) {
 	matches := kernelVersionRegex.FindStringSubmatch(s)
 	if matches == nil {
-		return Version{}, fmt.Errorf("invalid version string: %s", s)
+		return Version{}, fmt.Errorf("invalid version string %q: expected format 'X.Y.Z' (e.g., '5.15.0')", s)
 	}
 	return parseVersionMatches(matches)
 }
@@ -119,22 +130,22 @@ func parseVersionString(s string) (Version, error) {
 // parseVersionMatches converts regex matches to a Version struct.
 func parseVersionMatches(matches []string) (Version, error) {
 	if len(matches) < 4 {
-		return Version{}, fmt.Errorf("invalid version matches: %v", matches)
+		return Version{}, fmt.Errorf("invalid version matches: expected 4 elements (full match + 3 version parts), got %d: %v", len(matches), matches)
 	}
 
 	major, err := strconv.Atoi(matches[1])
 	if err != nil {
-		return Version{}, fmt.Errorf("invalid major version: %s", matches[1])
+		return Version{}, fmt.Errorf("invalid major version %q: %w", matches[1], err)
 	}
 
 	minor, err := strconv.Atoi(matches[2])
 	if err != nil {
-		return Version{}, fmt.Errorf("invalid minor version: %s", matches[2])
+		return Version{}, fmt.Errorf("invalid minor version %q: %w", matches[2], err)
 	}
 
 	patch, err := strconv.Atoi(matches[3])
 	if err != nil {
-		return Version{}, fmt.Errorf("invalid patch version: %s", matches[3])
+		return Version{}, fmt.Errorf("invalid patch version %q: %w", matches[3], err)
 	}
 
 	return Version{
@@ -171,14 +182,15 @@ func Check() (CheckResult, error) {
 
 // CheckAndValidate checks the kernel version and returns an error if it doesn't meet requirements.
 // The error message includes helpful information about the current and required versions.
-func CheckAndValidate() error {
+// Returns CheckResult so callers can reuse the version information.
+func CheckAndValidate() (CheckResult, error) {
 	result, err := Check()
 	if err != nil {
-		return fmt.Errorf("failed to check kernel version: %w", err)
+		return CheckResult{}, fmt.Errorf("failed to check kernel version: %w", err)
 	}
 
 	if !result.MeetsMinimum {
-		return fmt.Errorf(
+		return result, fmt.Errorf(
 			"kernel version %s does not meet minimum requirements.\n"+
 				"  Current:    %s\n"+
 				"  Minimum:    %s (required for eBPF/XDP support)\n"+
@@ -194,7 +206,7 @@ func CheckAndValidate() error {
 		)
 	}
 
-	return nil
+	return result, nil
 }
 
 // CheckAndValidateWithWarning checks the kernel version and logs a warning if below recommended.
