@@ -1,9 +1,9 @@
 package handles
 
 import (
-	"log"
 	"net/http"
 
+	"rho-aias/internal/logger"
 	"rho-aias/internal/threatintel"
 
 	"github.com/gin-gonic/gin"
@@ -33,7 +33,7 @@ func (h *IntelHandle) GetStatus(c *gin.Context) {
 
 // TriggerUpdate 手动触发更新
 func (h *IntelHandle) TriggerUpdate(c *gin.Context) {
-	log.Println("[API] Manual update triggered")
+	logger.Info("[API] Manual update triggered")
 
 	if err := h.manager.TriggerUpdate(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

@@ -3,12 +3,12 @@ package geoblocking
 
 import (
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/logger"
 
 	"github.com/robfig/cron/v3"
 )
@@ -62,21 +62,21 @@ func (m *Manager) Start() error {
 	defer m.mu.Unlock()
 
 	if !m.config.Enabled {
-		log.Println("[GeoBlocking] Geo-blocking module is disabled")
+		logger.Info("[GeoBlocking] Geo-blocking module is disabled")
 		return nil
 	}
 
-	log.Println("[GeoBlocking] Starting geo-blocking manager...")
+	logger.Info("[GeoBlocking] Starting geo-blocking manager...")
 
 	// 初始状态：不启用 geo_config（等待数据加载）
 	// LoadAll 或 SyncToKernel 会在数据加载成功后自动启用
 
 	// 1. 加载本地缓存（离线启动）
 	if err := m.loadFromCache(); err != nil {
-		log.Printf("[GeoBlocking] Warning: failed to load cache: %v", err)
+		logger.Warnf("[GeoBlocking] Failed to load cache: %v", err)
 		// 缓存加载失败是正常的（首次运行），不需要特殊处理
 	} else {
-		log.Println("[GeoBlocking] Loaded cache successfully")
+		logger.Info("[GeoBlocking] Loaded cache successfully")
 	}
 
 	// 2. 创建 Cron 调度器
@@ -88,7 +88,7 @@ func (m *Manager) Start() error {
 		if source.Enabled {
 			sid := SourceID(sourceID)
 			if err := m.scheduleSource(sid, source); err != nil {
-				log.Printf("[GeoBlocking] Failed to schedule %s: %v", sourceID, err)
+				logger.Warnf("[GeoBlocking] Failed to schedule %s: %v", sourceID, err)
 				// 继续尝试其他源，不中断启动
 			}
 		}
@@ -97,7 +97,7 @@ func (m *Manager) Start() error {
 	// 4. 启动 Cron 调度器
 	m.cron.Start()
 
-	log.Println("[GeoBlocking] Started successfully")
+	logger.Info("[GeoBlocking] Started successfully")
 	return nil
 }
 
@@ -121,14 +121,14 @@ func (m *Manager) scheduleSource(sourceID SourceID, source config.GeoIPSource) e
 
 	// 创建 Cron 任务
 	jobID := m.cron.Schedule(schedule, cron.FuncJob(func() {
-		log.Printf("[GeoBlocking] [%s] Scheduled update triggered", sourceID)
+		logger.Infof("[GeoBlocking] [%s] Scheduled update triggered", sourceID)
 		if err := m.updateSource(sourceID, source); err != nil {
-			log.Printf("[GeoBlocking] [%s] update failed: %v", sourceID, err)
+			logger.Errorf("[GeoBlocking] [%s] update failed: %v", sourceID, err)
 			m.updateSourceStatus(sourceID, false, 0, err.Error())
 		}
 		// 更新后保存缓存
 		if err := m.saveCache(); err != nil {
-			log.Printf("[GeoBlocking] Failed to save cache: %v", err)
+			logger.Errorf("[GeoBlocking] Failed to save cache: %v", err)
 		}
 	}))
 
@@ -143,56 +143,56 @@ func (m *Manager) scheduleSource(sourceID SourceID, source config.GeoIPSource) e
 	status.Enabled = true
 	m.status.Sources[sourceID] = *status
 
-	log.Printf("[GeoBlocking] [%s] Scheduled with cron: %s", sourceID, source.Schedule)
+	logger.Infof("[GeoBlocking] [%s] Scheduled with cron: %s", sourceID, source.Schedule)
 	return nil
 }
 
 // updateAllSources 更新所有启用的 GeoIP 源（用于手动触发）
 func (m *Manager) updateAllSources() {
-	log.Println("[GeoBlocking] Starting update for all sources...")
+	logger.Info("[GeoBlocking] Starting update for all sources...")
 
 	// 获取所有启用的 GeoIP 源
 	sources := m.getEnabledSources()
 	if len(sources) == 0 {
-		log.Println("[GeoBlocking] No enabled sources")
+		logger.Info("[GeoBlocking] No enabled sources")
 		return
 	}
 
 	// 更新每个 GeoIP 源
 	for sourceID, source := range sources {
 		if err := m.updateSource(sourceID, source); err != nil {
-			log.Printf("[GeoBlocking] [%s] update failed: %v", sourceID, err)
+			logger.Errorf("[GeoBlocking] [%s] update failed: %v", sourceID, err)
 			m.updateSourceStatus(sourceID, false, 0, err.Error())
 		}
 	}
 
 	// 更新后保存缓存
 	if err := m.saveCache(); err != nil {
-		log.Printf("[GeoBlocking] Failed to save cache: %v", err)
+		logger.Errorf("[GeoBlocking] Failed to save cache: %v", err)
 	}
 
-	log.Println("[GeoBlocking] Update completed")
+	logger.Info("[GeoBlocking] Update completed")
 }
 
 // updateSource 更新单个 GeoIP 源
 // sourceID: GeoIP 源标识符
 // source: GeoIP 源配置
 func (m *Manager) updateSource(sourceID SourceID, source config.GeoIPSource) error {
-	log.Printf("[GeoBlocking] [%s] Fetching from %s", sourceID, source.URL)
+	logger.Infof("[GeoBlocking] [%s] Fetching from %s", sourceID, source.URL)
 
 	// 1. 获取数据
 	data, err := m.fetcher.Fetch(source.URL)
 	if err != nil {
 		return err
 	}
-	log.Printf("[GeoBlocking] [%s] Fetched %d bytes", sourceID, len(data))
+	logger.Infof("[GeoBlocking] [%s] Fetched %d bytes", sourceID, len(data))
 
 	// 2. 解析数据（传递允许的国家列表）
 	parsed, err := m.parser.Parse(data, source.Format, m.config.AllowedCountries, sourceID)
 	if err != nil {
 		return err
 	}
-	log.Printf("[GeoBlocking] [%s] Parsed %d rules", sourceID, parsed.TotalCount())
+	logger.Infof("[GeoBlocking] [%s] Parsed %d rules", sourceID, parsed.TotalCount())
 
 	// 3. 同步到内核
 	geoConfig := &GeoConfig{
@@ -223,14 +223,14 @@ func (m *Manager) loadFromCache() error {
 		return err
 	}
 
-	log.Printf("[GeoBlocking] Loading cache with %d sources...", len(cacheData.Sources))
+	logger.Infof("[GeoBlocking] Loading cache with %d sources...", len(cacheData.Sources))
 
 	// 在 Start() 的 m.mu 锁保护下，直接更新状态（避免重复获取锁）
 	now := time.Now()
 
 	// 加载每个源的数据
 	for sourceID, data := range cacheData.Sources {
-		log.Printf("[GeoBlocking] [%s] Loading %d rules from cache", sourceID, data.TotalCount())
+		logger.Infof("[GeoBlocking] [%s] Loading %d rules from cache", sourceID, data.TotalCount())
 
 		geoConfig := &GeoConfig{
 			Enabled:              cacheData.Config.Enabled,
@@ -239,7 +239,7 @@ func (m *Manager) loadFromCache() error {
 			AllowPrivateNetworks: m.config.AllowPrivateNetworks, // 从当前配置读取
 		}
 		if err := m.syncer.LoadAll(&data, geoConfig); err != nil {
-			log.Printf("[GeoBlocking] [%s] Failed to load from cache: %v", sourceID, err)
+			logger.Warnf("[GeoBlocking] [%s] Failed to load from cache: %v", sourceID, err)
 			// 失败状态
 			status, exists := m.sourceStatus[sourceID]
 			if !exists {
@@ -373,7 +373,7 @@ func (m *Manager) GetStatus() *Status {
 
 // TriggerUpdate 手动触发 GeoIP 更新
 func (m *Manager) TriggerUpdate() error {
-	log.Println("[GeoBlocking] Manual update triggered")
+	logger.Info("[GeoBlocking] Manual update triggered")
 	m.updateAllSources()
 	return nil
 }
@@ -401,10 +401,10 @@ func (m *Manager) UpdateConfig(mode string, countries []string) error {
 
 // Stop 停止 GeoIP 管理器
 func (m *Manager) Stop() {
-	log.Println("[GeoBlocking] Stopping geo-blocking manager...")
+	logger.Info("[GeoBlocking] Stopping geo-blocking manager...")
 	if m.cron != nil {
 		m.cron.Stop() // 停止所有 Cron 任务
 	}
 	close(m.done)
-	log.Println("[GeoBlocking] Stopped")
+	logger.Info("[GeoBlocking] Stopped")
 }

@@ -3,12 +3,12 @@ package threatintel
 
 import (
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/logger"
 
 	"github.com/robfig/cron/v3"
 )
@@ -61,17 +61,17 @@ func (m *Manager) Start() error {
 	defer m.mu.Unlock()
 
 	if !m.config.Enabled {
-		log.Println("[ThreatIntel] Threat intelligence module is disabled")
+		logger.Info("[ThreatIntel] Threat intelligence module is disabled")
 		return nil
 	}
 
-	log.Println("[ThreatIntel] Starting threat intelligence manager...")
+	logger.Info("[ThreatIntel] Starting threat intelligence manager...")
 
 	// 1. 加载本地缓存（离线启动）
 	if err := m.loadFromCache(); err != nil {
-		log.Printf("[ThreatIntel] Warning: failed to load cache: %v", err)
+		logger.Warnf("[ThreatIntel] Failed to load cache: %v", err)
 	} else {
-		log.Println("[ThreatIntel] Loaded cache successfully")
+		logger.Info("[ThreatIntel] Loaded cache successfully")
 	}
 
 	// 2. 创建 Cron 调度器
@@ -83,7 +83,7 @@ func (m *Manager) Start() error {
 		if source.Enabled {
 			sid := SourceID(sourceID)
 			if err := m.scheduleSource(sid, source); err != nil {
-				log.Printf("[ThreatIntel] Failed to schedule %s: %v", sourceID, err)
+				logger.Warnf("[ThreatIntel] Failed to schedule %s: %v", sourceID, err)
 				// 继续尝试其他源，不中断启动
 			}
 		}
@@ -92,7 +92,7 @@ func (m *Manager) Start() error {
 	// 4. 启动 Cron 调度器
 	m.cron.Start()
 
-	log.Println("[ThreatIntel] Started successfully")
+	logger.Info("[ThreatIntel] Started successfully")
 	return nil
 }
 
@@ -106,14 +106,14 @@ func (m *Manager) scheduleSource(sourceID SourceID, source config.IntelSource) e
 
 	// 创建 Cron 任务
 	jobID := m.cron.Schedule(schedule, cron.FuncJob(func() {
-		log.Printf("[ThreatIntel] [%s] Scheduled update triggered", sourceID)
+		logger.Infof("[ThreatIntel] [%s] Scheduled update triggered", sourceID)
 		if err := m.updateSource(sourceID, source); err != nil {
-			log.Printf("[ThreatIntel] [%s] update failed: %v", sourceID, err)
+			logger.Errorf("[ThreatIntel] [%s] update failed: %v", sourceID, err)
 			m.updateSourceStatus(sourceID, false, 0, err.Error())
 		}
 		// 更新后保存缓存
 		if err := m.saveCache(); err != nil {
-			log.Printf("[ThreatIntel] Failed to save cache: %v", err)
+			logger.Errorf("[ThreatIntel] Failed to save cache: %v", err)
 		}
 	}))
 
@@ -128,56 +128,56 @@ func (m *Manager) scheduleSource(sourceID SourceID, source config.IntelSource) e
 	status.Enabled = true
 	m.status.Sources[sourceID] = *status
 
-	log.Printf("[ThreatIntel] [%s] Scheduled with cron: %s", sourceID, source.Schedule)
+	logger.Infof("[ThreatIntel] [%s] Scheduled with cron: %s", sourceID, source.Schedule)
 	return nil
 }
 
 // updateAllSources 更新所有启用的威胁情报源（用于手动触发）
 func (m *Manager) updateAllSources() {
-	log.Println("[ThreatIntel] Starting update for all sources...")
+	logger.Info("[ThreatIntel] Starting update for all sources...")
 
 	// 获取所有启用的情报源
 	sources := m.getEnabledSources()
 	if len(sources) == 0 {
-		log.Println("[ThreatIntel] No enabled sources")
+		logger.Info("[ThreatIntel] No enabled sources")
 		return
 	}
 
 	// 更新每个情报源
 	for sourceID, source := range sources {
 		if err := m.updateSource(sourceID, source); err != nil {
-			log.Printf("[ThreatIntel] [%s] update failed: %v", sourceID, err)
+			logger.Errorf("[ThreatIntel] [%s] update failed: %v", sourceID, err)
 			m.updateSourceStatus(sourceID, false, 0, err.Error())
 		}
 	}
 
 	// 更新后保存缓存
 	if err := m.saveCache(); err != nil {
-		log.Printf("[ThreatIntel] Failed to save cache: %v", err)
+		logger.Errorf("[ThreatIntel] Failed to save cache: %v", err)
 	}
 
-	log.Println("[ThreatIntel] Update completed")
+	logger.Info("[ThreatIntel] Update completed")
 }
 
 // updateSource 更新单个威胁情报源
 // sourceID: 情报源标识符
 // source: 情报源配置
 func (m *Manager) updateSource(sourceID SourceID, source config.IntelSource) error {
-	log.Printf("[ThreatIntel] [%s] Fetching from %s", sourceID, source.URL)
+	logger.Infof("[ThreatIntel] [%s] Fetching from %s", sourceID, source.URL)
 
 	// 1. 获取数据
 	data, err := m.fetcher.Fetch(source.URL)
 	if err != nil {
 		return err
 	}
-	log.Printf("[ThreatIntel] [%s] Fetched %d bytes", sourceID, len(data))
+	logger.Infof("[ThreatIntel] [%s] Fetched %d bytes", sourceID, len(data))
 
 	// 2. 解析数据
 	parsed, err := m.parser.Parse(data, source.Format, sourceID)
 	if err != nil {
 		return err
 	}
-	log.Printf("[ThreatIntel] [%s] Parsed %d rules (exact: %d, cidr: %d)",
+	logger.Infof("[ThreatIntel] [%s] Parsed %d rules (exact: %d, cidr: %d)",
 		sourceID, parsed.TotalCount(), len(parsed.IPv4Exact), len(parsed.IPv4CIDR))
 
 	// 3. 同步到内核（传递来源掩码）
@@ -204,7 +204,7 @@ func (m *Manager) loadFromCache() error {
 		return err
 	}
 
-	log.Printf("[ThreatIntel] Loading cache with %d sources...", len(cacheData.Sources))
+	logger.Infof("[ThreatIntel] Loading cache with %d sources...", len(cacheData.Sources))
 
 	// 在 Start() 的 m.mu 锁保护下，直接更新状态（避免重复获取锁）
 	now := time.Now()
@@ -212,11 +212,11 @@ func (m *Manager) loadFromCache() error {
 
 	// 加载每个源的数据
 	for sourceID, data := range cacheData.Sources {
-		log.Printf("[ThreatIntel] [%s] Loading %d rules from cache", sourceID, data.TotalCount())
+		logger.Infof("[ThreatIntel] [%s] Loading %d rules from cache", sourceID, data.TotalCount())
 
 		sourceMask := sourceIDToMask(sourceID)
 		if err := m.syncer.LoadAll(&data, sourceMask); err != nil {
-			log.Printf("[ThreatIntel] [%s] Failed to load from cache: %v", sourceID, err)
+			logger.Warnf("[ThreatIntel] [%s] Failed to load from cache: %v", sourceID, err)
 			// 失败状态
 			status, exists := m.sourceStatus[sourceID]
 			if !exists {
@@ -347,19 +347,19 @@ func (m *Manager) GetStatus() *Status {
 
 // TriggerUpdate 手动触发威胁情报更新
 func (m *Manager) TriggerUpdate() error {
-	log.Println("[ThreatIntel] Manual update triggered")
+	logger.Info("[ThreatIntel] Manual update triggered")
 	m.updateAllSources()
 	return nil
 }
 
 // Stop 停止威胁情报管理器
 func (m *Manager) Stop() {
-	log.Println("[ThreatIntel] Stopping threat intelligence manager...")
+	logger.Info("[ThreatIntel] Stopping threat intelligence manager...")
 	if m.cron != nil {
 		m.cron.Stop() // 停止所有 Cron 任务
 	}
 	close(m.done)
-	log.Println("[ThreatIntel] Stopped")
+	logger.Info("[ThreatIntel] Stopped")
 }
 
 // containsCIDR 检查字符串是否是 CIDR 格式（包含 /）

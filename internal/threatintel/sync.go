@@ -3,10 +3,10 @@ package threatintel
 
 import (
 	"fmt"
-	"log"
 	"sync"
 
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/logger"
 )
 
 // Syncer 威胁情报原子同步器
@@ -43,7 +43,7 @@ func (s *Syncer) SyncToKernel(data *IntelData, sourceMask uint32) error {
 	// 2. 计算差异（需要新增、删除和更新掩码的规则）
 	toAdd, toRemove, toUpdateMask := s.diff(currentRules, data, sourceMask)
 
-	log.Printf("[Syncer] Current: %d, New: %d, ToAdd: %d, ToRemove: %d, ToUpdateMask: %d",
+	logger.Infof("[Syncer] Current: %d, New: %d, ToAdd: %d, ToRemove: %d, ToUpdateMask: %d",
 		len(currentRules), data.TotalCount(), len(toAdd), len(toRemove), len(toUpdateMask))
 
 	// 3. 批量删除需要移除的规则（仅单源拥有）
@@ -51,7 +51,7 @@ func (s *Syncer) SyncToKernel(data *IntelData, sourceMask uint32) error {
 		if err := s.batchDelete(toRemove); err != nil {
 			return fmt.Errorf("batch delete failed: %w", err)
 		}
-		log.Printf("[Syncer] Removed %d rules", len(toRemove))
+		logger.Infof("[Syncer] Removed %d rules", len(toRemove))
 	}
 
 	// 4. 批量更新掩码（多源共有规则，按位删除当前来源）
@@ -59,7 +59,7 @@ func (s *Syncer) SyncToKernel(data *IntelData, sourceMask uint32) error {
 		if _, err := s.xdp.BatchUpdateRuleSourceMask(toUpdateMask, sourceMask); err != nil {
 			return fmt.Errorf("batch update mask failed: %w", err)
 		}
-		log.Printf("[Syncer] Updated mask for %d rules (removed source 0x%x)", len(toUpdateMask), sourceMask)
+		logger.Infof("[Syncer] Updated mask for %d rules (removed source 0x%x)", len(toUpdateMask), sourceMask)
 	}
 
 	// 5. 批量添加需要新增的规则
@@ -67,7 +67,7 @@ func (s *Syncer) SyncToKernel(data *IntelData, sourceMask uint32) error {
 		if err := s.batchAdd(toAdd, sourceMask); err != nil {
 			return fmt.Errorf("batch add failed: %w", err)
 		}
-		log.Printf("[Syncer] Added %d rules", len(toAdd))
+		logger.Infof("[Syncer] Added %d rules", len(toAdd))
 	}
 
 	return nil
@@ -111,7 +111,7 @@ func (s *Syncer) diff(current []ebpfs.Rule, newData *IntelData, sourceMask uint3
 				} else if r.Value.SourceMask&sourceMask != 0 {
 					// 多源共有规则，按位删除当前来源
 					toUpdateMask = append(toUpdateMask, k)
-					log.Printf("[Syncer] Rule %s owned by multiple sources (mask: 0x%x), will remove source bit 0x%x",
+					logger.Debugf("[Syncer] Rule %s owned by multiple sources (mask: 0x%x), will remove source bit 0x%x",
 						k, r.Value.SourceMask, sourceMask)
 				}
 			}
@@ -179,7 +179,7 @@ func (s *Syncer) LoadAll(data *IntelData, sourceMask uint32) error {
 		if err := s.batchAdd(toAdd, sourceMask); err != nil {
 			return fmt.Errorf("load all failed: %w", err)
 		}
-		log.Printf("[Syncer] Loaded %d rules from cache", len(toAdd))
+		logger.Infof("[Syncer] Loaded %d rules from cache", len(toAdd))
 	}
 
 	return nil

@@ -2,15 +2,15 @@ package database
 
 import (
 	"fmt"
-	"log"
 
 	"rho-aias/internal/auth/password"
 	"rho-aias/internal/casbin"
+	"rho-aias/internal/logger"
 	"rho-aias/internal/models"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // Database 数据库封装
@@ -21,7 +21,7 @@ type Database struct {
 // NewDatabase 创建数据库连接
 func NewDatabase(dsn string) (*Database, error) {
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: gormlogger.Default.LogMode(gormlogger.Info),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
@@ -29,12 +29,12 @@ func NewDatabase(dsn string) (*Database, error) {
 
 	// 配置 SQLite WAL 模式
 	if err := db.Exec("PRAGMA journal_mode=WAL").Error; err != nil {
-		log.Printf("Warning: failed to enable WAL mode: %v", err)
+		logger.Warnf("[Database] Failed to enable WAL mode: %v", err)
 	}
 
 	// 配置同步模式
 	if err := db.Exec("PRAGMA synchronous=NORMAL").Error; err != nil {
-		log.Printf("Warning: failed to set synchronous mode: %v", err)
+		logger.Warnf("[Database] Failed to set synchronous mode: %v", err)
 	}
 
 	return &Database{db}, nil
@@ -73,10 +73,10 @@ func (db *Database) InitDefaultUser(enforcer *casbin.Enforcer) error {
 
 	// 为管理员分配角色
 	if err := enforcer.AssignRoleToUser(admin.ID, "admin"); err != nil {
-		log.Printf("Warning: failed to assign admin role: %v", err)
+		logger.Warnf("[Database] Failed to assign admin role: %v", err)
 	}
 
-	log.Println("[Database] Default admin user created: admin / admin123")
+	logger.Info("[Database] Default admin user created: admin / admin123")
 	return nil
 }
 

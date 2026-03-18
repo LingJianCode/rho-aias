@@ -3,8 +3,9 @@ package casbin
 import (
 	"embed"
 	"fmt"
-	"log"
 	"strings"
+
+	"rho-aias/internal/logger"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
@@ -64,11 +65,11 @@ func (e *Enforcer) InitDefaultPolicies() error {
 		return fmt.Errorf("failed to get policies: %w", err)
 	}
 	if len(policies) > 0 {
-		log.Println("[Casbin] Policies already exist, skip initialization")
+		logger.Info("[Casbin] Policies already exist, skip initialization")
 		return nil
 	}
 
-	log.Println("[Casbin] Initializing default policies...")
+	logger.Info("[Casbin] Initializing default policies...")
 
 	// 添加默认角色权限
 	// role:admin 拥有所有权限（使用通配符）
@@ -95,7 +96,7 @@ func (e *Enforcer) InitDefaultPolicies() error {
 		return fmt.Errorf("failed to save policies: %w", err)
 	}
 
-	log.Println("[Casbin] Default policies initialized successfully")
+	logger.Info("[Casbin] Default policies initialized successfully")
 	return nil
 }
 

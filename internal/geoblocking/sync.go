@@ -3,12 +3,12 @@ package geoblocking
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"strings"
 	"sync"
 
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/logger"
 )
 
 // Syncer GeoIP 原子同步器
@@ -44,7 +44,7 @@ func (s *Syncer) SyncToKernel(data *GeoIPData, config *GeoConfig) error {
 	// 2. 计算差异
 	toAdd, toRemove := s.diff(currentRules, data)
 
-	log.Printf("[GeoSyncer] Current: %d, New: %d, ToAdd: %d, ToRemove: %d",
+	logger.Infof("[GeoSyncer] Current: %d, New: %d, ToAdd: %d, ToRemove: %d",
 		len(currentRules), data.TotalCount(), len(toAdd), len(toRemove))
 
 	// 3. 批量删除需要移除的规则
@@ -52,7 +52,7 @@ func (s *Syncer) SyncToKernel(data *GeoIPData, config *GeoConfig) error {
 		if err := s.batchDelete(toRemove); err != nil {
 			return fmt.Errorf("batch delete failed: %w", err)
 		}
-		log.Printf("[GeoSyncer] Removed %d rules", len(toRemove))
+		logger.Infof("[GeoSyncer] Removed %d rules", len(toRemove))
 	}
 
 	// 4. 批量添加需要新增的规则
@@ -60,7 +60,7 @@ func (s *Syncer) SyncToKernel(data *GeoIPData, config *GeoConfig) error {
 		if err := s.batchAdd(toAdd); err != nil {
 			return fmt.Errorf("batch add failed: %w", err)
 		}
-		log.Printf("[GeoSyncer] Added %d rules", len(toAdd))
+		logger.Infof("[GeoSyncer] Added %d rules", len(toAdd))
 	}
 
 	// 5. 如果配置允许，添加私有网段到白名单
@@ -80,9 +80,9 @@ func (s *Syncer) SyncToKernel(data *GeoIPData, config *GeoConfig) error {
 		if err := s.xdp.UpdateGeoConfig(true, mode); err != nil {
 			return fmt.Errorf("update geo config failed: %w", err)
 		}
-		log.Printf("[GeoSyncer] Geo-blocking ACTIVATED with %d rules", data.TotalCount())
+		logger.Infof("[GeoSyncer] Geo-blocking ACTIVATED with %d rules", data.TotalCount())
 	} else {
-		log.Printf("[GeoSyncer] No rules loaded, geo-blocking NOT activated")
+		logger.Warn("[GeoSyncer] No rules loaded, geo-blocking NOT activated")
 		// 保持 enabled=0，不更新 geo_config
 	}
 
@@ -167,13 +167,13 @@ func (s *Syncer) LoadAll(data *GeoIPData, config *GeoConfig) error {
 		if err := s.batchAdd(data.IPv4CIDR); err != nil {
 			return fmt.Errorf("load all failed: %w", err)
 		}
-		log.Printf("[GeoSyncer] Loaded %d rules from cache", len(data.IPv4CIDR))
+		logger.Infof("[GeoSyncer] Loaded %d rules from cache", len(data.IPv4CIDR))
 	}
 
 	// 如果配置允许，添加私有网段
 	if config.AllowPrivateNetworks {
 		if err := s.addPrivateNetworks(); err != nil {
-			log.Printf("[GeoSyncer] Warning: add private networks failed: %v", err)
+			logger.Warnf("[GeoSyncer] Add private networks failed: %v", err)
 		}
 	}
 
@@ -187,9 +187,9 @@ func (s *Syncer) LoadAll(data *GeoIPData, config *GeoConfig) error {
 		if err := s.xdp.UpdateGeoConfig(true, mode); err != nil {
 			return fmt.Errorf("update geo config failed: %w", err)
 		}
-		log.Printf("[GeoSyncer] Geo-blocking ACTIVATED with %d rules from cache", data.TotalCount())
+		logger.Infof("[GeoSyncer] Geo-blocking ACTIVATED with %d rules from cache", data.TotalCount())
 	} else {
-		log.Printf("[GeoSyncer] No rules in cache, geo-blocking NOT activated")
+		logger.Warn("[GeoSyncer] No rules in cache, geo-blocking NOT activated")
 	}
 
 	return nil
@@ -254,6 +254,6 @@ func (s *Syncer) addPrivateNetworks() error {
 		}
 	}
 
-	log.Printf("[GeoSyncer] Added private networks to whitelist")
+	logger.Info("[GeoSyncer] Added private networks to whitelist")
 	return nil
 }

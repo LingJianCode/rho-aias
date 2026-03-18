@@ -5,10 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/netip"
-	"os"
+	"rho-aias/internal/logger"
 	"rho-aias/utils"
 	"strings"
 
@@ -47,7 +46,7 @@ func (x *Xdp) Start() error {
 		return fmt.Errorf("failed to get interface %s: %s", x.InterfaceName, err)
 	}
 	if err := rlimit.RemoveMemlock(); err != nil {
-		log.Printf("failed to remove memlock: %s", err.Error())
+		logger.Warnf("[XDP] Failed to remove memlock: %s", err.Error())
 	}
 	var ebpfObj xdpObjects
 	if err := loadXdpObjects(&ebpfObj, nil); err != nil {
@@ -74,11 +73,11 @@ func (x *Xdp) Start() error {
 		if err == nil {
 			x.linkType = flagName
 			x.link = &l
-			log.Printf("XDP program attached successfully, current mode: %s", flagName)
+			logger.Infof("[XDP] Program attached successfully, current mode: %s", flagName)
 			break
 		}
 		count++
-		fmt.Printf("failed to attach XDP program with %s mode: %s\n", flagName, err.Error())
+		logger.Debugf("[XDP] Failed to attach with %s mode: %s", flagName, err.Error())
 	}
 	if count == 3 {
 		x.Close()
@@ -88,7 +87,7 @@ func (x *Xdp) Start() error {
 }
 
 func (x *Xdp) Close() {
-	log.Println("Xdp close.")
+	logger.Info("[XDP] Close")
 	if x.done != nil {
 		close(x.done)
 	}
@@ -108,12 +107,12 @@ func (x *Xdp) GetLinkType() string {
 }
 
 func (x *Xdp) MonitorEvents() {
-	log.Println("MonitorEvents")
+	logger.Info("[XDP] MonitorEvents started")
 	for {
 		// 检查 done 通道（非阻塞）
 		select {
 		case <-x.done:
-			log.Println("MonitorEvents exit...")
+			logger.Info("[XDP] MonitorEvents exit")
 			return
 		default:
 		}
@@ -122,19 +121,19 @@ func (x *Xdp) MonitorEvents() {
 		record, err := x.reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
-				log.Printf("ringbuf reader closed, trying to restart eBPF")
+				logger.Warn("[XDP] Ringbuf reader closed, trying to restart eBPF")
 				x.Close()
 				if err := x.Start(); err != nil {
-					log.Fatalf("failed to restart eBPF: %s", err.Error())
+					logger.Fatalf("[XDP] Failed to restart eBPF: %s", err.Error())
 				} else {
-					log.Printf("eBPF restarted successfully")
+					logger.Info("[XDP] eBPF restarted successfully")
 				}
 				return
 			}
 			// 其他错误，检查 done 后继续
 			select {
 			case <-x.done:
-				log.Println("MonitorEvents exit after error...")
+				logger.Info("[XDP] MonitorEvents exit after error")
 				return
 			default:
 				continue
@@ -143,7 +142,7 @@ func (x *Xdp) MonitorEvents() {
 
 		var pi PacketInfo
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &pi); err != nil {
-			log.Printf("Failed to parse packet info: %v", err)
+			logger.Warnf("[XDP] Failed to parse packet info: %v", err)
 			continue
 		}
 
@@ -152,7 +151,7 @@ func (x *Xdp) MonitorEvents() {
 		dstIP := formatIP(pi.DstIP, pi.DstIPv6, uint16(pi.EthProto))
 		matchTypeStr := matchTypeToString(pi.MatchType)
 
-		log.Printf("Blocked packet - Src: %s, MatchType: %s", srcIP, matchTypeStr)
+		logger.Infof("[XDP] Blocked packet - Src: %s, MatchType: %s", srcIP, matchTypeStr)
 
 		// 触发回调
 		if x.callback != nil {
@@ -246,7 +245,7 @@ func (x *Xdp) AddRule(value string) error {
 	if err != nil {
 		return err
 	}
-	log.Println(bytes, iptype)
+	logger.Debugf("[XDP] AddRule: bytes=%v, iptype=%v", bytes, iptype)
 	// 手动规则设置 MANUAL 位 (0x04)
 	blockValue := NewBlockValue(SourceMaskManual)
 	return x.updateMap(iptype, bytes, blockValue, true)
@@ -342,7 +341,7 @@ func (x *Xdp) BatchAddRules(values []string, sourceMask uint32) error {
 	for _, value := range values {
 		bytes, iptype, err := utils.ParseValueToBytes(value)
 		if err != nil {
-			log.Printf("Failed to parse value %s: %v", value, err)
+			logger.Warnf("[XDP] Failed to parse value %s: %v", value, err)
 			continue
 		}
 
@@ -360,7 +359,7 @@ func (x *Xdp) BatchAddRules(values []string, sourceMask uint32) error {
 			ipv4CIDRKeys = append(ipv4CIDRKeys, key)
 			ipv4CIDRValues = append(ipv4CIDRValues, blockValue)
 		default:
-			log.Printf("Unsupported IP type: %v for value %s", iptype, value)
+			logger.Warnf("[XDP] Unsupported IP type: %v for value %s", iptype, value)
 		}
 	}
 
@@ -565,7 +564,7 @@ func (x *Xdp) BatchAddGeoIPRules(cidrs []string) error {
 		// 解析格式: "1.0.0.0/24,CN"
 		parts := strings.Split(cidrWithCountry, ",")
 		if len(parts) < 2 {
-			log.Printf("[GeoBlocking] Invalid format: %s", cidrWithCountry)
+			logger.Warnf("[GeoBlocking] Invalid format: %s", cidrWithCountry)
 			continue
 		}
 
@@ -575,13 +574,13 @@ func (x *Xdp) BatchAddGeoIPRules(cidrs []string) error {
 		// 解析 CIDR
 		_, ipNet, err := net.ParseCIDR(cidr)
 		if err != nil {
-			log.Printf("[GeoBlocking] Failed to parse CIDR %s: %v", cidr, err)
+			logger.Warnf("[GeoBlocking] Failed to parse CIDR %s: %v", cidr, err)
 			continue
 		}
 
 		// 只处理 IPv4 网络（跳过 IPv6）
 		if ipNet.IP.To4() == nil {
-			log.Printf("[GeoBlocking] Skipping non-IPv4 network: %s", cidr)
+			logger.Debugf("[GeoBlocking] Skipping non-IPv4 network: %s", cidr)
 			continue
 		}
 
