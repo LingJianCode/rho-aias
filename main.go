@@ -229,6 +229,10 @@ func main() {
 		routers.RegisterManualRoutes(api, manualHandle, casbinEnforcer, authService, apiKeyService)
 		routers.RegisterBlockLogRoutes(api, blockLogHandle, casbinEnforcer, authService, apiKeyService)
 
+		// Register Event Reporting routes
+		eventHandle := handles.NewEventHandle(xdp)
+		routers.RegisterEventRoutes(api, eventHandle, casbinEnforcer, authService, apiKeyService)
+
 		// Register Intel routes (if enabled)
 		if cfg.Intel.Enabled && intelMgr != nil {
 			intelHandle := handles.NewIntelHandle(intelMgr)
@@ -244,6 +248,10 @@ func main() {
 		// No authentication, register routes directly
 		routers.RegisterManualRoutes(api, manualHandle, nil, nil, nil)
 		routers.RegisterBlockLogRoutes(api, blockLogHandle, nil, nil, nil)
+
+		// Register Event Reporting routes
+		eventHandle := handles.NewEventHandle(xdp)
+		routers.RegisterEventRoutes(api, eventHandle, nil, nil, nil)
 
 		if cfg.Intel.Enabled && intelMgr != nil {
 			intelHandle := handles.NewIntelHandle(intelMgr)
