@@ -169,6 +169,21 @@ struct geo_config {
     __u32 padding;        /* Alignment padding */
 } __attribute__((packed));
 
+// Event reporting configuration map
+// Controls whether to report dropped packet events to userspace
+struct event_config {
+    __u32 enabled;        /* Event reporting enabled flag (0=disabled, 1=enabled) */
+    __u32 sample_rate;    /* Sample rate: report 1 out of every N dropped packets (e.g., 1000 = 0.1%) */
+    __u32 padding[2];     /* Alignment padding to 16 bytes */
+} __attribute__((packed));
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, __u32);
+    __type(value, struct event_config);
+    __uint(max_entries, 1);
+} event_config SEC(".maps");
+
 // IPv4 GeoIP whitelist LPM trie
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
@@ -485,13 +500,29 @@ submit:
     if (LIKELY(match_type == MATCH_BY_PASS))
         return XDP_PASS;
 
-    // 匹配规则则丢弃
-    // 考虑做一个开关，打开时才会上报数据，用于实时调试观察丢弃的包？
-    // 建议: 如果需要监控，考虑以下优化：
-    //   1. 添加采样率，避免每个包都上报
-    //   2. 使用 BPF_MAP_TYPE_RINGBUF 替代 PERF_EVENT_ARRAY（内核 5.8+）
-    //   3. 添加配置开关，只在调试时启用
-
-    // bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, pkt_info, sizeof(*pkt_info));
+    // 匹配规则则丢弃，并根据配置决定是否上报事件
+    {
+        __u32 config_key = 0;
+        struct event_config *cfg = bpf_map_lookup_elem(&event_config, &config_key);
+        
+        // 只有在配置启用时才上报事件
+        if (cfg && cfg->enabled) {
+            // 采样逻辑：使用随机数决定是否上报
+            // sample_rate = N 表示每 N 个丢弃包上报 1 个
+            // 例如：sample_rate = 1000 表示 0.1% 的上报率
+            __u32 sample_rate = cfg->sample_rate;
+            if (sample_rate == 0) {
+                sample_rate = 1000; // 默认采样率，防止除零
+            }
+            
+            // bpf_get_prandom_u32() 返回 0 到 UINT32_MAX 之间的随机数
+            // 如果 random % sample_rate == 0，则上报
+            __u32 random_val = bpf_get_prandom_u32();
+            if ((random_val % sample_rate) == 0) {
+                bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, pkt_info, sizeof(*pkt_info));
+            }
+        }
+    }
+    
     return XDP_DROP;
 }
