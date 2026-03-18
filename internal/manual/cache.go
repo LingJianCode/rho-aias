@@ -30,24 +30,45 @@ func NewCache(dir string) *Cache {
 }
 
 // Save 保存手动规则缓存数据到本地磁盘（使用 gob 二进制格式）
+// 采用原子写入策略：先写临时文件，再原子重命名，防止写入过程中断导致数据丢失
 func (c *Cache) Save(data *CacheData) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	path := filepath.Join(c.dir, "manual_cache.bin")
+	tmpPath := path + ".tmp"
 
-	f, err := os.Create(path)
+	// 1. 写入临时文件
+	f, err := os.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("create cache file failed: %w", err)
+		return fmt.Errorf("create tmp file failed: %w", err)
 	}
-	defer f.Close()
 
 	// 更新时间戳
 	data.Timestamp = time.Now().Unix()
 
 	encoder := gob.NewEncoder(f)
 	if err := encoder.Encode(data); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
 		return fmt.Errorf("encode cache data failed: %w", err)
+	}
+
+	// 2. 确保数据写入磁盘
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("sync cache data failed: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close tmp file failed: %w", err)
+	}
+
+	// 3. 原子重命名
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename cache file failed: %w", err)
 	}
 
 	return nil
