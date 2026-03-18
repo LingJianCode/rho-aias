@@ -416,3 +416,78 @@ func TestNewGeoConfig(t *testing.T) {
 		})
 	}
 }
+
+// ============================================
+// Event Config Tests
+// ============================================
+
+func TestNewEventConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		enabled    bool
+		sampleRate uint32
+		want       EventConfig
+	}{
+		{
+			name:       "enabled with default sample rate",
+			enabled:    true,
+			sampleRate: 1000,
+			want: EventConfig{
+				Enabled:    1,
+				SampleRate: 1000,
+				Padding:    [2]uint32{0, 0},
+			},
+		},
+		{
+			name:       "disabled with custom sample rate",
+			enabled:    false,
+			sampleRate: 100,
+			want: EventConfig{
+				Enabled:    0,
+				SampleRate: 100,
+				Padding:    [2]uint32{0, 0},
+			},
+		},
+		{
+			name:       "enabled with sample rate 1",
+			enabled:    true,
+			sampleRate: 1,
+			want: EventConfig{
+				Enabled:    1,
+				SampleRate: 1,
+				Padding:    [2]uint32{0, 0},
+			},
+		},
+		{
+			name:       "zero sample rate defaults to 1000",
+			enabled:    true,
+			sampleRate: 0,
+			want: EventConfig{
+				Enabled:    1,
+				SampleRate: 1000, // 默认采样率
+				Padding:    [2]uint32{0, 0},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NewEventConfig(tt.enabled, tt.sampleRate)
+			if got != tt.want {
+				t.Errorf("NewEventConfig(%v, %v) = %v, want %v", tt.enabled, tt.sampleRate, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDefaultEventConfig(t *testing.T) {
+	got := DefaultEventConfig()
+	want := EventConfig{
+		Enabled:    0,    // 默认关闭
+		SampleRate: 1000, // 默认采样率
+		Padding:    [2]uint32{0, 0},
+	}
+	if got != want {
+		t.Errorf("DefaultEventConfig() = %v, want %v", got, want)
+	}
+}
