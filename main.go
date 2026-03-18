@@ -16,6 +16,7 @@ import (
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/geoblocking"
 	"rho-aias/internal/handles"
+	"rho-aias/internal/kernel"
 	"rho-aias/internal/manual"
 	"rho-aias/internal/routers"
 	"rho-aias/internal/services"
@@ -27,6 +28,20 @@ import (
 )
 
 func main() {
+	// Check kernel version before initializing eBPF/XDP
+	if err := kernel.CheckAndValidate(); err != nil {
+		log.Fatalf("[Kernel] %v", err)
+	}
+
+	// Log kernel version info
+	if result, err := kernel.Check(); err == nil {
+		log.Printf("[Kernel] Detected kernel version: %s", result.CurrentVersion)
+		if !result.MeetsRecommended {
+			log.Printf("[Kernel] Warning: kernel version %s is below recommended version %s",
+				result.CurrentVersion, result.RecommendedVersion)
+		}
+	}
+
 	cfg := config.NewConfig("config.yml")
 	log.Println(cfg)
 	// Initialize XDP (existing functionality)
