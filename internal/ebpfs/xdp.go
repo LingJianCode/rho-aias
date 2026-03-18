@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 )
 
@@ -24,7 +24,7 @@ type Xdp struct {
 	InterfaceName string
 	objects       *xdpObjects
 	link          *link.Link
-	reader        *perf.Reader
+	reader       *ringbuf.Reader
 	done          chan struct{}
 	linkType      string
 	callback      BlockLogCallback // 阻断事件回调
@@ -54,10 +54,10 @@ func (x *Xdp) Start() error {
 		return fmt.Errorf("failed to load eBPF objects: %s", err.Error())
 	}
 	x.objects = &ebpfObj
-	x.reader, err = perf.NewReader(x.objects.Events, os.Getpagesize())
+	x.reader, err = ringbuf.NewReader(x.objects.Events)
 	if err != nil {
 		x.Close()
-		return fmt.Errorf("failed to create perf event reader: %s", err.Error())
+		return fmt.Errorf("failed to create ringbuf reader: %s", err.Error())
 	}
 	x.done = make(chan struct{})
 
@@ -118,11 +118,11 @@ func (x *Xdp) MonitorEvents() {
 		default:
 		}
 
-		// 阻塞式读取 perf 事件
+		// 阻塞式读取 ringbuf 事件
 		record, err := x.reader.Read()
 		if err != nil {
-			if err == perf.ErrClosed {
-				log.Printf("perf event reader closed, trying to restart eBPF")
+			if errors.Is(err, ringbuf.ErrClosed) {
+				log.Printf("ringbuf reader closed, trying to restart eBPF")
 				x.Close()
 				if err := x.Start(); err != nil {
 					log.Fatalf("failed to restart eBPF: %s", err.Error())
@@ -685,4 +685,37 @@ func (x *Xdp) GetGeoConfigEnabled() uint32 {
 		return 0 // 查询失败，返回未启用
 	}
 	return config.Enabled
+}
+
+// ============================================
+// Event Reporting 相关方法
+// ============================================
+
+// SetEventConfig 设置事件上报配置
+// enabled: 是否启用事件上报
+// sampleRate: 采样率，每 N 个丢弃包上报 1 个 (例如 1000 = 0.1%)
+func (x *Xdp) SetEventConfig(enabled bool, sampleRate uint32) error {
+	config := NewEventConfig(enabled, sampleRate)
+	key := uint32(0)
+	return x.objects.EventConfig.Put(&key, &config)
+}
+
+// GetEventConfig 获取当前事件上报配置
+func (x *Xdp) GetEventConfig() (EventConfig, error) {
+	key := uint32(0)
+	config := EventConfig{}
+	if err := x.objects.EventConfig.Lookup(&key, &config); err != nil {
+		// 如果查询失败（map 不存在），返回默认配置
+		return DefaultEventConfig(), err
+	}
+	return config, nil
+}
+
+// IsEventReportingEnabled 检查事件上报是否启用
+func (x *Xdp) IsEventReportingEnabled() bool {
+	config, err := x.GetEventConfig()
+	if err != nil {
+		return false
+	}
+	return config.Enabled == 1
 }
