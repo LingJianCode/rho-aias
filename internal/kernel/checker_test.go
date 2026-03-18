@@ -47,6 +47,12 @@ func TestVersionCompare(t *testing.T) {
 		// Complex comparisons
 		{Version{6, 1, 25}, Version{5, 15, 0}, 1},
 		{Version{4, 19, 100}, Version{5, 0, 0}, -1},
+
+		// Edge cases for Issue #34
+		{Version{0, 0, 0}, Version{0, 0, 0}, 0},
+		{Version{0, 0, 0}, Version{1, 0, 0}, -1},
+		{Version{999, 999, 999}, Version{999, 999, 998}, 1},
+		{Version{999, 999, 998}, Version{999, 999, 999}, -1},
 	}
 
 	for _, tt := range tests {
@@ -69,6 +75,11 @@ func TestVersionAtLeast(t *testing.T) {
 		{Version{4, 18, 1}, Version{4, 18, 0}, true},
 		{Version{4, 17, 0}, Version{4, 18, 0}, false},
 		{Version{3, 10, 0}, Version{4, 18, 0}, false},
+		// Edge cases for Issue #34
+		{Version{0, 0, 0}, Version{4, 18, 0}, false},
+		{Version{999, 999, 999}, Version{4, 18, 0}, true},
+		{Version{4, 18, 0}, Version{4, 18, 0}, true},  // boundary
+		{Version{4, 17, 999}, Version{4, 18, 0}, false}, // just below boundary
 	}
 
 	for _, tt := range tests {
@@ -136,6 +147,49 @@ func TestParseKernelVersion(t *testing.T) {
 			want:    Version{},
 			wantErr: true,
 		},
+		// Edge cases for Issue #34
+		{
+			name:    "kernel version 0.0.0",
+			content: "Linux version 0.0.0 (test@localhost) #1 SMP",
+			want:    Version{0, 0, 0},
+			wantErr: false,
+		},
+		{
+			name:    "very large version numbers 999.999.999",
+			content: "Linux version 999.999.999-test (test@localhost) #1 SMP",
+			want:    Version{999, 999, 999},
+			wantErr: false,
+		},
+		{
+			name:    "large minor version 5.999.1",
+			content: "Linux version 5.999.1-test (test@localhost) #1 SMP",
+			want:    Version{5, 999, 1},
+			wantErr: false,
+		},
+		{
+			name:    "large patch version 5.15.9999",
+			content: "Linux version 5.15.9999-test (test@localhost) #1 SMP",
+			want:    Version{5, 15, 9999},
+			wantErr: false,
+		},
+		{
+			name:    "minimum version boundary 4.18.0",
+			content: "Linux version 4.18.0 (test@localhost) #1 SMP",
+			want:    Version{4, 18, 0},
+			wantErr: false,
+		},
+		{
+			name:    "just below minimum 4.17.999",
+			content: "Linux version 4.17.999 (test@localhost) #1 SMP",
+			want:    Version{4, 17, 999},
+			wantErr: false,
+		},
+		{
+			name:    "version with zero minor and patch 5.0.0",
+			content: "Linux version 5.0.0 (test@localhost) #1 SMP",
+			want:    Version{5, 0, 0},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -169,7 +223,7 @@ func TestRecommendedVersion(t *testing.T) {
 func TestCheckAndValidate(t *testing.T) {
 	// This test runs on the actual system, so we just verify it doesn't panic
 	// and returns a meaningful result
-	err := CheckAndValidate()
+	result, err := CheckAndValidate()
 
 	// Get the actual kernel version for logging purposes
 	version, verr := GetKernelVersion()
@@ -186,6 +240,10 @@ func TestCheckAndValidate(t *testing.T) {
 		if err != nil {
 			t.Errorf("CheckAndValidate() should pass for kernel %s >= %s, but got error: %v",
 				version, MinVersion, err)
+		}
+		// Verify result is returned correctly
+		if result.CurrentVersion != version {
+			t.Errorf("CheckAndValidate() result.CurrentVersion = %v, want %v", result.CurrentVersion, version)
 		}
 	} else {
 		if err == nil {

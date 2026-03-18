@@ -29,17 +29,16 @@ import (
 
 func main() {
 	// Check kernel version before initializing eBPF/XDP
-	if err := kernel.CheckAndValidate(); err != nil {
+	result, err := kernel.CheckAndValidate()
+	if err != nil {
 		log.Fatalf("[Kernel] %v", err)
 	}
 
-	// Log kernel version info
-	if result, err := kernel.Check(); err == nil {
-		log.Printf("[Kernel] Detected kernel version: %s", result.CurrentVersion)
-		if !result.MeetsRecommended {
-			log.Printf("[Kernel] Warning: kernel version %s is below recommended version %s",
-				result.CurrentVersion, result.RecommendedVersion)
-		}
+	// Log kernel version info (reusing the result from CheckAndValidate)
+	log.Printf("[Kernel] Detected kernel version: %s", result.CurrentVersion)
+	if !result.MeetsRecommended {
+		log.Printf("[Kernel] Warning: kernel version %s is below recommended version %s",
+			result.CurrentVersion, result.RecommendedVersion)
 	}
 
 	cfg := config.NewConfig("config.yml")
@@ -47,8 +46,7 @@ func main() {
 	// Initialize XDP (existing functionality)
 	xdp := ebpfs.NewXdp(cfg.Ebpf.InterfaceName)
 	defer xdp.Close()
-	err := xdp.Start()
-	if err != nil {
+	if err := xdp.Start(); err != nil {
 		panic(err)
 	}
 	go xdp.MonitorEvents()
