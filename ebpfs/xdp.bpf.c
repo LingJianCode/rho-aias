@@ -146,12 +146,14 @@ struct {
     __uint(max_entries, 1);
 } scratch SEC(".maps");
 
-// Performance event map for reporting matched packets
+// Ring buffer for reporting matched packets (Linux 5.8+)
+// BPF_MAP_TYPE_RINGBUF offers better performance than PERF_EVENT_ARRAY:
+// - Global shared buffer instead of per-CPU buffers
+// - Guaranteed event ordering
+// - Lower memory overhead and fewer wakeups
 struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(key_size, sizeof(int));
-    __uint(value_size, sizeof(int));
-    __uint(max_entries, 128);
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 20);  // 1MB buffer size
 } events SEC(".maps");
 
 // Geo-blocking configuration map
@@ -519,7 +521,7 @@ submit:
             // 如果 random % sample_rate == 0，则上报
             __u32 random_val = bpf_get_prandom_u32();
             if ((random_val % sample_rate) == 0) {
-                bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, pkt_info, sizeof(*pkt_info));
+                bpf_ringbuf_output(&events, pkt_info, sizeof(*pkt_info), 0);
             }
         }
     }
