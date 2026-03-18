@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 )
 
@@ -24,7 +24,7 @@ type Xdp struct {
 	InterfaceName string
 	objects       *xdpObjects
 	link          *link.Link
-	reader        *perf.Reader
+	reader       *ringbuf.Reader
 	done          chan struct{}
 	linkType      string
 	callback      BlockLogCallback // 阻断事件回调
@@ -54,10 +54,10 @@ func (x *Xdp) Start() error {
 		return fmt.Errorf("failed to load eBPF objects: %s", err.Error())
 	}
 	x.objects = &ebpfObj
-	x.reader, err = perf.NewReader(x.objects.Events, os.Getpagesize())
+	x.reader, err = ringbuf.NewReader(x.objects.Events)
 	if err != nil {
 		x.Close()
-		return fmt.Errorf("failed to create perf event reader: %s", err.Error())
+		return fmt.Errorf("failed to create ringbuf reader: %s", err.Error())
 	}
 	x.done = make(chan struct{})
 
@@ -118,11 +118,11 @@ func (x *Xdp) MonitorEvents() {
 		default:
 		}
 
-		// 阻塞式读取 perf 事件
+		// 阻塞式读取 ringbuf 事件
 		record, err := x.reader.Read()
 		if err != nil {
-			if err == perf.ErrClosed {
-				log.Printf("perf event reader closed, trying to restart eBPF")
+			if errors.Is(err, ringbuf.ErrClosed) {
+				log.Printf("ringbuf reader closed, trying to restart eBPF")
 				x.Close()
 				if err := x.Start(); err != nil {
 					log.Fatalf("failed to restart eBPF: %s", err.Error())
