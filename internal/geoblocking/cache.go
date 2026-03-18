@@ -50,15 +50,15 @@ func (c *Cache) Save(data *CacheData) error {
 
 	encoder := gob.NewEncoder(f)
 	if err := encoder.Encode(data); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+		f.Close() // 忽略关闭错误
+		os.Remove(tmpPath) // 清理临时文件
 		return fmt.Errorf("encode cache data failed: %w", err)
 	}
 
 	// 2. 确保数据写入磁盘
 	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+		f.Close() // 忽略关闭错误
+		os.Remove(tmpPath) // 清理临时文件
 		return fmt.Errorf("sync cache data failed: %w", err)
 	}
 
