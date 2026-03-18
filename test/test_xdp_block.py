@@ -18,6 +18,7 @@ eBPF XDP IP 阻断功能集成测试
 import json
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -25,6 +26,12 @@ import time
 import unittest
 from typing import Optional, Tuple
 from netns import NetNS, VethPair, TestEnvironment
+
+try:
+    import yaml
+except ImportError:
+    print("PyYAML is required. Install with: pip install pyyaml")
+    sys.exit(1)
 
 # 配置日志
 logging.basicConfig(
@@ -37,12 +44,13 @@ logger = logging.getLogger(__name__)
 class RhoAiasProcess:
     """rho-aias 进程管理类"""
     
-    def __init__(self, binary_path: str, config_path: str, interface: str):
+    def __init__(self, binary_path: str, default_config_path: str, interface: str, api_port: int = 18080):
         self.binary_path = binary_path
-        self.config_path = config_path
+        self.default_config_path = default_config_path
         self.interface = interface
+        self.api_port = api_port
         self.process: Optional[subprocess.Popen] = None
-        self.api_port = 18080  # 测试用端口
+        self.config_dir = "/tmp/rho_test"
     
     def start(self) -> bool:
         """启动 rho-aias 进程"""
@@ -50,32 +58,43 @@ class RhoAiasProcess:
             logger.error(f"Binary not found: {self.binary_path}")
             return False
         
-        # 创建临时配置文件 - 使用 /tmp/config.yml
-        config_dir = "/tmp"
-        config_file = os.path.join(config_dir, "config.yml")
-        config_content = f"""server:
-  port: {self.api_port}
-ebpf:
-  interface_name: {self.interface}
-intel:
-  enabled: false
-geo_blocking:
-  enabled: false
-manual:
-  enabled: false
-auth:
-  enabled: false
-"""
-        with open(config_file, 'w') as f:
-            f.write(config_content)
+        # 创建临时配置目录
+        os.makedirs(self.config_dir, exist_ok=True)
+        config_file = os.path.join(self.config_dir, "config.yml")
+        
+        # 读取默认配置文件
+        try:
+            with open(self.default_config_path, 'r') as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Failed to load default config: {e}")
+            return False
+        
+        # 覆盖测试所需的配置项
+        config['server']['port'] = self.api_port
+        config['ebpf']['interface_name'] = self.interface
+        
+        # 禁用外部数据源（测试环境）
+        config['intel']['enabled'] = False
+        config['geo_blocking']['enabled'] = False
+        config['manual']['enabled'] = True  # 保留手动规则功能用于测试
+        config['auth']['enabled'] = False
+        
+        # 写入临时配置文件
+        try:
+            with open(config_file, 'w') as f:
+                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+        except Exception as e:
+            logger.error(f"Failed to write temp config: {e}")
+            return False
 
         logger.info(f"Starting rho-aias on interface {self.interface}...")
 
         try:
-            # 在配置文件所在目录运行程序，这样 main.go 可以找到 config.yml
+            # 在配置文件所在目录运行程序
             self.process = subprocess.Popen(
                 [self.binary_path],
-                cwd=config_dir,  # 设置工作目录为 /tmp
+                cwd=self.config_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 preexec_fn=os.setsid
@@ -111,10 +130,9 @@ auth:
             finally:
                 self.process = None
         
-        # 清理配置文件
-        config_file = os.path.join("/tmp", "config.yml")
-        if os.path.exists(config_file):
-            os.remove(config_file)
+        # 清理临时配置目录
+        if os.path.exists(self.config_dir):
+            shutil.rmtree(self.config_dir)
 
 
 class APIClient:
@@ -178,13 +196,17 @@ class TestXDPIpBlocking(unittest.TestCase):
         
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-        cls.config_path = "/tmp/rho_test_config.yml"
+        cls.default_config_path = os.path.join(cls.project_root, "config.yml")
         cls.api_port = 18080
         cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}")
         
         # 检查二进制文件
         if not os.path.exists(cls.binary_path):
             raise unittest.SkipTest(f"Binary not found: {cls.binary_path}. Run 'make build' first.")
+        
+        # 检查默认配置文件
+        if not os.path.exists(cls.default_config_path):
+            raise unittest.SkipTest(f"Default config not found: {cls.default_config_path}")
     
     def setUp(self):
         """每个测试前的准备工作"""
@@ -213,8 +235,9 @@ class TestXDPIpBlocking(unittest.TestCase):
         """在指定 veth 上启动 rho-aias"""
         self.rho_process = RhoAiasProcess(
             self.binary_path,
-            self.config_path,
-            veth_name
+            self.default_config_path,
+            veth_name,
+            self.api_port
         )
         return self.rho_process.start()
     
