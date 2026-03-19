@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -125,10 +126,30 @@ func main() {
 	})
 	blockLogHandle := handles.NewBlockLogHandle(blockLog)
 
+	// Initialize database (needed for Intel and GeoBlocking status recording)
+	var db *database.Database
+	dbPath := cfg.Auth.DatabasePath
+	if dbPath == "" {
+		dbPath = "./data/auth.db"
+	}
+	db, err = database.NewDatabase(dbPath)
+	if err != nil {
+		logger.Warnf("[Main] Failed to initialize database: %v (status recording will be disabled)", err)
+	} else {
+		// Auto migrate
+		if err := db.AutoMigrate(); err != nil {
+			logger.Warnf("[Main] Failed to migrate database: %v", err)
+		}
+	}
+
 	// Initialize Intel Manager (if enabled)
 	var intelMgr *threatintel.Manager
+	var dbConn *gorm.DB
+	if db != nil {
+		dbConn = db.DB
+	}
 	if cfg.Intel.Enabled {
-		intelMgr = threatintel.NewManager(&cfg.Intel, xdp, db.DB)
+		intelMgr = threatintel.NewManager(&cfg.Intel, xdp, dbConn)
 		if err := intelMgr.Start(); err != nil {
 			logger.Warnf("[Main] Intel manager start failed: %v", err)
 		}
@@ -156,7 +177,7 @@ func main() {
 	// Initialize Geo-Blocking Manager (if enabled)
 	var geoMgr *geoblocking.Manager
 	if cfg.GeoBlocking.Enabled {
-		geoMgr = geoblocking.NewManager(&cfg.GeoBlocking, xdp, db.DB)
+		geoMgr = geoblocking.NewManager(&cfg.GeoBlocking, xdp, dbConn)
 		if err := geoMgr.Start(); err != nil {
 			logger.Warnf("[Main] Geo-blocking manager start failed: %v", err)
 		}
@@ -183,7 +204,6 @@ func main() {
 
 	// Initialize Authentication (if enabled)
 	var (
-		db             *database.Database
 		authService    *services.AuthService
 		userService    *services.UserService
 		apiKeyService  *services.APIKeyService
@@ -195,22 +215,8 @@ func main() {
 		captchaStore   *captcha.MemoryStore
 		casbinEnforcer *casbin.Enforcer
 	)
-	if cfg.Auth.Enabled {
-		// Initialize database
-		dbPath := cfg.Auth.DatabasePath
-		if dbPath == "" {
-			dbPath = "./data/auth.db"
-		}
-		db, err = database.NewDatabase(dbPath)
-		if err != nil {
-			logger.Fatalf("[Auth] Failed to initialize database: %v", err)
-		}
+	if cfg.Auth.Enabled && db != nil {
 		defer db.Close()
-
-		// Auto migrate
-		if err := db.AutoMigrate(); err != nil {
-			logger.Fatalf("[Auth] Failed to migrate database: %v", err)
-		}
 
 		// Initialize Casbin
 		casbinEnforcer, err = casbin.NewEnforcer(db.DB)

@@ -11,7 +11,6 @@ import (
 	"rho-aias/internal/logger"
 	"rho-aias/internal/models"
 
-	"github.com/glebarez/sqlite"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )
@@ -189,7 +188,7 @@ func (m *Manager) updateSource(sourceID SourceID, source config.IntelSource) err
 	if err != nil {
 		// 记录失败状态到数据库
 		duration := time.Since(startTime).Milliseconds()
-		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
+		_ = m.recordStatusToDB(string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[ThreatIntel] [%s] Fetched %d bytes", sourceID, len(data))
@@ -199,7 +198,7 @@ func (m *Manager) updateSource(sourceID SourceID, source config.IntelSource) err
 	if err != nil {
 		// 记录失败状态到数据库
 		duration := time.Since(startTime).Milliseconds()
-		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
+		_ = m.recordStatusToDB(string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[ThreatIntel] [%s] Parsed %d rules (exact: %d, cidr: %d)",
@@ -210,7 +209,7 @@ func (m *Manager) updateSource(sourceID SourceID, source config.IntelSource) err
 	if err := m.syncer.SyncToKernel(parsed, sourceMask); err != nil {
 		// 记录失败状态到数据库
 		duration := time.Since(startTime).Milliseconds()
-		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
+		_ = m.recordStatusToDB(string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 
@@ -219,7 +218,7 @@ func (m *Manager) updateSource(sourceID SourceID, source config.IntelSource) err
 
 	// 5. 记录成功状态到数据库
 	duration := time.Since(startTime).Milliseconds()
-	if err := m.recordStatusToDB(string(sourceID), source.Name, "success", parsed.TotalCount(), "", duration); err != nil {
+	if err := m.recordStatusToDB(string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
 		logger.Errorf("[ThreatIntel] [%s] Failed to record status to DB: %v", sourceID, err)
 	}
 

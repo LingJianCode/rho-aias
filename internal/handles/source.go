@@ -31,8 +31,6 @@ func NewSourceHandle(db *gorm.DB, intelMgr *threatintel.Manager, geoMgr *geobloc
 
 // GetStatus 获取所有数据源状态
 func (h *SourceHandle) GetStatus(c *gin.Context) {
-	var records []models.SourceStatusRecord
-
 	// 获取最近一次的状态记录（每个数据源只保留最新的）
 	type Result struct {
 		ID           uint      `json:"id"`
