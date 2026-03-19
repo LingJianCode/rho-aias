@@ -10,6 +10,7 @@ import (
 	"rho-aias/internal/logger"
 	"rho-aias/utils"
 	"strings"
+	"sync"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -25,6 +26,7 @@ type Xdp struct {
 	link          *link.Link
 	reader       *ringbuf.Reader
 	done          chan struct{}
+	doneOnce      sync.Once
 	linkType      string
 	callback      BlockLogCallback // 阻断事件回调
 }
@@ -88,18 +90,20 @@ func (x *Xdp) Start() error {
 
 func (x *Xdp) Close() {
 	logger.Info("[XDP] Close")
-	if x.done != nil {
-		close(x.done)
-	}
-	if x.reader != nil {
-		x.reader.Close()
-	}
-	if x.link != nil {
-		(*x.link).Close()
-	}
-	if x.objects != nil {
-		x.objects.Close()
-	}
+	x.doneOnce.Do(func() {
+		if x.done != nil {
+			close(x.done)
+		}
+		if x.reader != nil {
+			x.reader.Close()
+		}
+		if x.link != nil {
+			(*x.link).Close()
+		}
+		if x.objects != nil {
+			x.objects.Close()
+		}
+	})
 }
 
 func (x *Xdp) GetLinkType() string {
