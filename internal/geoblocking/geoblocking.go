@@ -203,7 +203,7 @@ func (m *Manager) updateSource(sourceID SourceID, source config.GeoIPSource) err
 	if err != nil {
 		// 记录失败状态到数据库
 		duration := time.Since(startTime).Milliseconds()
-		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
+		_ = m.recordStatusToDB(string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[GeoBlocking] [%s] Fetched %d bytes", sourceID, len(data))
@@ -213,7 +213,7 @@ func (m *Manager) updateSource(sourceID SourceID, source config.GeoIPSource) err
 	if err != nil {
 		// 记录失败状态到数据库
 		duration := time.Since(startTime).Milliseconds()
-		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
+		_ = m.recordStatusToDB(string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[GeoBlocking] [%s] Parsed %d rules", sourceID, parsed.TotalCount())
@@ -228,7 +228,7 @@ func (m *Manager) updateSource(sourceID SourceID, source config.GeoIPSource) err
 	if err := m.syncer.SyncToKernel(parsed, geoConfig); err != nil {
 		// 记录失败状态到数据库
 		duration := time.Since(startTime).Milliseconds()
-		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
+		_ = m.recordStatusToDB(string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 
@@ -237,7 +237,7 @@ func (m *Manager) updateSource(sourceID SourceID, source config.GeoIPSource) err
 
 	// 5. 记录成功状态到数据库
 	duration := time.Since(startTime).Milliseconds()
-	if err := m.recordStatusToDB(string(sourceID), source.Name, "success", parsed.TotalCount(), "", duration); err != nil {
+	if err := m.recordStatusToDB(string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
 		logger.Errorf("[GeoBlocking] [%s] Failed to record status to DB: %v", sourceID, err)
 	}
 
