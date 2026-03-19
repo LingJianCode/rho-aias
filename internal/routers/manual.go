@@ -15,7 +15,6 @@ func RegisterManualRoutes(group *gin.RouterGroup, manualHandle *handles.ManualHa
 
 	// 如果没有启用认证，直接注册路由
 	if enforcer == nil || authService == nil || apiKeyService == nil {
-		manual.GET("/rules", manualHandle.GetRule)
 		manual.POST("/rules", manualHandle.AddRule)
 		manual.DELETE("/rules", manualHandle.DelRule)
 		return
@@ -23,13 +22,6 @@ func RegisterManualRoutes(group *gin.RouterGroup, manualHandle *handles.ManualHa
 
 	// 启用认证，添加权限控制
 	{
-		// 查看规则 - 需要 firewall:read 权限
-		manual.GET("/rules",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
-			manualHandle.GetRule,
-		)
-
 		// 添加规则 - 需要 firewall:write 权限
 		manual.POST("/rules",
 			middleware.AuthMiddleware(authService, apiKeyService),

@@ -311,6 +311,10 @@ func main() {
 		routers.RegisterManualRoutes(api, manualHandle, casbinEnforcer, authService, apiKeyService)
 		routers.RegisterBlockLogRoutes(api, blockLogHandle, casbinEnforcer, authService, apiKeyService)
 
+		// Register Rule query routes
+		ruleQueryHandle := handles.NewRuleQueryHandle(xdp)
+		routers.RegisterRuleRoutes(api, ruleQueryHandle, casbinEnforcer, authService, apiKeyService)
+
 		// Register Event Reporting routes
 		eventHandle := handles.NewEventHandle(xdp)
 		routers.RegisterEventRoutes(api, eventHandle, casbinEnforcer, authService, apiKeyService)
@@ -330,6 +334,10 @@ func main() {
 		// No authentication, register routes directly
 		routers.RegisterManualRoutes(api, manualHandle, nil, nil, nil)
 		routers.RegisterBlockLogRoutes(api, blockLogHandle, nil, nil, nil)
+
+		// Register Rule query routes
+		ruleQueryHandle := handles.NewRuleQueryHandle(xdp)
+		routers.RegisterRuleRoutes(api, ruleQueryHandle, nil, nil, nil)
 
 		// Register Source status routes
 		if db != nil {
