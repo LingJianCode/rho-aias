@@ -46,6 +46,7 @@ func (db *Database) AutoMigrate() error {
 		&models.User{},
 		&models.APIKey{},
 		&models.AuditLog{},
+		&models.SourceStatusRecord{},
 	)
 }
 
