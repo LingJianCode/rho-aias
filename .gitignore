@@ -9,3 +9,4 @@ vmlinux.h
 data
 *.out
 __pycache__
+logs
