@@ -124,7 +124,7 @@ func main() {
 	// Initialize Intel Manager (if enabled)
 	var intelMgr *threatintel.Manager
 	if cfg.Intel.Enabled {
-		intelMgr = threatintel.NewManager(&cfg.Intel, xdp)
+		intelMgr = threatintel.NewManager(&cfg.Intel, xdp, db.DB)
 		if err := intelMgr.Start(); err != nil {
 			logger.Warnf("[Main] Intel manager start failed: %v", err)
 		}
@@ -135,7 +135,7 @@ func main() {
 	// Initialize Geo-Blocking Manager (if enabled)
 	var geoMgr *geoblocking.Manager
 	if cfg.GeoBlocking.Enabled {
-		geoMgr = geoblocking.NewManager(&cfg.GeoBlocking, xdp)
+		geoMgr = geoblocking.NewManager(&cfg.GeoBlocking, xdp, db.DB)
 		if err := geoMgr.Start(); err != nil {
 			logger.Warnf("[Main] Geo-blocking manager start failed: %v", err)
 		}
@@ -257,6 +257,12 @@ func main() {
 			routers.RegisterAuditRoutes(api, auditHandle, casbinEnforcer, authService, apiKeyService)
 		}
 
+		// Register Source status routes (需要数据库)
+		if db != nil {
+			sourceHandle := handles.NewSourceHandle(db.DB, intelMgr, geoMgr)
+			routers.RegisterSourceRoutes(api, sourceHandle, casbinEnforcer, authService, apiKeyService)
+		}
+
 		// Register protected routes with Casbin middleware
 		routers.RegisterManualRoutes(api, manualHandle, casbinEnforcer, authService, apiKeyService)
 		routers.RegisterBlockLogRoutes(api, blockLogHandle, casbinEnforcer, authService, apiKeyService)
@@ -280,6 +286,12 @@ func main() {
 		// No authentication, register routes directly
 		routers.RegisterManualRoutes(api, manualHandle, nil, nil, nil)
 		routers.RegisterBlockLogRoutes(api, blockLogHandle, nil, nil, nil)
+
+		// Register Source status routes
+		if db != nil {
+			sourceHandle := handles.NewSourceHandle(db.DB, intelMgr, geoMgr)
+			routers.RegisterSourceRoutes(api, sourceHandle, nil, nil, nil)
+		}
 
 		// Register Event Reporting routes
 		eventHandle := handles.NewEventHandle(xdp)

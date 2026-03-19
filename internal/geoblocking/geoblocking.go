@@ -9,8 +9,10 @@ import (
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
+	"rho-aias/internal/models"
 
 	"github.com/robfig/cron/v3"
+	"gorm.io/gorm"
 )
 
 // Manager GeoIP 管理器
@@ -30,12 +32,17 @@ type Manager struct {
 	// 状态管理
 	status       *Status                    // 模块状态
 	sourceStatus map[SourceID]*SourceStatus // 各 GeoIP 源状态
+
+	// 新增：数据库支持和并发控制
+	db            *gorm.DB                 // 数据库连接
+	sourceMutexes map[SourceID]*sync.Mutex // 各数据源的互斥锁
 }
 
 // NewManager 创建新的 GeoIP 管理器
 // cfg: GeoBlocking 配置
 // xdp: XDP eBPF 程序接口
-func NewManager(cfg *config.GeoBlockingConfig, xdp *ebpfs.Xdp) *Manager {
+// db: 数据库连接（用于记录状态）
+func NewManager(cfg *config.GeoBlockingConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Manager {
 	return &Manager{
 		config:       cfg,
 		xdp:          xdp,
@@ -45,6 +52,8 @@ func NewManager(cfg *config.GeoBlockingConfig, xdp *ebpfs.Xdp) *Manager {
 		syncer:       NewSyncer(xdp, cfg.BatchSize),
 		done:         make(chan struct{}),
 		sourceStatus: make(map[SourceID]*SourceStatus),
+		db:           db,
+		sourceMutexes: make(map[SourceID]*sync.Mutex),
 		status: &Status{
 			Enabled:          cfg.Enabled,
 			Mode:             cfg.Mode,
@@ -178,11 +187,23 @@ func (m *Manager) updateAllSources() {
 // sourceID: GeoIP 源标识符
 // source: GeoIP 源配置
 func (m *Manager) updateSource(sourceID SourceID, source config.GeoIPSource) error {
+	// 检查互斥锁，如果正在执行则跳过
+	mu := m.getSourceMutex(sourceID)
+	if !mu.TryLock() {
+		logger.Warnf("[GeoBlocking] [%s] Update skipped - already in progress", sourceID)
+		return fmt.Errorf("update already in progress")
+	}
+	defer mu.Unlock()
+
 	logger.Infof("[GeoBlocking] [%s] Fetching from %s", sourceID, source.URL)
+	startTime := time.Now()
 
 	// 1. 获取数据
 	data, err := m.fetcher.Fetch(source.URL)
 	if err != nil {
+		// 记录失败状态到数据库
+		duration := time.Since(startTime).Milliseconds()
+		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[GeoBlocking] [%s] Fetched %d bytes", sourceID, len(data))
@@ -190,6 +211,9 @@ func (m *Manager) updateSource(sourceID SourceID, source config.GeoIPSource) err
 	// 2. 解析数据（传递允许的国家列表）
 	parsed, err := m.parser.Parse(data, source.Format, m.config.AllowedCountries, sourceID)
 	if err != nil {
+		// 记录失败状态到数据库
+		duration := time.Since(startTime).Milliseconds()
+		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[GeoBlocking] [%s] Parsed %d rules", sourceID, parsed.TotalCount())
@@ -202,11 +226,25 @@ func (m *Manager) updateSource(sourceID SourceID, source config.GeoIPSource) err
 		AllowPrivateNetworks: m.config.AllowPrivateNetworks,
 	}
 	if err := m.syncer.SyncToKernel(parsed, geoConfig); err != nil {
+		// 记录失败状态到数据库
+		duration := time.Since(startTime).Milliseconds()
+		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
 		return err
 	}
 
 	// 4. 更新状态
 	m.updateSourceStatus(sourceID, true, parsed.TotalCount(), "")
+
+	// 5. 记录成功状态到数据库
+	duration := time.Since(startTime).Milliseconds()
+	if err := m.recordStatusToDB(string(sourceID), source.Name, "success", parsed.TotalCount(), "", duration); err != nil {
+		logger.Errorf("[GeoBlocking] [%s] Failed to record status to DB: %v", sourceID, err)
+	}
+
+	// 6. 清理 30 天前的历史记录
+	if err := m.cleanOldRecords(string(sourceID)); err != nil {
+		logger.Errorf("[GeoBlocking] [%s] Failed to clean old records: %v", sourceID, err)
+	}
 
 	return nil
 }
@@ -407,4 +445,51 @@ func (m *Manager) Stop() {
 	}
 	close(m.done)
 	logger.Info("[GeoBlocking] Stopped")
+}
+
+// getSourceMutex 获取指定数据源的互斥锁
+func (m *Manager) getSourceMutex(sourceID SourceID) *sync.Mutex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	mu, exists := m.sourceMutexes[sourceID]
+	if !exists {
+		mu = &sync.Mutex{}
+		m.sourceMutexes[sourceID] = mu
+	}
+	return mu
+}
+
+// recordStatusToDB 记录状态到数据库
+func (m *Manager) recordStatusToDB(sourceID, sourceName, status string, ruleCount int, errMsg string, duration int64) error {
+	if m.db == nil {
+		return fmt.Errorf("database connection is nil")
+	}
+
+	record := &models.SourceStatusRecord{
+		SourceType:   "geo_blocking",
+		SourceID:     sourceID,
+		SourceName:   sourceName,
+		Status:       status,
+		RuleCount:    ruleCount,
+		ErrorMessage: errMsg,
+		Duration:     int(duration),
+		UpdatedAt:    time.Now(),
+		CreatedAt:    time.Now(),
+	}
+
+	if err := m.db.Create(record).Error; err != nil {
+		return fmt.Errorf("failed to create status record: %w", err)
+	}
+
+	return nil
+}
+
+// cleanOldRecords 清理 30 天前的历史记录
+func (m *Manager) cleanOldRecords(sourceID string) error {
+	if m.db == nil {
+		return fmt.Errorf("database connection is nil")
+	}
+
+	return models.CleanOldRecords(m.db, "geo_blocking", sourceID)
 }
