@@ -9,8 +9,11 @@ import (
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
+	"rho-aias/internal/models"
 
+	"github.com/glebarez/sqlite"
 	"github.com/robfig/cron/v3"
+	"gorm.io/gorm"
 )
 
 // Manager 威胁情报管理器
@@ -31,12 +34,17 @@ type Manager struct {
 	status       *Status                    // 模块状态
 	lastUpdate   time.Time                  // 最后更新时间
 	sourceStatus map[SourceID]*SourceStatus // 各情报源状态
+
+	// 新增：数据库支持和并发控制
+	db               *gorm.DB                       // 数据库连接
+	sourceMutexes    map[SourceID]*sync.Mutex       // 各数据源的互斥锁
 }
 
 // NewManager 创建新的威胁情报管理器
 // cfg: 威胁情报配置
 // xdp: XDP eBPF 程序接口
-func NewManager(cfg *config.IntelConfig, xdp *ebpfs.Xdp) *Manager {
+// db: 数据库连接（用于记录状态）
+func NewManager(cfg *config.IntelConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Manager {
 	return &Manager{
 		config:       cfg,
 		xdp:          xdp,
@@ -46,6 +54,8 @@ func NewManager(cfg *config.IntelConfig, xdp *ebpfs.Xdp) *Manager {
 		syncer:       NewSyncer(xdp, cfg.BatchSize),
 		done:         make(chan struct{}),
 		sourceStatus: make(map[SourceID]*SourceStatus),
+		db:           db,
+		sourceMutexes: make(map[SourceID]*sync.Mutex),
 		status: &Status{
 			Enabled: cfg.Enabled,
 			Sources: make(map[SourceID]SourceStatus),
@@ -163,11 +173,23 @@ func (m *Manager) updateAllSources() {
 // sourceID: 情报源标识符
 // source: 情报源配置
 func (m *Manager) updateSource(sourceID SourceID, source config.IntelSource) error {
+	// 检查互斥锁，如果正在执行则跳过
+	mu := m.getSourceMutex(sourceID)
+	if !mu.TryLock() {
+		logger.Warnf("[ThreatIntel] [%s] Update skipped - already in progress", sourceID)
+		return fmt.Errorf("update already in progress")
+	}
+	defer mu.Unlock()
+
 	logger.Infof("[ThreatIntel] [%s] Fetching from %s", sourceID, source.URL)
+	startTime := time.Now()
 
 	// 1. 获取数据
 	data, err := m.fetcher.Fetch(source.URL)
 	if err != nil {
+		// 记录失败状态到数据库
+		duration := time.Since(startTime).Milliseconds()
+		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[ThreatIntel] [%s] Fetched %d bytes", sourceID, len(data))
@@ -175,6 +197,9 @@ func (m *Manager) updateSource(sourceID SourceID, source config.IntelSource) err
 	// 2. 解析数据
 	parsed, err := m.parser.Parse(data, source.Format, sourceID)
 	if err != nil {
+		// 记录失败状态到数据库
+		duration := time.Since(startTime).Milliseconds()
+		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[ThreatIntel] [%s] Parsed %d rules (exact: %d, cidr: %d)",
@@ -183,11 +208,25 @@ func (m *Manager) updateSource(sourceID SourceID, source config.IntelSource) err
 	// 3. 同步到内核（传递来源掩码）
 	sourceMask := sourceIDToMask(sourceID)
 	if err := m.syncer.SyncToKernel(parsed, sourceMask); err != nil {
+		// 记录失败状态到数据库
+		duration := time.Since(startTime).Milliseconds()
+		_ = m.recordStatusToDB(string(sourceID), source.Name, "failed", 0, err.Error(), duration)
 		return err
 	}
 
 	// 4. 更新状态
 	m.updateSourceStatus(sourceID, true, parsed.TotalCount(), "")
+
+	// 5. 记录成功状态到数据库
+	duration := time.Since(startTime).Milliseconds()
+	if err := m.recordStatusToDB(string(sourceID), source.Name, "success", parsed.TotalCount(), "", duration); err != nil {
+		logger.Errorf("[ThreatIntel] [%s] Failed to record status to DB: %v", sourceID, err)
+	}
+
+	// 6. 清理 30 天前的历史记录
+	if err := m.cleanOldRecords(string(sourceID)); err != nil {
+		logger.Errorf("[ThreatIntel] [%s] Failed to clean old records: %v", sourceID, err)
+	}
 
 	return nil
 }
@@ -389,4 +428,51 @@ func sourceIDToMask(sourceID SourceID) uint32 {
 	default:
 		return 0
 	}
+}
+
+// getSourceMutex 获取指定数据源的互斥锁
+func (m *Manager) getSourceMutex(sourceID SourceID) *sync.Mutex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	mu, exists := m.sourceMutexes[sourceID]
+	if !exists {
+		mu = &sync.Mutex{}
+		m.sourceMutexes[sourceID] = mu
+	}
+	return mu
+}
+
+// recordStatusToDB 记录状态到数据库
+func (m *Manager) recordStatusToDB(sourceID, sourceName, status string, ruleCount int, errMsg string, duration int64) error {
+	if m.db == nil {
+		return fmt.Errorf("database connection is nil")
+	}
+
+	record := &models.SourceStatusRecord{
+		SourceType:   "intel",
+		SourceID:     sourceID,
+		SourceName:   sourceName,
+		Status:       status,
+		RuleCount:    ruleCount,
+		ErrorMessage: errMsg,
+		Duration:     int(duration),
+		UpdatedAt:    time.Now(),
+		CreatedAt:    time.Now(),
+	}
+
+	if err := m.db.Create(record).Error; err != nil {
+		return fmt.Errorf("failed to create status record: %w", err)
+	}
+
+	return nil
+}
+
+// cleanOldRecords 清理 30 天前的历史记录
+func (m *Manager) cleanOldRecords(sourceID string) error {
+	if m.db == nil {
+		return fmt.Errorf("database connection is nil")
+	}
+
+	return models.CleanOldRecords(m.db, "intel", sourceID)
 }
