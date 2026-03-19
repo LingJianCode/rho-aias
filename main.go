@@ -130,6 +130,17 @@ func main() {
 		}
 		logger.Info("[Main] Intelligence module initialized")
 		defer intelMgr.Stop()
+
+		// 启动时自动触发更新（如果配置启用）
+		if cfg.Intel.AutoRefreshOnStart {
+			go func() {
+				time.Sleep(2 * time.Second) // 等待服务完全启动
+				logger.Info("[ThreatIntel] Auto-refresh on startup triggered")
+				if err := intelMgr.TriggerUpdate(); err != nil {
+					logger.Errorf("[ThreatIntel] Auto-refresh failed: %v", err)
+				}
+			}()
+		}
 	}
 
 	// Initialize Geo-Blocking Manager (if enabled)
@@ -141,6 +152,17 @@ func main() {
 		}
 		logger.Info("[Main] Geo-blocking module initialized")
 		defer geoMgr.Stop()
+
+		// 启动时自动触发更新（如果配置启用）
+		if cfg.GeoBlocking.AutoRefreshOnStart {
+			go func() {
+				time.Sleep(2 * time.Second) // 等待服务完全启动
+				logger.Info("[GeoBlocking] Auto-refresh on startup triggered")
+				if err := geoMgr.TriggerUpdate(); err != nil {
+					logger.Errorf("[GeoBlocking] Auto-refresh failed: %v", err)
+				}
+			}()
+		}
 	}
 
 	// Initialize Authentication (if enabled)

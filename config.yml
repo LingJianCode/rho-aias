@@ -13,6 +13,7 @@ ebpf:
   interface_name: ens33
 intel:
   enabled: true
+  auto_refresh_on_start: true  # 启动时自动刷新
   persistence_dir: ./data/intel
   batch_size: 1000
   sources:
@@ -31,6 +32,7 @@ intel:
       format: spamhaus
 geo_blocking:
   enabled: true
+  auto_refresh_on_start: true  # 启动时自动刷新
   mode: whitelist  # whitelist 或 blacklist
   allowed_countries:
     - CN  # 中国
