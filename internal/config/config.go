@@ -37,10 +37,11 @@ type EbpfConfig struct {
 
 // IntelConfig 情报配置
 type IntelConfig struct {
-	Enabled        bool                   `yaml:"enabled"`         // 总开关
-	PersistenceDir string                 `yaml:"persistence_dir"` // 持久化目录
-	Sources        map[string]IntelSource `yaml:"sources"`         // 情报源配置 (map 结构支持动态添加)
-	BatchSize      int                    `yaml:"batch_size"`      // 批量更新大小
+	Enabled          bool                   `yaml:"enabled"`            // 总开关
+	AutoRefreshOnStart bool                 `yaml:"auto_refresh_on_start"` // 启动时自动刷新
+	PersistenceDir   string                 `yaml:"persistence_dir"`   // 持久化目录
+	Sources          map[string]IntelSource `yaml:"sources"`           // 情报源配置 (map 结构支持动态添加)
+	BatchSize        int                    `yaml:"batch_size"`         // 批量更新大小
 }
 
 // IntelSource 单个情报源配置
@@ -53,13 +54,14 @@ type IntelSource struct {
 
 // GeoBlockingConfig 地域封禁配置
 type GeoBlockingConfig struct {
-	Enabled              bool                   `yaml:"enabled"`               // 总开关
-	Mode                 string                 `yaml:"mode"`                  // "whitelist" 或 "blacklist"
-	AllowedCountries     []string               `yaml:"allowed_countries"`     // 允许的国家代码列表
+	Enabled              bool                   `yaml:"enabled"`                 // 总开关
+	AutoRefreshOnStart   bool                   `yaml:"auto_refresh_on_start"`  // 启动时自动刷新
+	Mode                 string                 `yaml:"mode"`                    // "whitelist" 或 "blacklist"
+	AllowedCountries     []string               `yaml:"allowed_countries"`       // 允许的国家代码列表
 	AllowPrivateNetworks bool                   `yaml:"allow_private_networks"` // 允许私有网段绕过地域检查
-	PersistenceDir       string                 `yaml:"persistence_dir"`       // 持久化目录
-	BatchSize            int                    `yaml:"batch_size"`            // 批量更新大小
-	Sources              map[string]GeoIPSource `yaml:"sources"`               // GeoIP 数据源配置
+	PersistenceDir       string                 `yaml:"persistence_dir"`        // 持久化目录
+	BatchSize            int                    `yaml:"batch_size"`             // 批量更新大小
+	Sources              map[string]GeoIPSource `yaml:"sources"`                 // GeoIP 数据源配置
 }
 
 // GeoIPSource GeoIP 数据源配置
