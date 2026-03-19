@@ -4,12 +4,15 @@ package logger
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -440,4 +443,78 @@ func Named(name string) *zap.Logger {
 		return globalLogger.zap.Named(name)
 	}
 	return nil
+}
+
+// ========== Gin 中间件 ==========
+
+// GinLogger Gin 日志中间件
+func GinLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if globalLogger == nil || globalLogger.sugar == nil {
+			c.Next()
+			return
+		}
+
+		start := time.Now()
+		path := c.Request.URL.Path
+		query := c.Request.URL.RawQuery
+
+		c.Next()
+
+		latency := time.Since(start)
+
+		globalLogger.mu.RLock()
+		if globalLogger.stopped || globalLogger.sugar == nil {
+			globalLogger.mu.RUnlock()
+			return
+		}
+
+		fields := []interface{}{
+			"status", c.Writer.Status(),
+			"method", c.Request.Method,
+			"path", path,
+			"query", query,
+			"ip", c.ClientIP(),
+			"latency", latency.String(),
+			"user-agent", c.Request.UserAgent(),
+		}
+
+		if len(c.Errors) > 0 {
+			fields = append(fields, "errors", c.Errors.String())
+		}
+
+		switch {
+		case c.Writer.Status() >= http.StatusInternalServerError:
+			globalLogger.sugar.Errorw("[GIN]", fields...)
+		case c.Writer.Status() >= http.StatusBadRequest:
+			globalLogger.sugar.Warnw("[GIN]", fields...)
+		default:
+			globalLogger.sugar.Infow("[GIN]", fields...)
+		}
+		globalLogger.mu.RUnlock()
+	}
+}
+
+// GinRecovery Gin 异常恢复中间件
+func GinRecovery() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			if err := recover(); err != nil {
+				if globalLogger != nil && globalLogger.sugar != nil {
+					globalLogger.mu.RLock()
+					if !globalLogger.stopped && globalLogger.sugar != nil {
+						globalLogger.sugar.Errorw("[GIN] Panic recovered",
+							"error", err,
+							"path", c.Request.URL.Path,
+							"method", c.Request.Method,
+							"stack", string(debug.Stack()),
+						)
+					}
+					globalLogger.mu.RUnlock()
+				}
+				c.AbortWithStatus(http.StatusInternalServerError)
+			}
+		}()
+		c.Next()
+	}
 }
