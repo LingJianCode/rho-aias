@@ -28,6 +28,10 @@ import (
 )
 
 func main() {
+	// Create main context for managing goroutine lifecycles
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // Ensure context is cancelled on exit
+
 	// Check kernel version before initializing eBPF/XDP
 	result, err := kernel.CheckAndValidate()
 	if err != nil {
@@ -134,10 +138,16 @@ func main() {
 		// 启动时自动触发更新（如果配置启用）
 		if cfg.Intel.AutoRefreshOnStart {
 			go func() {
-				time.Sleep(2 * time.Second) // 等待服务完全启动
-				logger.Info("[ThreatIntel] Auto-refresh on startup triggered")
-				if err := intelMgr.TriggerUpdate(); err != nil {
-					logger.Errorf("[ThreatIntel] Auto-refresh failed: %v", err)
+				select {
+				case <-ctx.Done():
+					logger.Info("[ThreatIntel] Auto-refresh goroutine cancelled")
+					return
+				case <-time.After(2 * time.Second):
+					// 等待服务完全启动
+					logger.Info("[ThreatIntel] Auto-refresh on startup triggered")
+					if err := intelMgr.TriggerUpdate(); err != nil {
+						logger.Errorf("[ThreatIntel] Auto-refresh failed: %v", err)
+					}
 				}
 			}()
 		}
@@ -156,10 +166,16 @@ func main() {
 		// 启动时自动触发更新（如果配置启用）
 		if cfg.GeoBlocking.AutoRefreshOnStart {
 			go func() {
-				time.Sleep(2 * time.Second) // 等待服务完全启动
-				logger.Info("[GeoBlocking] Auto-refresh on startup triggered")
-				if err := geoMgr.TriggerUpdate(); err != nil {
-					logger.Errorf("[GeoBlocking] Auto-refresh failed: %v", err)
+				select {
+				case <-ctx.Done():
+					logger.Info("[GeoBlocking] Auto-refresh goroutine cancelled")
+					return
+				case <-time.After(2 * time.Second):
+					// 等待服务完全启动
+					logger.Info("[GeoBlocking] Auto-refresh on startup triggered")
+					if err := geoMgr.TriggerUpdate(); err != nil {
+						logger.Errorf("[GeoBlocking] Auto-refresh failed: %v", err)
+					}
 				}
 			}()
 		}
@@ -349,6 +365,10 @@ func main() {
 	// 等待信号
 	sig := <-quit
 	logger.Infof("[Main] 接收到信号: %v，开始优雅退出...", sig)
+
+	// 取消所有后台 goroutine
+	cancel()
+	logger.Info("[Main] 已取消所有后台 goroutine")
 
 	// 停止情报管理器
 
