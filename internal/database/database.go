@@ -1,6 +1,8 @@
 package database
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
@@ -104,9 +106,11 @@ func (db *Database) InitAPIKeysFromConfig(enforcer *casbin.Enforcer, apiKeys []c
 			continue
 		}
 
-		// 检查是否已存在相同 Key
+		// 检查是否已存在相同 Key（计算 Hash 后比较）
+		hash := sha256.Sum256([]byte(keyConfig.Key))
+		hashStr := hex.EncodeToString(hash[:])
 		var count int64
-		db.Model(&models.APIKey{}).Where("key = ?", keyConfig.Key).Count(&count)
+		db.Model(&models.APIKey{}).Where("key = ?", hashStr).Count(&count)
 		if count > 0 {
 			logger.Infof("[Database] API key already exists: %s", keyConfig.Name)
 			continue
@@ -131,10 +135,10 @@ func (db *Database) InitAPIKeysFromConfig(enforcer *casbin.Enforcer, apiKeys []c
 			permissionsJSON = string(permBytes)
 		}
 
-		// 创建 API Key
+		// 创建 API Key（存储 Hash 值）
 		apiKey := &models.APIKey{
 			Name:        keyConfig.Name,
-			Key:         keyConfig.Key,
+			Key:         hashStr,
 			KeyPrefix:   keyPrefix,
 			UserID:      admin.ID,
 			Permissions: permissionsJSON,
