@@ -234,6 +234,11 @@ func main() {
 			logger.Warnf("[Auth] Failed to initialize default user: %v", err)
 		}
 
+		// Initialize API Keys from config
+		if err := db.InitAPIKeysFromConfig(casbinEnforcer, cfg.Auth.APIKeys); err != nil {
+			logger.Warnf("[Auth] Failed to initialize API keys from config: %v", err)
+		}
+
 		// Initialize services
 		jwtSecret := cfg.Auth.JWTSecret
 		if jwtSecret == "" {

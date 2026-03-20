@@ -13,6 +13,8 @@
 - **持久化存储**：规则自动持久化到本地，支持离线启动
 - **Cron 定时任务**：支持独立的定时更新调度
 - **认证与授权**：JWT 认证、验证码、API Key、Casbin RBAC 权限控制
+- **阻断日志**：实时记录阻断事件，支持统计和查询
+- **事件上报**：可配置的 eBPF 事件采样上报机制
 
 ### 规则来源
 
@@ -72,6 +74,9 @@
 │  │  用户管理: GET/POST/PUT/DELETE /api/users/*                  │   │
 │  │  API Key: GET/POST/DELETE /api/api-keys/*                    │   │
 │  │  审计日志: GET/POST /api/audit/*                             │   │
+│  │  数据源: GET/POST /api/sources/*                             │   │
+│  │  规则查询: GET /api/rules                                    │   │
+│  │  事件配置: GET/POST /api/xdp/events/*                        │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -105,6 +110,8 @@ rho-aias/
 │   │   └── net_type.go           # 网络类型定义
 │   ├── geoblocking/              # 地域封禁模块
 │   ├── handles/                  # API 处理器
+│   ├── kernel/                   # 内核版本检测
+│   ├── logger/                   # 日志模块
 │   ├── manual/                   # 手动规则模块
 │   ├── middleware/               # HTTP 中间件
 │   ├── models/                   # 数据模型
@@ -112,6 +119,7 @@ rho-aias/
 │   ├── services/                 # 业务逻辑服务
 │   └── threatintel/              # 威胁情报模块
 ├── config/                       # 配置示例
+├── test/                         # 测试脚本
 └── utils/                        # 工具函数
 ```
 
@@ -145,28 +153,38 @@ make build
 ```yaml
 server:
   port: 8080                    # HTTP API 端口
+
+# 日志配置
+log:
+  level: info                   # 日志级别: debug/info/warn/error
+  format: console               # 输出格式: console/json
+  output_dir: ./logs            # 日志目录
+  max_age_days: 30              # 日志保留天数
+  rotation_hours: 1             # 按小时分割
+
 ebpf:
   interface_name: ens33         # 网络接口名称
 
 # 认证配置
 auth:
-  enabled: true                    # 是否启用认证
-  jwt_secret: ""                   # JWT 密钥，建议从环境变量 JWT_SECRET 读取
-  jwt_issuer: "rho-aias"           # JWT 签发者
-  token_duration: 1440             # Token 有效期（分钟），默认 24 小时
+  enabled: true                 # 是否启用认证
+  jwt_secret: ""                # JWT 密钥，建议从环境变量 JWT_SECRET 读取
+  jwt_issuer: "rho-aias"        # JWT 签发者
+  token_duration: 1440          # Token 有效期（分钟），默认 24 小时
   database_path: "./data/auth.db"  # 数据库路径
-  captcha_enabled: true            # 是否启用验证码
-  captcha_duration: 5              # 验证码有效期（分钟）
+  captcha_enabled: true         # 是否启用验证码
+  captcha_duration: 5           # 验证码有效期（分钟）
 
 # 威胁情报配置
 intel:
   enabled: true
+  auto_refresh_on_start: true   # 启动时自动刷新
   persistence_dir: ./data/intel
   batch_size: 1000
   sources:
     ipsum:
       enabled: true
-      schedule: "0 1 * * *"    # Cron 表达式
+      schedule: "0 1 * * *"     # Cron 表达式
       url: http://localhost/ipsum.txt
       format: ipsum
     spamhaus:
@@ -178,6 +196,7 @@ intel:
 # 地域封禁配置
 geo_blocking:
   enabled: true
+  auto_refresh_on_start: true   # 启动时自动刷新
   mode: whitelist               # whitelist 或 blacklist
   allowed_countries:
     - CN                        # 允许的国家代码
@@ -195,8 +214,57 @@ geo_blocking:
 manual:
   enabled: true
   persistence_dir: ./data/manual
-  auto_load: true              # 启动时自动加载
+  auto_load: true               # 启动时自动加载
+
+# 阻断日志配置
+blocklog:
+  enabled: true                 # 是否启用文件持久化
+  log_dir: "./logs/blocklog"    # 日志目录（按小时分割，格式：YYYY-MM-DD_HH.jsonl）
+  memory_cache_size: 10000      # 内存缓存大小（用于实时查询）
+  buffer_size: 1000             # 异步写入缓冲区大小
+  flush_interval: 5             # 刷盘间隔（秒）
 ```
+
+### API Key 配置
+
+可以在配置文件中预定义 API Key，启动时自动加载到数据库：
+
+**配置示例：**
+
+```yaml
+auth:
+  api_keys:
+    # 超级管理员 Key（拥有全部权限）
+    - name: "Master Admin Key"
+      key: "${MASTER_API_KEY}"  # 从环境变量读取
+      permissions: ["*"]  # 全部权限
+
+    # 只读 Key（仅查询权限）
+    - name: "Read-only Key"
+      key: "sk_live_your-read-key-here"
+      permissions:
+        - "firewall:read"
+        - "intel:read"
+        - "geo:read"
+        - "blocklog:read"
+```
+
+**使用方式：**
+
+```bash
+# 设置环境变量
+export MASTER_API_KEY="sk_live_$(openssl rand -hex 32)"
+
+# 使用 API Key 访问
+curl http://localhost:8080/api/manual/rules \
+  -H "Authorization: Bearer ${MASTER_API_KEY}"
+```
+
+**注意事项：**
+- `key` 字段支持环境变量，格式：`${VAR_NAME}`
+- `permissions` 为 `["*"]` 时表示拥有全部权限
+- 配置中的 API Key 仅在首次创建时生效，已存在的 Key 不会更新
+- 建议生产环境使用环境变量传入密钥
 
 ### 运行
 
@@ -270,6 +338,14 @@ curl -X DELETE http://localhost:8080/api/manual/rules \
   -d '{"value": "192.168.1.1"}'
 ```
 
+### 规则查询 API
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/rules` | 查询所有规则 | firewall:read |
+
+返回当前 XDP 中加载的所有规则（包括手动规则、威胁情报、地域封禁）。
+
 ### 威胁情报 API
 
 | 方法 | 路径 | 说明 | 权限 |
@@ -311,6 +387,35 @@ curl -X DELETE http://localhost:8080/api/manual/rules \
 | POST | `/api/geoblocking/update` | 手动触发 GeoIP 更新 | geo:write |
 | POST | `/api/geoblocking/config` | 更新配置（模式、国家） | geo:write |
 
+### 数据源状态 API
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/sources/status` | 获取所有数据源状态 | source:read |
+| GET | `/api/sources/:type/status` | 获取指定类型数据源状态 | source:read |
+| GET | `/api/sources/:type/:id/status` | 获取指定数据源状态 | source:read |
+| POST | `/api/sources/:type/:id/refresh` | 手动触发数据源刷新 | source:write |
+
+**路径参数：**
+- `:type` - 数据源类型：`intel`（威胁情报）或 `geo`（地域封禁）
+- `:id` - 数据源 ID：`ipsum`、`spamhaus`、`maxmind` 等
+
+**示例：**
+
+```bash
+# 获取所有数据源状态
+curl http://localhost:8080/api/sources/status \
+  -H "Authorization: Bearer <token>"
+
+# 获取威胁情报数据源状态
+curl http://localhost:8080/api/sources/intel/status \
+  -H "Authorization: Bearer <token>"
+
+# 手动刷新 IPSum 数据源
+curl -X POST http://localhost:8080/api/sources/intel/ipsum/refresh \
+  -H "Authorization: Bearer <token>"
+```
+
 ### 阻断日志 API
 
 | 方法 | 路径 | 说明 | 权限 |
@@ -320,6 +425,27 @@ curl -X DELETE http://localhost:8080/api/manual/rules \
 | GET | `/api/blocklog/blocked-ips` | 获取阻断 IP 列表 | blocklog:read |
 | GET | `/api/blocklog/blocked-countries` | 获取阻断国家列表 | blocklog:read |
 | DELETE | `/api/blocklog/records` | 清除所有阻断记录 | blocklog:clear |
+
+### XDP 事件配置 API
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/api/xdp/events/status` | 获取事件上报状态 | firewall:read |
+| POST | `/api/xdp/events/config` | 设置事件上报配置 | firewall:write |
+
+**配置示例：**
+
+```bash
+# 获取当前事件配置
+curl http://localhost:8080/api/xdp/events/status \
+  -H "Authorization: Bearer <token>"
+
+# 设置事件采样率和缓冲区大小
+curl -X POST http://localhost:8080/api/xdp/events/config \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"sample_rate": 100, "buffer_size": 1024}'
+```
 
 ### 用户管理 API
 
@@ -446,6 +572,6 @@ go test -v ./...
 
 4. **Token 存储**：客户端应安全存储 Token
 
-## 已知问题
+## 许可证
 
-暂无已知问题。
+[待定]

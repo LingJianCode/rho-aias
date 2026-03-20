@@ -11,6 +11,8 @@
 
 ## 快速开始
 
+### 基本测试（不使用认证）
+
 ```bash
 # 运行所有测试
 sudo ./test/run_tests.sh
@@ -25,13 +27,28 @@ sudo ./test/run_tests.sh -t TestXDPIpBlocking.test_01_ipv4_exact_block
 sudo ./test/run_tests.sh -v
 ```
 
-## 测试文件说明
+### API Key 认证测试
 
-| 文件 | 说明 |
-|------|------|
-| `run_tests.sh` | 测试运行脚本，包含环境检查和清理逻辑 |
-| `test_xdp_block.py` | 主测试脚本，包含所有测试用例 |
-| `netns.py` | Network Namespace 管理模块 |
+```bash
+# 使用 API Key 认证运行测试（使用默认测试 Key）
+sudo ./test/run_tests.sh --use-api-key
+
+# 使用指定的 API Key
+sudo ./test/run_tests.sh --use-api-key --api-key sk_live_your-key-here
+
+# 使用环境变量中的 API Key
+export TEST_API_KEY="sk_live_your-key-here"
+sudo ./test/run_tests.sh --use-api-key
+
+# 运行特定的 API Key 认证测试
+sudo ./test/run_tests.sh --use-api-key -t TestAPIKeyAuth.test_01_api_key_auth
+```
+
+**注意事项：**
+- `--use-api-key` 参数启用 API Key 认证测试
+- `--api-key` 参数指定测试用的 API Key（可选，优先级高于环境变量）
+- 环境变量 `TEST_API_KEY` 也可以设置 API Key
+- 不指定时使用默认测试 Key：`sk_live_test-admin-key-1234567890abcdef`
 
 ## 测试用例
 
@@ -52,6 +69,15 @@ sudo ./test/run_tests.sh -v
 | `test_namespace_creation` | Network namespace 创建和删除 |
 | `test_veth_pair_creation` | Veth pair 创建和 IP 配置 |
 | `test_full_environment` | 完整环境连通性测试 |
+
+### TestAPIKeyAuth - API Key 认证测试
+
+|| 测试用例 | 描述 |
+|---------|------|
+| `test_01_api_key_auth` | API Key 认证功能测试 - 使用 API Key 添加规则并验证生效 |
+| `test_02_invalid_api_key` | 无效 API Key 测试 - 验证无效 Key 被拒绝 |
+| `test_03_api_key_permissions` | API Key 权限测试 - 验证读写权限控制 |
+| `test_04_api_key_without_auth` | 不启用认证时的 API Key 测试 - 验证 Key 在认证关闭时仍能工作 |
 
 ## 测试环境架构
 
@@ -74,19 +100,13 @@ sudo ./test/run_tests.sh -v
 +------------------+     +------------------+
 ```
 
-## 单独运行 Python 测试
+## 测试脚本说明
 
-```bash
-# 直接运行 Python 测试脚本
-cd test
-sudo python3 test_xdp_block.py
-
-# 运行特定测试类
-sudo python3 test_xdp_block.py TestEnvironmentSetup
-
-# 运行特定测试方法
-sudo python3 test_xdp_block.py TestXDPIpBlocking.test_01_ipv4_exact_block
-```
+| 文件 | 说明 |
+|------|------|
+| `run_tests.sh` | **推荐使用的测试入口脚本**，包含环境检查和清理逻辑 |
+| `test_xdp_block.py` | 主测试脚本，包含所有测试用例（由 run_tests.sh 调用） |
+| `netns.py` | Network Namespace 管理模块 |
 
 ## 常见问题
 

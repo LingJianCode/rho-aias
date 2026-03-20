@@ -61,6 +61,24 @@ auth:
   captcha_enabled: true            # 是否启用验证码
   captcha_duration: 5              # 验证码有效期（分钟）
 
+  # 预定义的 API Key（可选）
+  # 留空数组则不创建任何 API Key
+  # 建议在生产环境中通过环境变量传入密钥，如：${MASTER_API_KEY}
+  api_keys:
+    # 示例：超级管理员 API Key（拥有全部权限）
+    # - name: "Master Admin Key"
+    #   key: "${MASTER_API_KEY}"  # 从环境变量读取
+    #   permissions: ["*"]  # 全部权限
+
+    # 示例：只读 API Key（仅查询权限）
+    # - name: "Read-only Key"
+    #   key: "sk_live_your-read-key-here"
+    #   permissions:
+    #     - "firewall:read"
+    #     - "intel:read"
+    #     - "geo:read"
+    #     - "blocklog:read"
+
 # 阻断日志配置
 blocklog:
   enabled: true                    # 是否启用文件持久化
