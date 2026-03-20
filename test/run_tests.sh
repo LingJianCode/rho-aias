@@ -144,7 +144,8 @@ run_tests() {
             python3 test_xdp_block.py --use-api-key "${other_args[@]}"
         fi
     else
-        python3 test_xdp_block.py "${other_args[@]}"
+        # 不使用 API Key 认证，只运行 TestXDPIpBlocking 测试
+        python3 test_xdp_block.py -t TestXDPIpBlocking "${other_args[@]}"
     fi
     
     local exit_code=$?
