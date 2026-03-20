@@ -3,7 +3,9 @@
 # eBPF XDP IP 阻断功能集成测试运行脚本
 #
 # 使用方法:
-#   ./run_tests.sh              # 运行所有测试
+#   ./run_tests.sh              # 运行所有测试（不使用认证）
+#   ./run_tests.sh --use-api-key # 使用 API Key 认证运行测试
+#   ./run_tests.sh --use-api-key --api-key sk_live_your-key-here # 使用指定 API Key
 #   ./run_tests.sh --env-only   # 仅运行环境测试（不需要编译 rho-aias）
 #   ./run_tests.sh -t TestXDPIpBlocking.test_01_ipv4_exact_block  # 运行特定测试
 #
@@ -102,14 +104,52 @@ cleanup() {
 
 # 运行测试
 run_tests() {
-    local args="$@"
+    local use_api_key=false
+    local api_key=""
+    local other_args=()
+    
+    # 解析参数
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --use-api-key)
+                use_api_key=true
+                shift
+                ;;
+            --api-key)
+                api_key="$2"
+                shift 2
+                ;;
+            *)
+                other_args+=("$1")
+                shift
+                ;;
+        esac
+    done
     
     cd "$SCRIPT_DIR"
     
-    log_info "开始运行测试..."
-    echo "========================================"
+    # 如果使用 API Key 认证
+    if [ "$use_api_key" = true ]; then
+        log_info "启用 API Key 认证测试"
+        
+        # 如果指定了 API Key，传递给 Python 脚本
+        if [ -n "$api_key" ]; then
+            log_info "使用指定的 API Key"
+            python3 test_xdp_block.py --use-api-key --api-key "$api_key" "${other_args[@]}"
+        elif [ -n "$TEST_API_KEY" ]; then
+            log_info "使用环境变量 TEST_API_KEY"
+            python3 test_xdp_block.py --use-api-key "${other_args[@]}"
+        else
+            log_info "使用默认测试 API Key"
+            python3 test_xdp_block.py --use-api-key "${other_args[@]}"
+        fi
+    else
+        python3 test_xdp_block.py "${other_args[@]}"
+    fi
     
-    if python3 test_xdp_block.py $args; then
+    local exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
         echo "========================================"
         log_info "测试完成"
         return 0

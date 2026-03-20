@@ -1,10 +1,12 @@
 package database
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"rho-aias/internal/auth/password"
 	"rho-aias/internal/casbin"
+	"rho-aias/internal/config"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/models"
 
@@ -78,6 +80,94 @@ func (db *Database) InitDefaultUser(enforcer *casbin.Enforcer) error {
 	}
 
 	logger.Info("[Database] Default admin user created: admin / admin123")
+	return nil
+}
+
+// InitAPIKeysFromConfig 从配置文件初始化 API Keys
+func (db *Database) InitAPIKeysFromConfig(enforcer *casbin.Enforcer, apiKeys []config.APIKeyConfig) error {
+	if len(apiKeys) == 0 {
+		return nil
+	}
+
+	// 获取管理员用户 ID
+	var admin models.User
+	db.Where("role = ?", "admin").First(&admin)
+	if admin.ID == 0 {
+		return fmt.Errorf("admin user not found, cannot create API keys")
+	}
+
+	createdCount := 0
+	for _, keyConfig := range apiKeys {
+		// 跳过空的 Key
+		if keyConfig.Key == "" {
+			logger.Warnf("[Database] Skipping API key with empty value: %s", keyConfig.Name)
+			continue
+		}
+
+		// 检查是否已存在相同 Key
+		var count int64
+		db.Model(&models.APIKey{}).Where("key = ?", keyConfig.Key).Count(&count)
+		if count > 0 {
+			logger.Infof("[Database] API key already exists: %s", keyConfig.Name)
+			continue
+		}
+
+		// 计算 Key 前缀（用于显示）
+		keyPrefix := "sk_live_"
+		if len(keyConfig.Key) > 16 {
+			keyPrefix += keyConfig.Key[8:16]
+		} else {
+			keyPrefix += keyConfig.Key
+		}
+
+		// 转换权限列表为 JSON
+		permissionsJSON := "[\"*\"]"
+		if len(keyConfig.Permissions) > 0 {
+			permBytes, err := json.Marshal(keyConfig.Permissions)
+			if err != nil {
+				logger.Warnf("[Database] Failed to marshal permissions for %s: %v", keyConfig.Name, err)
+				continue
+			}
+			permissionsJSON = string(permBytes)
+		}
+
+		// 创建 API Key
+		apiKey := &models.APIKey{
+			Name:        keyConfig.Name,
+			Key:         keyConfig.Key,
+			KeyPrefix:   keyPrefix,
+			UserID:      admin.ID,
+			Permissions: permissionsJSON,
+			Active:      true,
+		}
+
+		if err := db.Create(apiKey).Error; err != nil {
+			logger.Errorf("[Database] Failed to create API key %s: %v", keyConfig.Name, err)
+			continue
+		}
+
+		// 设置 API Key 权限
+		var permissions []string
+		if len(keyConfig.Permissions) == 1 && keyConfig.Permissions[0] == "*" {
+			// 全部权限：添加通配符策略
+			permissions = []string{"*:*"}
+		} else {
+			// 使用配置中的权限列表
+			permissions = keyConfig.Permissions
+		}
+
+		if err := enforcer.AddAPIKeyPermissions(apiKey.Key, permissions); err != nil {
+			logger.Warnf("[Database] Failed to add permissions for API key %s: %v", keyConfig.Name, err)
+		}
+
+		createdCount++
+		logger.Infof("[Database] API key created: %s (prefix: %s)", keyConfig.Name, keyPrefix)
+	}
+
+	if createdCount > 0 {
+		logger.Infof("[Database] Total API keys created from config: %d", createdCount)
+	}
+
 	return nil
 }
 

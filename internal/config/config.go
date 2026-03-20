@@ -82,13 +82,21 @@ type ManualConfig struct {
 
 // AuthConfig 认证配置
 type AuthConfig struct {
-	Enabled         bool   `yaml:"enabled"`          // 是否启用认证
-	JWTSecret       string `yaml:"jwt_secret"`       // JWT 密钥（建议从环境变量读取）
-	JWTIssuer       string `yaml:"jwt_issuer"`       // JWT 签发者
-	TokenDuration   int    `yaml:"token_duration"`   // Token 有效期（分钟）
-	DatabasePath    string `yaml:"database_path"`    // 数据库路径
-	CaptchaEnabled  bool   `yaml:"captcha_enabled"`  // 是否启用验证码
-	CaptchaDuration int    `yaml:"captcha_duration"` // 验证码有效期（分钟）
+	Enabled         bool          `yaml:"enabled"`          // 是否启用认证
+	JWTSecret       string        `yaml:"jwt_secret"`       // JWT 密钥（建议从环境变量读取）
+	JWTIssuer       string        `yaml:"jwt_issuer"`       // JWT 签发者
+	TokenDuration   int           `yaml:"token_duration"`   // Token 有效期（分钟）
+	DatabasePath    string        `yaml:"database_path"`    // 数据库路径
+	CaptchaEnabled  bool          `yaml:"captcha_enabled"`  // 是否启用验证码
+	CaptchaDuration int           `yaml:"captcha_duration"` // 验证码有效期（分钟）
+	APIKeys         []APIKeyConfig `yaml:"api_keys"`       // 预定义的 API Key
+}
+
+// APIKeyConfig API Key 配置
+type APIKeyConfig struct {
+	Name        string   `yaml:"name"`        // Key 名称
+	Key         string   `yaml:"key"`         // API Key（支持环境变量 ${VAR}）
+	Permissions []string `yaml:"permissions"` // 权限列表，["*"] 表示全部权限
 }
 
 // BlockLogConfig 阻断日志配置
@@ -159,5 +167,16 @@ func NewConfig(fileName string) *Config {
 		config.BlockLog.FlushInterval = 5 // 默认 5 秒
 	}
 
+	// 展开环境变量
+	config.expandEnvVars()
+
 	return &config
+}
+
+// expandEnvVars 展开配置中的环境变量（支持 ${VAR_NAME} 格式）
+func (c *Config) expandEnvVars() {
+	// 展开 API Key 中的环境变量
+	for i := range c.Auth.APIKeys {
+		c.Auth.APIKeys[i].Key = os.ExpandEnv(c.Auth.APIKeys[i].Key)
+	}
 }
