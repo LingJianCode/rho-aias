@@ -9,10 +9,10 @@ all: gen build
 vmlinux.h:
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > ebpfs/vmlinux.h
 
-gen:
+gen: vmlinux.h
 	$(GO) generate $(BPF_GEN_DIR)
 
-build:
+build: gen
 	@echo "==> Building"
 	$(GO) build -o $(APP)
 
