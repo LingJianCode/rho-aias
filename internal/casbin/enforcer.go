@@ -147,7 +147,15 @@ func (e *Enforcer) AddAPIKeyPermissions(keyHash string, permissions []string) er
 
 		// 添加策略：(subject, obj, act)
 		// obj 为完整权限标识（如 firewall:read），act 为操作类型（如 read）
-		if _, err := e.AddPolicy(subject, perm, parts[1]); err != nil {
+		// 特殊处理 *:* 通配符
+		obj := perm
+		act := parts[1]
+		if perm == "*:*" {
+			obj = "*"
+			act = "*"
+		}
+
+		if _, err := e.AddPolicy(subject, obj, act); err != nil {
 			return fmt.Errorf("failed to add api key permission: %w", err)
 		}
 	}
