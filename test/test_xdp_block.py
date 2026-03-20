@@ -213,7 +213,7 @@ class APIClient:
 
     def get_rules(self, source: str = None) -> Tuple[bool, dict]:
         """获取规则列表"""
-        url = "/api/manual/rules"
+        url = "/api/rules"
         if source:
             url += f"?source={source}"
         return self._request("GET", url)
@@ -238,9 +238,9 @@ class APIClient:
         url = f"{self.base_url}{path}"
         headers = {"Content-Type": "application/json"}
 
-        # 添加 API Key 认证
+        # 添加 API Key 认证（使用 X-API-Key 头）
         if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+            headers["X-API-Key"] = self.api_key
 
         try:
             if method == "GET":
@@ -512,7 +512,7 @@ class TestAPIKeyAuth(unittest.TestCase):
             self.skipTest("Failed to setup test environment")
 
         # 获取测试用的 API Key
-        test_api_key = os.environ.get("TEST_API_KEY", "sk_live_test_admin-key-1234567890abcdef")
+        test_api_key = os.environ.get("TEST_API_KEY", "sk_live_test-admin-key-1234567890abcdef")
 
         # 创建使用 API Key 的客户端
         self.api_client = APIClient(f"http://127.0.0.1:{self.api_port}", test_api_key)
