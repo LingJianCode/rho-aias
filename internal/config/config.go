@@ -177,6 +177,17 @@ func NewConfig(fileName string) *Config {
 		config.BlockLog.FlushInterval = 5 // 默认 5 秒
 	}
 
+	// WAF 默认值
+	if config.WAF.WAFLogPath == "" {
+		config.WAF.WAFLogPath = "/logs/waf_audit.log"
+	}
+	if config.WAF.RateLimitLogPath == "" {
+		config.WAF.RateLimitLogPath = "/logs/rate_limit.log"
+	}
+	if config.WAF.BanDuration == 0 {
+		config.WAF.BanDuration = 3600 // 默认 1 小时
+	}
+
 	// 展开环境变量
 	config.expandEnvVars()
 
