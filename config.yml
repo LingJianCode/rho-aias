@@ -86,3 +86,10 @@ blocklog:
   memory_cache_size: 10000         # 内存缓存大小（用于实时查询）
   buffer_size: 1000                # 异步写入缓冲区大小
   flush_interval: 5                # 刷盘间隔（秒）
+
+# WAF 日志监控配置
+waf:
+  enabled: false                    # 是否启用 WAF 日志监控
+  waf_log_path: /logs/waf_audit.log           # WAF 审计日志路径（Caddy + Coraza）
+  rate_limit_log_path: /logs/rate_limit.log  # Rate Limit 日志路径
+  ban_duration: 3600                # 封禁时长（秒，默认1小时）

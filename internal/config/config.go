@@ -7,6 +7,7 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+// Config 配置结构
 type Config struct {
 	Server      ServerConfig        `yaml:"server"`
 	Log         LogConfig           `yaml:"log"`
@@ -16,6 +17,7 @@ type Config struct {
 	Manual      ManualConfig        `yaml:"manual"`
 	Auth        AuthConfig          `yaml:"auth"`
 	BlockLog    BlockLogConfig      `yaml:"blocklog"`
+	WAF         WAFConfig           `yaml:"waf"`
 }
 
 // LogConfig 日志配置
@@ -106,6 +108,14 @@ type BlockLogConfig struct {
 	MemoryCacheSize int    `yaml:"memory_cache_size"` // 内存缓存大小（用于实时查询）
 	BufferSize      int    `yaml:"buffer_size"`       // 异步写入缓冲区大小
 	FlushInterval   int    `yaml:"flush_interval"`    // 刷盘间隔（秒）
+}
+
+// WAFConfig WAF 日志监控配置
+type WAFConfig struct {
+	Enabled            bool   `yaml:"enabled"`              // 是否启用 WAF 日志监控
+	WAFLogPath         string `yaml:"waf_log_path"`         // WAF 审计日志路径（Caddy + Coraza）
+	RateLimitLogPath   string `yaml:"rate_limit_log_path"` // Rate Limit 日志路径
+	BanDuration        int    `yaml:"ban_duration"`         // 封禁时长（秒）
 }
 
 func NewConfig(fileName string) *Config {
