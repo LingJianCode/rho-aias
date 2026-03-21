@@ -1,0 +1,86 @@
+{
+        debug
+        auto_https off
+        order coraza_waf after rate_limit
+        log {
+                output file /logs/access.log {
+                        roll_size 100mb
+                        roll_keep 5
+                        roll_keep_for 720h
+                }
+                format json
+                level debug
+                exclude http.handlers.waf
+        }
+
+        log rate_limit_log {
+                output file /logs/rate_limit.log {
+                        roll_size 100mb
+                        roll_keep 5
+                        roll_keep_for 720h
+                }
+                format json
+                level info
+
+                include http.handlers.rate_limit
+        }
+}
+
+
+# 定义限流策略片段
+(rate_limit_policy) {
+        rate_limit {
+                # 定义一个名为 "global_zone" 的区域
+                zone global_zone {
+                        match {
+                                # 匹配所有请求，或者你可以指定特定的 path
+                                path_regexp .*
+                        }
+                        key {remote_host} # 关键：按客户端 IP (remote_host) 进行计数
+                        events 50 # 阈值：允许 50 次请求
+                        window 10s # 时间窗口：在 10 秒内
+                }
+
+                # 如果超过阈值，返回 429 Too Many Requests
+                handle {
+                        respond "Too Many Requests - IP Rate Limited" 429
+                }
+        }
+}
+
+(waf) {
+        coraza_waf {
+                load_owasp_crs
+                directives `
+                Include @coraza.conf-recommended
+                Include @crs-setup.conf.example
+                Include @owasp_crs/*.conf
+                SecDefaultAction "phase:3,log,auditlog,pass"
+                SecDefaultAction "phase:4,log,auditlog,pass"
+                SecDefaultAction "phase:5,log,auditlog,pass"
+                SecRuleEngine On
+                #SecDebugLog /logs/waf_debug.log
+                #SecDebugLogLevel 9
+                SecRule REQUEST_URI "@streq /admin" "id:101,phase:1,t:lowercase,deny,status:403"
+                SecRule REQUEST_BODY "@rx maliciouspayload" "id:102,phase:2,t:lowercase,deny,status:403"
+                SecRule RESPONSE_STATUS "@rx 406" "id:103,phase:3,t:lowercase,deny,status:403"
+                SecResponseBodyAccess On
+                SecResponseBodyMimeType application/json
+                SecRule RESPONSE_BODY "@contains responsebodycode" "id:104,phase:4,t:lowercase,deny,status:403"
+                SecAuditEngine On
+                SecAuditLog /logs/waf_audit.log
+                SecAuditLogFormat json
+                `
+        }
+
+        handle_errors 403 {
+                header X-Blocked "true"
+		respond "403 Forbidden\n" 403
+        }
+}
+
+:8080 {
+        import rate_limit_policy
+        import waf
+        reverse_proxy localhost:8081
+}
