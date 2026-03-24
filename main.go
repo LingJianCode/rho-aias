@@ -21,6 +21,7 @@ import (
 	"rho-aias/internal/routers"
 	"rho-aias/internal/services"
 	"rho-aias/internal/threatintel"
+	"rho-aias/internal/waf"
 	"syscall"
 	"time"
 
@@ -199,6 +200,18 @@ func main() {
 					}
 				}
 			}()
+		}
+	}
+
+	// Initialize WAF Monitor (if enabled)
+	var wafMonitor *waf.Monitor
+	if cfg.WAF.Enabled {
+		wafMonitor = waf.NewMonitor(&cfg.WAF, xdp, ctx)
+		if err := wafMonitor.Start(); err != nil {
+			logger.Warnf("[Main] WAF monitor start failed: %v", err)
+		} else {
+			logger.Info("[Main] WAF monitor module initialized")
+			defer wafMonitor.Stop()
 		}
 	}
 

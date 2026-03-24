@@ -7,6 +7,7 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+// Config 配置结构
 type Config struct {
 	Server      ServerConfig        `yaml:"server"`
 	Log         LogConfig           `yaml:"log"`
@@ -16,6 +17,7 @@ type Config struct {
 	Manual      ManualConfig        `yaml:"manual"`
 	Auth        AuthConfig          `yaml:"auth"`
 	BlockLog    BlockLogConfig      `yaml:"blocklog"`
+	WAF         WAFConfig           `yaml:"waf"`
 }
 
 // LogConfig 日志配置
@@ -108,6 +110,14 @@ type BlockLogConfig struct {
 	FlushInterval   int    `yaml:"flush_interval"`    // 刷盘间隔（秒）
 }
 
+// WAFConfig WAF 日志监控配置
+type WAFConfig struct {
+	Enabled            bool   `yaml:"enabled"`              // 是否启用 WAF 日志监控
+	WAFLogPath         string `yaml:"waf_log_path"`         // WAF 审计日志路径（Caddy + Coraza）
+	RateLimitLogPath   string `yaml:"rate_limit_log_path"` // Rate Limit 日志路径
+	BanDuration        int    `yaml:"ban_duration"`         // 封禁时长（秒）
+}
+
 func NewConfig(fileName string) *Config {
 	// 打开 YAML 文件
 	file, err := os.Open(fileName)
@@ -165,6 +175,17 @@ func NewConfig(fileName string) *Config {
 	}
 	if config.BlockLog.FlushInterval == 0 {
 		config.BlockLog.FlushInterval = 5 // 默认 5 秒
+	}
+
+	// WAF 默认值
+	if config.WAF.WAFLogPath == "" {
+		config.WAF.WAFLogPath = "/logs/waf_audit.log"
+	}
+	if config.WAF.RateLimitLogPath == "" {
+		config.WAF.RateLimitLogPath = "/logs/rate_limit.log"
+	}
+	if config.WAF.BanDuration == 0 {
+		config.WAF.BanDuration = 3600 // 默认 1 小时
 	}
 
 	// 展开环境变量
