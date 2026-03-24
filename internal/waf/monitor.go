@@ -7,17 +7,19 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
 	"rho-aias/internal/config"
-	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+// sourceMaskWAF WAF 来源掩码，与 ebpfs.SourceMaskWAF (0x08) 保持一致
+const sourceMaskWAF uint32 = 0x08
 
 // IPBanRecord IP 封禁记录
 type IPBanRecord struct {
@@ -25,15 +27,21 @@ type IPBanRecord struct {
 	Expiry   time.Time // 过期时间
 }
 
+// XDPRuleManager 定义 WAF Monitor 所需的 XDP 规则操作接口
+// 通过接口抽象，方便单元测试中使用 mock 替代真实 XDP
+type XDPRuleManager interface {
+	AddRuleWithSource(ip string, sourceMask uint32) error
+	UpdateRuleSourceMask(ip string, removeMask uint32) (newMask uint32, exists bool, changed bool, err error)
+}
+
 // Monitor WAF 日志监控器
 type Monitor struct {
-	cfg        *config.WAFConfig
-	xdp        *ebpfs.Xdp
-	ctx        context.Context
-	cancel     context.CancelFunc
-	watcher    *fsnotify.Watcher
-	fileHandle *os.File
-	filePos    int64 // 文件读取位置
+	cfg     *config.WAFConfig
+	xdp     XDPRuleManager
+	ctx     context.Context
+	cancel  context.CancelFunc
+	watcher *fsnotify.Watcher
+	filePos map[string]int64 // 按文件路径分别记录读取位置
 
 	// 已封禁 IP 缓存
 	bannedIPs map[string]IPBanRecord
@@ -48,14 +56,15 @@ type Monitor struct {
 }
 
 // NewMonitor 创建 WAF 日志监控器
-func NewMonitor(cfg *config.WAFConfig, xdp *ebpfs.Xdp, ctx context.Context) *Monitor {
+func NewMonitor(cfg *config.WAFConfig, xdp XDPRuleManager, ctx context.Context) *Monitor {
 	childCtx, cancel := context.WithCancel(ctx)
 
 	return &Monitor{
-		cfg:      cfg,
-		xdp:      xdp,
-		ctx:      childCtx,
-		cancel:   cancel,
+		cfg:       cfg,
+		xdp:       xdp,
+		ctx:       childCtx,
+		cancel:    cancel,
+		filePos:   make(map[string]int64),
 		bannedIPs: make(map[string]IPBanRecord),
 		// 匹配常见 IP 地址格式 (IPv4)
 		ipRegex: regexp.MustCompile(`\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b`),
@@ -103,9 +112,6 @@ func (m *Monitor) Stop() {
 	if m.watcher != nil {
 		m.watcher.Close()
 	}
-	if m.fileHandle != nil {
-		m.fileHandle.Close()
-	}
 	logger.Info("[WAF] Monitor stopped")
 }
 
@@ -117,7 +123,7 @@ func (m *Monitor) watchLogFile(filePath string) error {
 	}
 
 	// 添加监听（监听文件所在目录，因为文件可能被重新创建）
-	dirPath := filePath[:strings.LastIndex(filePath, "/")]
+	dirPath := filepath.Dir(filePath)
 	if err := m.watcher.Add(dirPath); err != nil {
 		return fmt.Errorf("failed to watch directory %s: %w", dirPath, err)
 	}
@@ -187,12 +193,13 @@ func (m *Monitor) readLogFile(filePath string) error {
 
 	// 如果文件变小了，说明被轮转了，从头开始读取
 	fileSize := fileInfo.Size()
-	if fileSize < m.filePos {
-		m.filePos = 0
+	pos := m.filePos[filePath] // 获取该文件的读取位置
+	if fileSize < pos {
+		pos = 0
 	}
 
 	// 从上次读取的位置开始读取
-	if _, err := file.Seek(m.filePos, 0); err != nil {
+	if _, err := file.Seek(pos, 0); err != nil {
 		return err
 	}
 
@@ -203,8 +210,9 @@ func (m *Monitor) readLogFile(filePath string) error {
 		line := scanner.Text()
 		lineCount++
 
-		// 提取 IP 并封禁
-		if ip := m.extractIP(line); ip != "" {
+		// 根据日志来源提取 IP 并封禁
+		logSource := m.getLogSource(filePath)
+		if ip := m.extractIP(line, logSource); ip != "" {
 			m.banIP(ip, filePath)
 		}
 	}
@@ -214,7 +222,7 @@ func (m *Monitor) readLogFile(filePath string) error {
 	}
 
 	// 更新读取位置
-	m.filePos = fileSize
+	m.filePos[filePath] = fileSize
 
 	if lineCount > 0 {
 		logger.Debugf("[WAF] Processed %d new lines from %s", lineCount, filePath)
@@ -224,15 +232,40 @@ func (m *Monitor) readLogFile(filePath string) error {
 }
 
 // extractIP 从日志行中提取 IP 地址
-func (m *Monitor) extractIP(line string) string {
+// logSource 标识日志来源（"waf" 或 "rate_limit"），用于选择不同的 IP 提取策略
+func (m *Monitor) extractIP(line string, logSource string) string {
 	matches := m.ipRegex.FindAllString(line, -1)
 	if len(matches) == 0 {
 		return ""
 	}
 
-	// 如果有多个 IP，通常第一个是客户端 IP
-	// 可以根据具体日志格式调整
-	return matches[0]
+	switch logSource {
+	case "rate_limit":
+		// Rate limit 日志：第一个 IP 是客户端 IP
+		// 格式示例: "rate_limit_exceeded for 1.2.3.4"
+		return matches[0]
+	case "waf":
+		// WAF 审计日志可能包含服务端 IP（反向代理场景）
+		// 格式示例: "server: 10.0.0.1 -> client: 1.2.3.4, rule_id: 12345"
+		// 如果有多个 IP，取最后一个（通常是客户端 IP）
+		if len(matches) > 1 {
+			return matches[len(matches)-1]
+		}
+		return matches[0]
+	default:
+		return matches[0]
+	}
+}
+
+// getLogSource 根据文件路径判断日志来源类型
+func (m *Monitor) getLogSource(filePath string) string {
+	if filePath == m.cfg.WAFLogPath {
+		return "waf"
+	}
+	if filePath == m.cfg.RateLimitLogPath {
+		return "rate_limit"
+	}
+	return "unknown"
 }
 
 // banIP 封禁 IP 地址（带去重）
@@ -254,7 +287,7 @@ func (m *Monitor) banIP(ip, logFile string) {
 	}
 
 	// 调用 XDP 添加封禁规则
-	if err := m.xdp.AddRuleWithSource(ip, ebpfs.SourceMaskWAF); err != nil {
+	if err := m.xdp.AddRuleWithSource(ip, sourceMaskWAF); err != nil {
 		logger.Errorf("[WAF] Failed to add XDP rule for IP %s: %v", ip, err)
 		return
 	}
@@ -286,7 +319,7 @@ func (m *Monitor) cleanupExpiredBans() {
 	}
 }
 
-// cleanup 清理过期的封禁记录
+// cleanup 清理过期的封禁记录，并同步移除对应的 XDP 规则
 func (m *Monitor) cleanup() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -296,14 +329,19 @@ func (m *Monitor) cleanup() {
 
 	for ip, record := range m.bannedIPs {
 		if now.After(record.Expiry) {
+			// 同步移除 XDP 中的 WAF 来源封禁规则
+			if _, _, _, err := m.xdp.UpdateRuleSourceMask(ip, sourceMaskWAF); err != nil {
+				logger.Warnf("[WAF] Failed to remove XDP rule for expired IP %s: %v", ip, err)
+			} else {
+				logger.Debugf("[WAF] Removed XDP rule for expired IP %s", ip)
+			}
 			delete(m.bannedIPs, ip)
 			expiredCount++
-			logger.Debugf("[WAF] Cleaned up expired ban for IP %s", ip)
 		}
 	}
 
 	if expiredCount > 0 {
-		logger.Infof("[WAF] Cleaned up %d expired IP bans", expiredCount)
+		logger.Infof("[WAF] Cleaned up %d expired IP bans and removed XDP rules", expiredCount)
 	}
 }
 
