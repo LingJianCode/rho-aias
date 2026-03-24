@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -30,6 +31,10 @@ import (
 )
 
 func main() {
+	// Parse command-line flags
+	configPath := flag.String("config", "config.yml", "Path to configuration file")
+	flag.Parse()
+
 	// Create main context for managing goroutine lifecycles
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // Ensure context is cancelled on exit
@@ -41,7 +46,7 @@ func main() {
 		panic(fmt.Sprintf("[Kernel] %v", err))
 	}
 
-	cfg := config.NewConfig("config.yml")
+	cfg := config.NewConfig(*configPath)
 
 	// Initialize logger
 	if err := logger.Init(&logger.Config{

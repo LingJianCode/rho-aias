@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 8081
 
 # 日志配置
 log:
@@ -89,7 +89,7 @@ blocklog:
 
 # WAF 日志监控配置
 waf:
-  enabled: false                    # 是否启用 WAF 日志监控
-  waf_log_path: /logs/waf_audit.log           # WAF 审计日志路径（Caddy + Coraza）
-  rate_limit_log_path: /logs/rate_limit.log  # Rate Limit 日志路径
+  enabled: true                     # 是否启用 WAF 日志监控
+  waf_log_path: /caddy-logs/waf_audit.log      # WAF 审计日志路径（Caddy + Coraza）
+  rate_limit_log_path: /caddy-logs/rate_limit.log  # Rate Limit 日志路径
   ban_duration: 3600                # 封禁时长（秒，默认1小时）

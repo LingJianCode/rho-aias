@@ -1,0 +1,48 @@
+services:
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-logs:/logs
+      - caddy-data:/data
+    networks:
+      - rho-network
+
+  rho-aias:
+    build: .
+    container_name: rho-aias
+    privileged: false
+    cap_drop:
+      - ALL
+    cap_add:
+      - CAP_BPF
+      - CAP_PERFMON
+      - CAP_NET_ADMIN
+      - CAP_NET_RAW
+    network_mode: host
+    volumes:
+      - ./config.yml:/app/config/config.yml:ro
+      - rho-aias-logs:/app/logs
+      - rho-aias-data:/app/data
+      - rho-aias-bpf:/app/bpf
+      - caddy-logs:/caddy-logs:ro  # 共享 Caddy 日志目录供监控
+    command: ["--config", "/app/config/config.yml"]
+    restart: unless-stopped
+
+volumes:
+  caddy-logs:
+  caddy-data:
+  rho-aias-logs:
+  rho-aias-data:
+  rho-aias-bpf:
+
+networks:
+  rho-network:
+    driver: bridge
