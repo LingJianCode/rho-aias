@@ -24,13 +24,13 @@ RUN sed -i "s/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g" /etc/apk/repositories
 RUN addgroup -S caddy && adduser -S -G caddy caddy
 
 # 创建目录
-RUN mkdir -p /etc/caddy /data /config /logs
+RUN mkdir -p /etc/caddy /logs
 
 # 拷贝 Caddy 二进制
 COPY --from=builder /caddy /usr/bin/caddy
 
 # 赋权
-RUN chown -R caddy:caddy /etc/caddy /data /config /logs
+RUN chown -R caddy:caddy /etc/caddy /logs
 
 # 切换用户
 USER caddy
@@ -40,8 +40,6 @@ WORKDIR /etc/caddy
 
 # 默认端口
 EXPOSE 80 443 8080
-
-VOLUME ["/etc/caddy", "/data", "/config", "/logs"]
 
 # 启动命令
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

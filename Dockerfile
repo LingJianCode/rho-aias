@@ -58,8 +58,5 @@ WORKDIR /app
 # 默认端口
 EXPOSE 8080
 
-# 挂载点
-VOLUME ["/app/config", "/app/logs", "/app/data", "/app/bpf"]
-
 # 启动命令
 ENTRYPOINT ["/usr/bin/rho-aias"]
