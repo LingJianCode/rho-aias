@@ -81,6 +81,20 @@
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## 开发环境
+
+1. 设置GOPROXY
+```bash
+go env -w GO111MODULE=on
+go env -w GOPROXY=https://goproxy.cn,direct
+```
+
+2. 安装必要开发环境
+```bash
+apt update
+apt install  bpftool libbpf-dev llvm clang libelf-dev gcc-multilib build-essential
+```
+
 ## 项目结构
 
 ```
