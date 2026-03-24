@@ -9,7 +9,6 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-logs:/logs
-      - caddy-data:/data
 
   rho-aias:
     build: .
@@ -26,15 +25,11 @@ services:
     volumes:
       - ./config.yml:/app/config/config.yml:ro
       - rho-aias-logs:/app/logs
-      - rho-aias-data:/app/data
-      - rho-aias-bpf:/app/bpf
+      - ./data:/app/data
       - caddy-logs:/caddy-logs:ro
     command: ["--config", "/app/config/config.yml"]
     restart: unless-stopped
 
 volumes:
   caddy-logs:
-  caddy-data:
   rho-aias-logs:
-  rho-aias-data:
-  rho-aias-bpf:
