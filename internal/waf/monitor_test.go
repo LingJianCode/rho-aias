@@ -405,7 +405,7 @@ func TestBanIP_NewBan(t *testing.T) {
 	if _, ok := addedIPs["1.2.3.4"]; !ok {
 		t.Error("XDP AddRuleWithSource should have been called with IP 1.2.3.4")
 	}
-if addedIPs["1.2.3.4"] != sourceMaskWAF {
+	if addedIPs["1.2.3.4"] != sourceMaskWAF {
 			t.Errorf("source mask should be sourceMaskWAF (%d), got %d", sourceMaskWAF, addedIPs["1.2.3.4"])
 	}
 }

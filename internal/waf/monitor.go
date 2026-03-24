@@ -206,12 +206,11 @@ func (m *Monitor) readLogFile(filePath string) error {
 	// 逐行读取新增内容
 	scanner := bufio.NewScanner(file)
 	lineCount := 0
+	logSource := m.getLogSource(filePath)
 	for scanner.Scan() {
 		line := scanner.Text()
 		lineCount++
 
-		// 根据日志来源提取 IP 并封禁
-		logSource := m.getLogSource(filePath)
 		if ip := m.extractIP(line, logSource); ip != "" {
 			m.banIP(ip, filePath)
 		}
@@ -258,11 +257,13 @@ func (m *Monitor) extractIP(line string, logSource string) string {
 }
 
 // getLogSource 根据文件路径判断日志来源类型
+// 使用 filepath.Clean 规范化路径后再比较，避免相对路径 vs 绝对路径导致匹配失败
 func (m *Monitor) getLogSource(filePath string) string {
-	if filePath == m.cfg.WAFLogPath {
+	cleanPath := filepath.Clean(filePath)
+	if cleanPath == filepath.Clean(m.cfg.WAFLogPath) {
 		return "waf"
 	}
-	if filePath == m.cfg.RateLimitLogPath {
+	if cleanPath == filepath.Clean(m.cfg.RateLimitLogPath) {
 		return "rate_limit"
 	}
 	return "unknown"
@@ -320,23 +321,35 @@ func (m *Monitor) cleanupExpiredBans() {
 }
 
 // cleanup 清理过期的封禁记录，并同步移除对应的 XDP 规则
+// 采用两阶段策略：先在锁内收集过期 IP 并删除记录，再释放锁后执行 XDP 操作，
+// 避免持锁期间因 XDP 调用阻塞 banIP()、IsBanned() 等其他操作。
 func (m *Monitor) cleanup() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	type expiredIP struct {
+		ip     string
+		record IPBanRecord
+	}
 
-	now := time.Now()
-	expiredCount := 0
-
-	for ip, record := range m.bannedIPs {
-		if now.After(record.Expiry) {
-			// 同步移除 XDP 中的 WAF 来源封禁规则
-			if _, _, _, err := m.xdp.UpdateRuleSourceMask(ip, sourceMaskWAF); err != nil {
-				logger.Warnf("[WAF] Failed to remove XDP rule for expired IP %s: %v", ip, err)
-			} else {
-				logger.Debugf("[WAF] Removed XDP rule for expired IP %s", ip)
+	// 第一阶段：在锁内收集所有过期 IP 并从 bannedIPs 中删除
+	var expired []expiredIP
+	{
+		m.mu.Lock()
+		now := time.Now()
+		for ip, record := range m.bannedIPs {
+			if now.After(record.Expiry) {
+				expired = append(expired, expiredIP{ip: ip, record: record})
+				delete(m.bannedIPs, ip)
 			}
-			delete(m.bannedIPs, ip)
-			expiredCount++
+		}
+		m.mu.Unlock()
+	}
+
+	// 第二阶段：释放锁后，逐个调用 XDP 移除规则
+	expiredCount := len(expired)
+	for _, e := range expired {
+		if _, _, _, err := m.xdp.UpdateRuleSourceMask(e.ip, sourceMaskWAF); err != nil {
+			logger.Warnf("[WAF] Failed to remove XDP rule for expired IP %s: %v", e.ip, err)
+		} else {
+			logger.Debugf("[WAF] Removed XDP rule for expired IP %s", e.ip)
 		}
 	}
 
