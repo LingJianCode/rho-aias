@@ -8,10 +8,12 @@ vmlinux.h
 rhoaias
 rho-aias
 
-# 日志和数据
-*.log
+# 日志和数据目录（完全忽略）
+data/
+logs/
 .claude
-data
-logs
+
+# 日志文件
+*.log
 __pycache__
 *.out

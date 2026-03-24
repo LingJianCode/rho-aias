@@ -47,7 +47,7 @@ RUN sed -i "s/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g" /etc/apk/repositories
     apk add --no-cache ca-certificates tzdata
 
 # 创建必要目录
-RUN mkdir -p /app/config /app/logs /app/data /app/bpf
+RUN mkdir -p /app/config /app/logs /app/data
 
 # 拷贝二进制文件
 COPY --from=builder /build/rho-aias /usr/bin/rho-aias
