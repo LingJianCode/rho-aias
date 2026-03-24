@@ -1,6 +1,9 @@
 *.o
+*_bpfeb.go
+*_bpfel.go
 rhoaias
 rho-aias
+vmlinux.h
 *.log
 .claude
 data
