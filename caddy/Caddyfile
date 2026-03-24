@@ -82,5 +82,5 @@
 :8080 {
         import rate_limit_policy
         import waf
-        reverse_proxy rho-aias:8081
+        reverse_proxy localhost:8081
 }
