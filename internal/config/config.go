@@ -9,15 +9,16 @@ import (
 
 // Config 配置结构
 type Config struct {
-	Server      ServerConfig        `yaml:"server"`
-	Log         LogConfig           `yaml:"log"`
-	Ebpf        EbpfConfig          `yaml:"ebpf"`
-	Intel       IntelConfig         `yaml:"intel"`
-	GeoBlocking GeoBlockingConfig   `yaml:"geo_blocking"`
-	Manual      ManualConfig        `yaml:"manual"`
-	Auth        AuthConfig          `yaml:"auth"`
-	BlockLog    BlockLogConfig      `yaml:"blocklog"`
-	WAF         WAFConfig           `yaml:"waf"`
+	Server           ServerConfig           `yaml:"server"`
+	Log              LogConfig              `yaml:"log"`
+	Ebpf             EbpfConfig             `yaml:"ebpf"`
+	Intel            IntelConfig            `yaml:"intel"`
+	GeoBlocking      GeoBlockingConfig      `yaml:"geo_blocking"`
+	Manual           ManualConfig           `yaml:"manual"`
+	Auth             AuthConfig             `yaml:"auth"`
+	BlockLog         BlockLogConfig         `yaml:"blocklog"`
+	WAF              WAFConfig              `yaml:"waf"`
+	AnomalyDetection AnomalyDetectionConfig `yaml:"anomaly_detection"`
 }
 
 // LogConfig 日志配置
@@ -114,10 +115,45 @@ type BlockLogConfig struct {
 
 // WAFConfig WAF 日志监控配置
 type WAFConfig struct {
-	Enabled            bool   `yaml:"enabled"`              // 是否启用 WAF 日志监控
-	WAFLogPath         string `yaml:"waf_log_path"`         // WAF 审计日志路径（Caddy + Coraza）
-	RateLimitLogPath   string `yaml:"rate_limit_log_path"` // Rate Limit 日志路径
-	BanDuration        int    `yaml:"ban_duration"`         // 封禁时长（秒）
+	Enabled          bool   `yaml:"enabled"`              // 是否启用 WAF 日志监控
+	WAFLogPath       string `yaml:"waf_log_path"`         // WAF 审计日志路径（Caddy + Coraza）
+	RateLimitLogPath string `yaml:"rate_limit_log_path"`  // Rate Limit 日志路径
+	BanDuration      int    `yaml:"ban_duration"`         // 封禁时长（秒）
+}
+
+// AnomalyDetectionConfig 异常检测配置
+type AnomalyDetectionConfig struct {
+	Enabled         bool          `yaml:"enabled"`          // 总开关
+	SampleRate      int           `yaml:"sample_rate"`      // 采样率 1/N（100 表示 1%）
+	CheckInterval   int           `yaml:"check_interval"`   // 检测间隔（秒）
+	MinPackets      int           `yaml:"min_packets"`      // 最小包数（少于此值不检测）
+	CleanupInterval int           `yaml:"cleanup_interval"` // 清理过期数据间隔（秒）
+	BlockDuration   int           `yaml:"block_duration"`   // 临时封禁时长（秒）
+	Baseline        BaselineConfig `yaml:"baseline"`        // 3σ 基线配置
+	Attacks         AttacksConfig  `yaml:"attacks"`         // 攻击类型配置
+}
+
+// BaselineConfig 3σ 基线检测配置
+type BaselineConfig struct {
+	MinSampleCount  int     `yaml:"min_sample_count"`  // 最小样本数
+	SigmaMultiplier float64 `yaml:"sigma_multiplier"`  // σ 倍数
+	MinThreshold    int     `yaml:"min_threshold"`     // 最小 PPS 阈值
+	MaxAge          int     `yaml:"max_age"`           // 基线最大年龄（秒）
+}
+
+// AttacksConfig 攻击类型配置
+type AttacksConfig struct {
+	SynFlood  AttackConfig `yaml:"syn_flood"`
+	UdpFlood  AttackConfig `yaml:"udp_flood"`
+	IcmpFlood AttackConfig `yaml:"icmp_flood"`
+	AckFlood  AttackConfig `yaml:"ack_flood"`
+}
+
+// AttackConfig 单个攻击类型配置
+type AttackConfig struct {
+	Enabled        bool    `yaml:"enabled"`
+	RatioThreshold float64 `yaml:"ratio_threshold"` // 协议占比阈值
+	BlockDuration  int     `yaml:"block_duration"`  // 封禁时长（秒）
 }
 
 func NewConfig(fileName string) *Config {
@@ -200,6 +236,63 @@ func NewConfig(fileName string) *Config {
 	}
 	if config.WAF.BanDuration == 0 {
 		config.WAF.BanDuration = 3600 // 默认 1 小时
+	}
+
+	// AnomalyDetection 默认值
+	if config.AnomalyDetection.SampleRate == 0 {
+		config.AnomalyDetection.SampleRate = 100
+	}
+	if config.AnomalyDetection.CheckInterval == 0 {
+		config.AnomalyDetection.CheckInterval = 1
+	}
+	if config.AnomalyDetection.MinPackets == 0 {
+		config.AnomalyDetection.MinPackets = 100
+	}
+	if config.AnomalyDetection.CleanupInterval == 0 {
+		config.AnomalyDetection.CleanupInterval = 300
+	}
+	if config.AnomalyDetection.BlockDuration == 0 {
+		config.AnomalyDetection.BlockDuration = 60
+	}
+
+	// Baseline 默认值
+	if config.AnomalyDetection.Baseline.MinSampleCount == 0 {
+		config.AnomalyDetection.Baseline.MinSampleCount = 10
+	}
+	if config.AnomalyDetection.Baseline.SigmaMultiplier == 0 {
+		config.AnomalyDetection.Baseline.SigmaMultiplier = 3.0
+	}
+	if config.AnomalyDetection.Baseline.MinThreshold == 0 {
+		config.AnomalyDetection.Baseline.MinThreshold = 100
+	}
+	if config.AnomalyDetection.Baseline.MaxAge == 0 {
+		config.AnomalyDetection.Baseline.MaxAge = 1800
+	}
+
+	// Attack 默认值
+	if config.AnomalyDetection.Attacks.SynFlood.RatioThreshold == 0 {
+		config.AnomalyDetection.Attacks.SynFlood.RatioThreshold = 0.5
+	}
+	if config.AnomalyDetection.Attacks.SynFlood.BlockDuration == 0 {
+		config.AnomalyDetection.Attacks.SynFlood.BlockDuration = 60
+	}
+	if config.AnomalyDetection.Attacks.UdpFlood.RatioThreshold == 0 {
+		config.AnomalyDetection.Attacks.UdpFlood.RatioThreshold = 0.8
+	}
+	if config.AnomalyDetection.Attacks.UdpFlood.BlockDuration == 0 {
+		config.AnomalyDetection.Attacks.UdpFlood.BlockDuration = 60
+	}
+	if config.AnomalyDetection.Attacks.IcmpFlood.RatioThreshold == 0 {
+		config.AnomalyDetection.Attacks.IcmpFlood.RatioThreshold = 0.5
+	}
+	if config.AnomalyDetection.Attacks.IcmpFlood.BlockDuration == 0 {
+		config.AnomalyDetection.Attacks.IcmpFlood.BlockDuration = 60
+	}
+	if config.AnomalyDetection.Attacks.AckFlood.RatioThreshold == 0 {
+		config.AnomalyDetection.Attacks.AckFlood.RatioThreshold = 0.8
+	}
+	if config.AnomalyDetection.Attacks.AckFlood.BlockDuration == 0 {
+		config.AnomalyDetection.Attacks.AckFlood.BlockDuration = 60
 	}
 
 	// 展开环境变量
