@@ -135,4 +135,95 @@ func (c *Cache) GetModTime() (time.Time, error) {
 func init() {
 	gob.Register(ManualRuleEntry{})
 	gob.Register(CacheData{})
+	gob.Register(WhitelistRuleEntry{})
+	gob.Register(WhitelistCacheData{})
+}
+
+// ============================================
+// 白名单持久化方法
+// ============================================
+
+// SaveWhitelist 保存白名单缓存数据到本地磁盘
+// 采用原子写入策略：先写临时文件，再原子重命名
+func (c *Cache) SaveWhitelist(data *WhitelistCacheData) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	path := filepath.Join(c.dir, "whitelist_cache.bin")
+	tmpPath := path + ".tmp"
+
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("create whitelist tmp file failed: %w", err)
+	}
+
+	data.Timestamp = time.Now().Unix()
+
+	encoder := gob.NewEncoder(f)
+	if err := encoder.Encode(data); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("encode whitelist cache data failed: %w", err)
+	}
+
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("sync whitelist cache data failed: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close whitelist tmp file failed: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename whitelist cache file failed: %w", err)
+	}
+
+	return nil
+}
+
+// LoadWhitelist 从本地磁盘加载白名单缓存数据
+func (c *Cache) LoadWhitelist() (*WhitelistCacheData, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	path := filepath.Join(c.dir, "whitelist_cache.bin")
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open whitelist cache file failed: %w", err)
+	}
+	defer f.Close()
+
+	var data WhitelistCacheData
+	decoder := gob.NewDecoder(f)
+	if err := decoder.Decode(&data); err != nil {
+		return nil, fmt.Errorf("decode whitelist cache data failed: %w", err)
+	}
+
+	return &data, nil
+}
+
+// WhitelistExists 检查白名单缓存文件是否存在
+func (c *Cache) WhitelistExists() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	path := filepath.Join(c.dir, "whitelist_cache.bin")
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// ClearWhitelist 清除白名单缓存文件
+func (c *Cache) ClearWhitelist() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	path := filepath.Join(c.dir, "whitelist_cache.bin")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove whitelist cache file failed: %w", err)
+	}
+	return nil
 }
