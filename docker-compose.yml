@@ -13,6 +13,8 @@ services:
   rho-aias:
     build: .
     container_name: rho-aias
+    environment:
+      - TZ=Asia/Shanghai
     privileged: false
     cap_drop:
       - ALL
