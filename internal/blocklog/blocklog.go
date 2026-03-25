@@ -55,8 +55,10 @@ func (bl *BlockLog) AddRecord(record BlockRecord) {
 	defer bl.mu.Unlock()
 
 	// 如果超过最大记录数，删除最旧的记录
+	// 使用 copy 而非 slice 重切，避免底层数组无限增长导致内存泄漏
 	if len(bl.records) >= bl.maxSize {
-		bl.records = bl.records[1:]
+		copy(bl.records, bl.records[1:])
+		bl.records = bl.records[:len(bl.records)-1]
 	}
 
 	bl.records = append(bl.records, record)

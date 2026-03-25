@@ -29,6 +29,11 @@ var ValidPermissions = map[string]bool{
 	"admin:*":        true,
 }
 
+var (
+	// ErrAPIKeyNotFound API Key 不存在错误
+	ErrAPIKeyNotFound = errors.New("api key not found")
+)
+
 // APIKeyService API Key 服务
 type APIKeyService struct {
 	db       *gorm.DB
@@ -154,22 +159,27 @@ func (s *APIKeyService) RevokeAPIKey(userID uint, keyID uint) error {
 	var apiKey models.APIKey
 	if err := s.db.Where("id = ? AND user_id = ?", keyID, userID).First(&apiKey).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errors.New("api key not found")
+			return ErrAPIKeyNotFound
 		}
 		return fmt.Errorf("failed to find api key: %w", err)
 	}
 
-	// 更新为非激活状态
-	if err := s.db.Model(&apiKey).Update("active", false).Error; err != nil {
-		return fmt.Errorf("failed to revoke api key: %w", err)
-	}
+	// 使用事务保证原子性：DB 更新 + Casbin 策略删除
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 更新为非激活状态
+		if err := tx.Model(&apiKey).Update("active", false).Error; err != nil {
+			return fmt.Errorf("failed to revoke api key: %w", err)
+		}
 
-	// 移除 Casbin 权限
-	if err := s.enforcer.RemoveAPIKeyPermissions(apiKey.Key); err != nil {
-		return fmt.Errorf("failed to remove permissions: %w", err)
-	}
+		// 移除 Casbin 权限
+		if err := s.enforcer.RemoveAPIKeyPermissions(apiKey.Key); err != nil {
+			return fmt.Errorf("failed to remove permissions: %w", err)
+		}
 
-	return nil
+		return nil
+	})
+
+	return err
 }
 
 // ValidateAPIKey 验证 API Key

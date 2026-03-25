@@ -6,7 +6,8 @@ import (
 
 const (
 	// DefaultCost 默认加密成本
-	DefaultCost = 10
+	// cost 12 在现代硬件上提供足够的安全性，同时保持合理的性能
+	DefaultCost = 12
 )
 
 // HashPassword 对密码进行加密

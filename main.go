@@ -354,7 +354,11 @@ func main() {
 			routers.RegisterGeoBlockingRoutes(api, geoHandle, casbinEnforcer, authService, apiKeyService)
 		}
 	} else {
-		// No authentication, register routes directly
+		// 认证未启用，所有 API 无保护暴露
+		if !cfg.Auth.Enabled {
+			logger.Warn("[Security] Authentication is DISABLED - all APIs are publicly accessible without any protection!")
+			logger.Warn("[Security] Enable authentication by setting 'auth.enabled: true' in config.yml for production use")
+		}
 		routers.RegisterManualRoutes(api, manualHandle, nil, nil, nil)
 		routers.RegisterBlockLogRoutes(api, blockLogHandle, nil, nil, nil)
 
