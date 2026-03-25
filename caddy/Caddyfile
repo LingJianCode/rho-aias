@@ -7,6 +7,7 @@
                         roll_size 100mb
                         roll_keep 5
                         roll_keep_for 720h
+			mode 0644
                 }
                 format json
                 level debug
@@ -18,6 +19,7 @@
                         roll_size 100mb
                         roll_keep 5
                         roll_keep_for 720h
+			mode 0644
                 }
                 format json
                 level info
