@@ -3,6 +3,7 @@ package threatintel
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,9 @@ type Manager struct {
 	// 新增：数据库支持和并发控制
 	db               *gorm.DB                       // 数据库连接
 	sourceMutexes    map[SourceID]*sync.Mutex       // 各数据源的互斥锁
+
+	// 每个源的最新规则数据（用于 saveCache 按源分类保存）
+	sourceRules map[SourceID]*IntelData
 }
 
 // NewManager 创建新的威胁情报管理器
@@ -55,6 +59,7 @@ func NewManager(cfg *config.IntelConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Manager {
 		sourceStatus: make(map[SourceID]*SourceStatus),
 		db:           db,
 		sourceMutexes: make(map[SourceID]*sync.Mutex),
+		sourceRules:   make(map[SourceID]*IntelData),
 		status: &Status{
 			Enabled: cfg.Enabled,
 			Sources: make(map[SourceID]SourceStatus),
@@ -216,7 +221,12 @@ func (m *Manager) updateSource(sourceID SourceID, source config.IntelSource) err
 	// 4. 更新状态
 	m.updateSourceStatus(sourceID, true, parsed.TotalCount(), "")
 
-	// 5. 记录成功状态到数据库
+	// 5. 保存该源的规则数据（用于后续 saveCache 按源分类）
+	m.mu.Lock()
+	m.sourceRules[sourceID] = parsed
+	m.mu.Unlock()
+
+	// 6. 记录成功状态到数据库
 	duration := time.Since(startTime).Milliseconds()
 	if err := m.recordStatusToDB(string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
 		logger.Errorf("[ThreatIntel] [%s] Failed to record status to DB: %v", sourceID, err)
@@ -302,20 +312,18 @@ func (m *Manager) saveCache() error {
 	m.mu.RLock()
 	for sourceID, status := range m.sourceStatus {
 		if status.Success && status.RuleCount > 0 {
-			// 从内核获取当前规则构建缓存数据
-			rules, _ := m.xdp.GetRule()
+			// 使用该源自己的规则数据构建缓存
 			data := NewIntelData(sourceID)
 
-			for _, r := range rules {
-				// 简单分类（实际应该按源分类）
-				if len(r.Key) > 0 {
-					if containsCIDR(r.Key) {
-						data.AddCIDR(r.Key)
-					} else {
-						data.AddIPv4(r.Key)
-					}
+			if sourceRules, ok := m.sourceRules[sourceID]; ok {
+				for _, ip := range sourceRules.IPv4Exact {
+					data.AddIPv4(ip)
+				}
+				for _, cidr := range sourceRules.IPv4CIDR {
+					data.AddCIDR(cidr)
 				}
 			}
+
 			cacheData.Sources[sourceID] = *data
 		}
 	}
@@ -402,12 +410,7 @@ func (m *Manager) Stop() {
 
 // containsCIDR 检查字符串是否是 CIDR 格式（包含 /）
 func containsCIDR(s string) bool {
-	for _, c := range s {
-		if c == '/' {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, "/")
 }
 
 // sourceIDToMask 将 SourceID 转换为来源掩码

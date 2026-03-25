@@ -56,7 +56,7 @@ COPY --from=builder /build/rho-aias /usr/bin/rho-aias
 WORKDIR /app
 
 # 默认端口
-EXPOSE 8080
+EXPOSE 8081
 
 # 启动命令
 ENTRYPOINT ["/usr/bin/rho-aias"]
