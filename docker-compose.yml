@@ -22,7 +22,8 @@ services:
 
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
+      - ./data/caddy/config:/root/.config/caddy/autosave.json
+      - ./data/caddy/data:/root/.local/share/caddy
       - ./logs/caddy:/logs
 
   rho-aias:
@@ -47,5 +48,3 @@ services:
     command: ["--config", "/app/config/config.yml"]
     restart: unless-stopped
 
-volumes:
-  caddy_data:
