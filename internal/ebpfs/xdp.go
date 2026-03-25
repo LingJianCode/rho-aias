@@ -753,3 +753,99 @@ func (x *Xdp) IsEventReportingEnabled() bool {
 	}
 	return config.Enabled == 1
 }
+
+// ============================================
+// Anomaly Detection 相关方法
+// ============================================
+
+// SetAnomalyConfig 设置异常检测采样配置
+// enabled: 是否启用异常检测采样
+// sampleRate: 采样率，每 N 个包采样 1 个 (例如 100 = 1%)
+func (x *Xdp) SetAnomalyConfig(enabled bool, sampleRate uint32) error {
+	config := NewAnomalyConfig(enabled, sampleRate)
+	key := uint32(0)
+	return x.objects.AnomalyConfig.Put(&key, &config)
+}
+
+// GetAnomalyConfig 获取当前异常检测采样配置
+func (x *Xdp) GetAnomalyConfig() (AnomalyConfig, error) {
+	key := uint32(0)
+	config := AnomalyConfig{}
+	if err := x.objects.AnomalyConfig.Lookup(&key, &config); err != nil {
+		// 如果查询失败（map 不存在），返回默认配置
+		return DefaultAnomalyConfig(), err
+	}
+	return config, nil
+}
+
+// IsAnomalyDetectionEnabled 检查异常检测是否启用
+func (x *Xdp) IsAnomalyDetectionEnabled() bool {
+	config, err := x.GetAnomalyConfig()
+	if err != nil {
+		return false
+	}
+	return config.Enabled == 1
+}
+
+// AnomalyEventCallback 异常检测事件回调函数类型
+// srcIP: 源 IP 地址
+// protocol: 协议类型 (TCP=6, UDP=17, ICMP=1)
+// tcpFlags: TCP 标志位
+// pktSize: 数据包大小
+type AnomalyEventCallback func(srcIP string, protocol uint8, tcpFlags uint8, pktSize uint32)
+
+// MonitorAnomalyEvents 监听异常检测采样事件
+// callback: 事件回调函数
+// 此方法应该在单独的 goroutine 中运行
+func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback) {
+	logger.Info("[XDP] MonitorAnomalyEvents started")
+	
+	// 创建独立的 Ring Buffer reader
+	reader, err := ringbuf.NewReader(x.objects.AnomalyEvents)
+	if err != nil {
+		logger.Errorf("[XDP] Failed to create anomaly events reader: %v", err)
+		return
+	}
+	defer reader.Close()
+	
+	for {
+		// 检查 done 通道（非阻塞）
+		select {
+		case <-x.done:
+			logger.Info("[XDP] MonitorAnomalyEvents exit")
+			return
+		default:
+		}
+
+		// 阻塞式读取 ringbuf 事件
+		record, err := reader.Read()
+		if err != nil {
+			if errors.Is(err, ringbuf.ErrClosed) {
+				logger.Warn("[XDP] Anomaly events ringbuf reader closed")
+				return
+			}
+			// 其他错误，检查 done 后继续
+			select {
+			case <-x.done:
+				logger.Info("[XDP] MonitorAnomalyEvents exit after error")
+				return
+			default:
+				continue
+			}
+		}
+
+		var pi PacketInfo
+		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &pi); err != nil {
+			logger.Warnf("[XDP] Failed to parse anomaly packet info: %v", err)
+			continue
+		}
+
+		// 解析源 IP 地址（仅 IPv4）
+		srcIP := formatIP(pi.SrcIP, [16]byte{}, 0x0800) // ETH_P_IP
+
+		// 触发回调
+		if callback != nil {
+			callback(srcIP, pi.IPProtocol, pi.TCPFlags, pi.PktSize)
+		}
+	}
+}

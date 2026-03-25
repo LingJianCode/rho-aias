@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"rho-aias/internal/anomaly"
 	"rho-aias/internal/auth/captcha"
 	"rho-aias/internal/auth/jwt"
 	"rho-aias/internal/blocklog"
@@ -217,6 +218,78 @@ func main() {
 		} else {
 			logger.Info("[Main] WAF monitor module initialized")
 			defer wafMonitor.Stop()
+		}
+	}
+
+	// Initialize Anomaly Detection (if enabled)
+	var anomalyDetector *anomaly.Detector
+	if cfg.AnomalyDetection.Enabled {
+		// 创建异常检测配置
+		anomalyConfig := anomaly.AnomalyDetectionConfig{
+			Enabled:         cfg.AnomalyDetection.Enabled,
+			SampleRate:      cfg.AnomalyDetection.SampleRate,
+			CheckInterval:   cfg.AnomalyDetection.CheckInterval,
+			MinPackets:      cfg.AnomalyDetection.MinPackets,
+			CleanupInterval: cfg.AnomalyDetection.CleanupInterval,
+			BlockDuration:   cfg.AnomalyDetection.BlockDuration,
+			Baseline: anomaly.BaselineConfig{
+				MinSampleCount:  cfg.AnomalyDetection.Baseline.MinSampleCount,
+				SigmaMultiplier: cfg.AnomalyDetection.Baseline.SigmaMultiplier,
+				MinThreshold:    cfg.AnomalyDetection.Baseline.MinThreshold,
+				MaxAge:          cfg.AnomalyDetection.Baseline.MaxAge,
+			},
+			Attacks: anomaly.AttacksConfig{
+				SynFlood: anomaly.AttackConfig{
+					Enabled:        cfg.AnomalyDetection.Attacks.SynFlood.Enabled,
+					RatioThreshold: cfg.AnomalyDetection.Attacks.SynFlood.RatioThreshold,
+					BlockDuration:  cfg.AnomalyDetection.Attacks.SynFlood.BlockDuration,
+				},
+				UdpFlood: anomaly.AttackConfig{
+					Enabled:        cfg.AnomalyDetection.Attacks.UdpFlood.Enabled,
+					RatioThreshold: cfg.AnomalyDetection.Attacks.UdpFlood.RatioThreshold,
+					BlockDuration:  cfg.AnomalyDetection.Attacks.UdpFlood.BlockDuration,
+				},
+				IcmpFlood: anomaly.AttackConfig{
+					Enabled:        cfg.AnomalyDetection.Attacks.IcmpFlood.Enabled,
+					RatioThreshold: cfg.AnomalyDetection.Attacks.IcmpFlood.RatioThreshold,
+					BlockDuration:  cfg.AnomalyDetection.Attacks.IcmpFlood.BlockDuration,
+				},
+				AckFlood: anomaly.AttackConfig{
+					Enabled:        cfg.AnomalyDetection.Attacks.AckFlood.Enabled,
+					RatioThreshold: cfg.AnomalyDetection.Attacks.AckFlood.RatioThreshold,
+					BlockDuration:  cfg.AnomalyDetection.Attacks.AckFlood.BlockDuration,
+				},
+			},
+		}
+
+		// 创建封禁回调函数
+		blockCallback := func(ip string, duration int, reason string) error {
+			// 使用 Anomaly Detection 来源掩码
+			err := xdp.AddRuleWithSource(ip, ebpfs.SourceMaskDDoS)
+			if err != nil {
+				logger.Errorf("[AnomalyDetection] Failed to block IP %s: %v", ip, err)
+				return err
+			}
+			logger.Infof("[AnomalyDetection] Blocked IP %s for %ds, reason: %s", ip, duration, reason)
+			return nil
+		}
+
+		anomalyDetector = anomaly.NewDetector(anomalyConfig, blockCallback)
+		if err := anomalyDetector.Start(); err != nil {
+			logger.Warnf("[Main] Anomaly detector start failed: %v", err)
+		} else {
+			logger.Info("[Main] Anomaly detection module initialized")
+			defer anomalyDetector.Stop()
+
+			// 配置 eBPF 异常检测采样
+			if err := xdp.SetAnomalyConfig(true, uint32(cfg.AnomalyDetection.SampleRate)); err != nil {
+				logger.Warnf("[Main] Failed to set anomaly config: %v", err)
+			}
+
+			// 启动异常检测事件监听
+			go xdp.MonitorAnomalyEvents(func(srcIP string, protocol uint8, tcpFlags uint8, pktSize uint32) {
+				anomalyDetector.RecordPacket(srcIP, protocol, tcpFlags, pktSize)
+			})
 		}
 	}
 

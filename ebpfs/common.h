@@ -32,7 +32,8 @@ struct block_value {
 #define SOURCE_MASK_IPSUM     0x01  /* Bit 0: IPSum 威胁情报 */
 #define SOURCE_MASK_SPAMHAUS  0x02  /* Bit 1: Spamhaus 威胁情报 */
 #define SOURCE_MASK_MANUAL    0x04  /* Bit 2: 手动添加 */
-#define SOURCE_MASK_WAF         0x08  /* Bit 3: WAF (未来) */
-#define SOURCE_MASK_DDoS        0x10  /* Bit 4: DDoS 检测 (未来) */
-#define SOURCE_MASK_RATE_LIMIT  0x20  /* Bit 5: 频率限制封禁 */
-#define SOURCE_MASK_RESERVED    0xC0  /* Bits 6-7: 保留给未来使用 */ 
+#define SOURCE_MASK_WAF       0x08  /* Bit 3: WAF */
+#define SOURCE_MASK_DDoS      0x10  /* Bit 4: DDoS 异常检测 */
+#define SOURCE_MASK_RATE_LIMIT 0x20  /* Bit 5: 频率限制封禁 */
+#define SOURCE_MASK_ANOMALY   0x40  /* Bit 6: 异常流量检测 */
+#define SOURCE_MASK_RESERVED  0x80  /* Bit 7: 保留 */ 
