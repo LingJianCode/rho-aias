@@ -61,13 +61,13 @@ func (d *AttackDetector) DetectAttack(stats *IPProtocolStats, minPackets int) []
 
 	now := time.Now()
 
-	// SYN Flood 检测
+	// SYN Flood 检测：TCP SYN 包占 TCP 总包的比例 > 阈值
 	if d.config.SynFlood.Enabled && stats.TCPCount > 1000 {
-		synRatio := float64(stats.TCPSynCount) / float64(totalPackets)
+		synRatio := float64(stats.TCPSynCount) / float64(stats.TCPCount)
 		if synRatio > d.config.SynFlood.RatioThreshold {
 			results = append(results, DetectionResult{
 				AttackType:    AttackTypeSynFlood,
-				CurrentPPS:    stats.TotalPackets, // 简化：使用总包数作为 PPS
+				CurrentPPS:    stats.TotalPackets, // 使用总包数作为 PPS
 				Threshold:     d.config.SynFlood.RatioThreshold,
 				BlockDuration: d.config.SynFlood.BlockDuration,
 				Timestamp:     now,
@@ -103,9 +103,9 @@ func (d *AttackDetector) DetectAttack(stats *IPProtocolStats, minPackets int) []
 		}
 	}
 
-	// ACK Flood 检测
+	// ACK Flood 检测：TCP ACK 包占 TCP 总包的比例 > 阈值
 	if d.config.AckFlood.Enabled && stats.TCPCount > 1000 {
-		ackRatio := float64(stats.TCPAckCount) / float64(totalPackets)
+		ackRatio := float64(stats.TCPAckCount) / float64(stats.TCPCount)
 		if ackRatio > d.config.AckFlood.RatioThreshold {
 			results = append(results, DetectionResult{
 				AttackType:    AttackTypeAckFlood,
@@ -130,7 +130,7 @@ func (d *AttackDetector) DetectSynFlood(stats *IPProtocolStats, minPackets int) 
 		return nil
 	}
 
-	synRatio := float64(stats.TCPSynCount) / float64(stats.TotalPackets)
+	synRatio := float64(stats.TCPSynCount) / float64(stats.TCPCount)
 	if synRatio > d.config.SynFlood.RatioThreshold {
 		return &DetectionResult{
 			AttackType:    AttackTypeSynFlood,
@@ -202,7 +202,7 @@ func (d *AttackDetector) DetectAckFlood(stats *IPProtocolStats, minPackets int) 
 		return nil
 	}
 
-	ackRatio := float64(stats.TCPAckCount) / float64(stats.TotalPackets)
+	ackRatio := float64(stats.TCPAckCount) / float64(stats.TCPCount)
 	if ackRatio > d.config.AckFlood.RatioThreshold {
 		return &DetectionResult{
 			AttackType:    AttackTypeAckFlood,

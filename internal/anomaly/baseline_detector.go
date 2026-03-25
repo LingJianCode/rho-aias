@@ -2,6 +2,7 @@ package anomaly
 
 import (
 	"math"
+	"time"
 )
 
 // BaselineDetector 3σ 基线检测器
@@ -38,6 +39,11 @@ func NewBaselineDetector(config BaselineConfig) *BaselineDetector {
 //   - M2_new = M2_old + (x - μ_old) * (x - μ_new)
 //   - σ² = M2 / (n - 1)  (当 n > 1)
 func (d *BaselineDetector) UpdateBaseline(baseline *Baseline, value float64) {
+	// 检查基线是否过期，如果过期则重置
+	if d.ShouldReset(baseline) {
+		d.ResetBaseline(baseline)
+	}
+
 	baseline.Count++
 	n := float64(baseline.Count)
 
@@ -46,6 +52,9 @@ func (d *BaselineDetector) UpdateBaseline(baseline *Baseline, value float64) {
 	baseline.Mean += delta / n
 	delta2 := value - baseline.Mean
 	baseline.M2 += delta * delta2
+
+	// 更新最后修改时间
+	baseline.LastUpdated = time.Now()
 }
 
 // CheckAnomaly 检查是否为异常
@@ -88,11 +97,21 @@ func (d *BaselineDetector) GetStats(baseline *Baseline) (mean, stdDev float64) {
 }
 
 // ShouldReset 检查是否应该重置基线
-// 如果基线超过最大年龄，应该重置
+// 如果基线超过最大年龄（MaxAge），应该重置
 func (d *BaselineDetector) ShouldReset(baseline *Baseline) bool {
-	// 这里需要外部传入当前时间进行比较
-	// 暂时返回 false，实际使用时应该在检测时判断
-	return false
+	if baseline.Count == 0 {
+		return false
+	}
+	maxAge := time.Duration(d.config.MaxAge) * time.Second
+	return time.Since(baseline.LastUpdated) > maxAge
+}
+
+// ResetBaseline 重置基线数据
+func (d *BaselineDetector) ResetBaseline(baseline *Baseline) {
+	baseline.Mean = 0
+	baseline.M2 = 0
+	baseline.Count = 0
+	baseline.LastUpdated = time.Time{}
 }
 
 // IsBaselineReady 检查基线是否准备好

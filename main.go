@@ -265,7 +265,7 @@ func main() {
 		// 创建封禁回调函数
 		blockCallback := func(ip string, duration int, reason string) error {
 			// 使用 Anomaly Detection 来源掩码
-			err := xdp.AddRuleWithSource(ip, ebpfs.SourceMaskDDoS)
+			err := xdp.AddRuleWithSourceAndExpiry(ip, ebpfs.SourceMaskAnomaly, duration)
 			if err != nil {
 				logger.Errorf("[AnomalyDetection] Failed to block IP %s: %v", ip, err)
 				return err
@@ -274,7 +274,19 @@ func main() {
 			return nil
 		}
 
-		anomalyDetector = anomaly.NewDetector(anomalyConfig, blockCallback)
+		// 创建解封回调函数
+		unblockCallback := func(ip string) error {
+			// 移除 Anomaly Detection 来源位，如果规则无其他来源则自动删除
+			_, _, _, err := xdp.RemoveSourceFromRule(ip, ebpfs.SourceMaskAnomaly)
+			if err != nil {
+				logger.Warnf("[AnomalyDetection] Failed to unblock IP %s: %v", ip, err)
+				return err
+			}
+			logger.Infof("[AnomalyDetection] Unblocked IP %s (ban expired)", ip)
+			return nil
+		}
+
+		anomalyDetector = anomaly.NewDetector(anomalyConfig, blockCallback, unblockCallback)
 		if err := anomalyDetector.Start(); err != nil {
 			logger.Warnf("[Main] Anomaly detector start failed: %v", err)
 		} else {

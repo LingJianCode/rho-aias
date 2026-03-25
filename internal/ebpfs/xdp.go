@@ -11,6 +11,7 @@ import (
 	"rho-aias/utils"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -303,6 +304,20 @@ func (x *Xdp) AddRuleWithSource(value string, sourceMask uint32) error {
 		return err
 	}
 	blockValue := NewBlockValue(sourceMask)
+	return x.updateMap(iptype, bytes, blockValue, true)
+}
+
+// AddRuleWithSourceAndExpiry 添加带过期时间的规则
+// duration: 封禁时长（秒），0 表示永久封禁
+func (x *Xdp) AddRuleWithSourceAndExpiry(value string, sourceMask uint32, duration int) error {
+	bytes, iptype, err := utils.ParseValueToBytes(value)
+	if err != nil {
+		return err
+	}
+	blockValue := NewBlockValue(sourceMask)
+	if duration > 0 {
+		blockValue.Expiry = uint64(time.Now().Unix()) + uint64(duration)
+	}
 	return x.updateMap(iptype, bytes, blockValue, true)
 }
 
