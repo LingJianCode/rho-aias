@@ -7,7 +7,7 @@
 ### 核心功能
 
 - **eBPF XDP 包过滤**：在驱动层实现高性能数据包拦截
-- **多源规则管理**：支持手动规则、威胁情报、地域封禁等多种规则来源
+- **多源规则管理**：支持手动规则、威胁情报、地域封禁、WAF 自动封禁等多种规则来源
 - **位掩码追踪**：通过位掩码标记规则来源，避免多源冲突
 - **RESTful API**：提供完整的 HTTP API 进行规则管理
 - **持久化存储**：规则自动持久化到本地，支持离线启动
@@ -15,15 +15,18 @@
 - **认证与授权**：JWT 认证、验证码、API Key、Casbin RBAC 权限控制
 - **阻断日志**：实时记录阻断事件，支持统计和查询
 - **事件上报**：可配置的 eBPF 事件采样上报机制
+- **WAF 联动**：监控 Caddy + Coraza WAF 日志，自动触发 IP 封禁并定期清理
 
 ### 规则来源
 
-| 来源 | 说明 | 状态 |
-|------|------|------|
-| 手动规则 | 通过 API 手动添加的 IP/CIDR/MAC 规则 | ✅ 已实现 |
-| IPSum | 第三方威胁情报源（~23万条规则） | ✅ 已实现 |
-| Spamhaus DROP | 国际知名垃圾邮件黑名单 | ✅ 已实现 |
-| Geo-Blocking | 基于国家/地区的地域封禁 | ✅ 已实现 |
+| 来源 | 说明 | 位掩码 | 状态 |
+|------|------|--------|------|
+| 手动规则 | 通过 API 手动添加的 IP/CIDR/MAC 规则 | `0x01` | ✅ 已实现 |
+| IPSum | 第三方威胁情报源（~23万条规则） | `0x02` | ✅ 已实现 |
+| Spamhaus DROP | 国际知名垃圾邮件黑名单 | `0x02` | ✅ 已实现 |
+| Geo-Blocking | 基于国家/地区的地域封禁 | `0x04` | ✅ 已实现 |
+| WAF 自动封禁 | 监控 WAF 审计日志自动封禁 IP | `0x08` | ✅ 已实现 |
+| DDoS 防护 | （预留） | `0x10` | 🔜 预留 |
 
 ## 架构设计
 
@@ -32,11 +35,15 @@
 │                         网络数据包流程                               │
 │                                                                      │
 │  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  XDP 程序 (ebpfs/xdp.bpf.c)                                   │   │
-│  │  - 最早拦截点（驱动层）                                        │   │
-│  │  - 按以下方式过滤：IP/MAC（L2/L3层）                            │   │
-│  │  - Maps: ipv4_list, ipv4_cidr_trie, ipv6_list, ipv6_cidr_trie│   │
-│  │  - 返回: XDP_DROP（丢弃）或 XDP_PASS（放行）                   │   │
+│  │  XDP 程序 (ebpfs/xdp.bpf.c)                                 │   │
+│  │  - 最早拦截点（驱动层）                                       │   │
+│  │  - 按以下方式过滤：IP/MAC（L2/L3层）                           │   │
+│  │  - Maps: block_ipv4_list, block_ipv4_cidr_trie,             │   │
+│  │          block_ipv6_list, block_ipv6_cidr_trie               │   │
+│  │  - 其他 Maps: events (事件上报), geo_config (地域配置),       │   │
+│  │              event_config (事件配置), geo_ipv4_whitelist,     │   │
+│  │              scratch (per-CPU 临时空间)                       │   │
+│  │  - 返回: XDP_DROP（丢弃）或 XDP_PASS（放行）                  │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              ↓ (if XDP_PASS)                        │
 │  ┌─────────────────────────────────────────────────────────────┐   │
@@ -64,10 +71,16 @@
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              ↓                                       │
 │  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  WAF 日志监控模块 (internal/waf/)                             │   │
+│  │  - monitor.go: 监控 WAF 审计日志和 Rate Limit 日志            │   │
+│  │  - 自动触发 IP 封禁（带过期时间），定期清理过期封禁              │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                              ↓                                       │
+│  ┌─────────────────────────────────────────────────────────────┐   │
 │  │  HTTP API (internal/handles/, internal/routers/)             │   │
 │  │  路由 (RESTful /api/{module}/{action}):                      │   │
 │  │  认证: /api/auth/*                                            │   │
-│  │  手动规则: GET/POST/DELETE /api/manual/rules                  │   │
+│  │  手动规则: POST/DELETE /api/manual/rules                     │   │
 │  │  情报: GET/POST /api/intel/status, /api/intel/update         │   │
 │  │  地域封禁: GET/POST /api/geoblocking/*                        │   │
 │  │  阻断日志: GET/DELETE /api/blocklog/*                         │   │
@@ -103,10 +116,18 @@ rho-aias/
 ├── config.yml                    # 配置文件（端口、网卡、威胁情报）
 ├── go.mod                        # Go 模块依赖
 ├── makefile                      # 构建脚本
+├── Dockerfile                    # rho-aias 镜像构建文件（多阶段构建）
+├── docker-compose.yml            # Docker Compose 部署（拉取镜像）
+├── docker-compose-build-run.yml  # Docker Compose 部署（本地构建）
+├── build.sh                      # CI/CD 镜像构建脚本
 ├── ebpfs/                        # eBPF C 源码
 │   ├── xdp.bpf.c                 # XDP 程序
-│   ├── common.h                  # 公共常量定义
-│   └── vmlinux.h                 # 内核头文件（自动生成）
+│   └── common.h                  # 公共常量定义（含位掩码定义）
+├── caddy/                        # Caddy + Coraza WAF 容器
+│   ├── Caddyfile                 # Caddy 配置（WAF 规则、Rate Limit）
+│   ├── Dockerfile                # 自定义 Caddy 镜像（含 coraza + ratelimit 插件）
+│   ├── README.md                 # Caddy 子项目说明
+│   └── build.sh                  # Caddy 镜像构建脚本
 ├── internal/
 │   ├── auth/                     # 认证模块
 │   │   ├── jwt/                  # JWT 服务
@@ -131,9 +152,17 @@ rho-aias/
 │   ├── models/                   # 数据模型
 │   ├── routers/                  # 路由注册
 │   ├── services/                 # 业务逻辑服务
-│   └── threatintel/              # 威胁情报模块
-├── config/                       # 配置示例
-├── test/                         # 测试脚本
+│   ├── threatintel/              # 威胁情报模块
+│   └── waf/                      # WAF 日志监控模块
+│       ├── monitor.go            # WAF 日志监控（自动封禁 + 过期清理）
+│       └── monitor_test.go       # 监控模块测试
+├── config/                       # RBAC 策略模型
+│   └── rbac_model.conf           # Casbin RBAC 模型定义
+├── test/                         # 集成测试
+│   ├── README.md                 # 测试说明
+│   ├── netns.py                  # 网络命名空间设置脚本
+│   ├── run_tests.sh              # 测试运行脚本
+│   └── test_xdp_block.py         # XDP 阻断集成测试
 └── utils/                        # 工具函数
 ```
 
@@ -142,7 +171,7 @@ rho-aias/
 ### 系统要求
 
 - Linux 内核 5.8+（支持 XDP）
-- Go 1.21+
+- Go 1.25+
 - root 权限或 CAP_BPF 能力
 - clang/LLVM（用于编译 eBPF 程序）
 
@@ -150,7 +179,7 @@ rho-aias/
 
 ```bash
 # 克隆仓库
-git clone <repository-url>
+git clone https://cnb.cool/MakeCNBGreatAgain/rho-aias.git
 cd rho-aias
 
 # 生成 eBPF Go 代码
@@ -160,13 +189,25 @@ make gen
 make build
 ```
 
+### 命令行参数
+
+```bash
+# 使用默认配置文件（config.yml）
+sudo ./rho-aias
+
+# 指定配置文件路径
+sudo ./rho-aias --config /path/to/config.yml
+```
+
+程序支持信号驱动的优雅关闭，发送 `SIGINT`（Ctrl+C）或 `SIGTERM` 后将在 5 秒内完成资源清理并退出。
+
 ### 配置
 
 编辑 `config.yml` 文件：
 
 ```yaml
 server:
-  port: 8080                    # HTTP API 端口
+  port: 8081                    # HTTP API 端口
 
 # 日志配置
 log:
@@ -181,13 +222,16 @@ ebpf:
 
 # 认证配置
 auth:
-  enabled: true                 # 是否启用认证
-  jwt_secret: ""                # JWT 密钥，建议从环境变量 JWT_SECRET 读取
+  enabled: false                # 是否启用认证（默认 false）
+  jwt_secret: ""                # JWT 密钥，建议从环境变量 JWT_SECRET 读取，留空则使用环境变量
   jwt_issuer: "rho-aias"        # JWT 签发者
-  token_duration: 1440          # Token 有效期（分钟），默认 24 小时
+  token_duration: 1440          # Token 有效期（分钟），默认 1440 分钟（24小时）
   database_path: "./data/auth.db"  # 数据库路径
   captcha_enabled: true         # 是否启用验证码
   captcha_duration: 5           # 验证码有效期（分钟）
+
+  # 预定义的 API Key（可选，留空数组则不创建）
+  api_keys: []
 
 # 威胁情报配置
 intel:
@@ -198,11 +242,13 @@ intel:
   sources:
     ipsum:
       enabled: true
+      periodic: true              # 是否开启周期性更新（默认 true，设为 false 则仅启动时下载）
       schedule: "0 1 * * *"     # Cron 表达式
       url: http://localhost/ipsum.txt
       format: ipsum
     spamhaus:
       enabled: true
+      periodic: true
       schedule: "0 2 * * *"
       url: http://localhost/drop.txt
       format: spamhaus
@@ -220,6 +266,7 @@ geo_blocking:
   sources:
     maxmind:
       enabled: true
+      periodic: true
       schedule: "0 3 * * *"
       url: http://localhost/GeoLite2-Country.mmdb
       format: maxmind-db
@@ -241,8 +288,8 @@ blocklog:
 # WAF 日志监控配置
 waf:
   enabled: true                 # 是否启用 WAF 日志监控
-  waf_log_path: "/logs/waf_audit.log"          # WAF 审计日志路径（Caddy + Coraza）
-  rate_limit_log_path: "/logs/rate_limit.log"  # Rate Limit 日志路径
+  waf_log_path: /caddy-logs/waf_audit.log          # WAF 审计日志路径（Caddy + Coraza）
+  rate_limit_log_path: /caddy-logs/rate_limit.log  # Rate Limit 日志路径
   ban_duration: 3600             # 封禁时长（秒），默认 3600（1 小时），建议 >= 300
 ```
 
@@ -307,7 +354,7 @@ auth:
 export MASTER_API_KEY="sk_live_$(openssl rand -hex 32)"
 
 # 使用 API Key 访问
-curl http://localhost:8080/api/manual/rules \
+curl http://localhost:8081/api/rules \
   -H "Authorization: Bearer ${MASTER_API_KEY}"
 ```
 
@@ -323,6 +370,63 @@ curl http://localhost:8080/api/manual/rules \
 # 需要 root 权限
 sudo ./rho-aias
 ```
+
+## Docker 部署
+
+项目采用双容器架构：**rho-aias**（防火墙引擎）+ **caddy**（反向代理 + WAF）。
+
+### 架构图
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Docker Compose                     │
+│                                                      │
+│  ┌─────────────────┐      ┌──────────────────────┐  │
+│  │   Caddy 容器     │      │  rho-aias 容器        │  │
+│  │                 │      │                      │  │
+│  │ ┌─────────────┐ │      │ ┌──────────────────┐ │  │
+│  │ │  Coraza WAF │ │      │ │  XDP eBPF 防火墙 │ │  │
+│  │ └─────────────┘ │      │ └──────────────────┘ │  │
+│  │ ┌─────────────┐ │      │ ┌──────────────────┐ │  │
+│  │ │ Rate Limit  │ │      │ │  威胁情报引擎    │ │  │
+│  │ └─────────────┘ │      │ └──────────────────┘ │  │
+│  │ ┌─────────────┐ │      │ ┌──────────────────┐ │  │
+│  │ │  Audit Log  │─┼──────│ │  WAF 日志监控    │ │  │
+│  │ └─────────────┘ │ 日志  │ └──────────────────┘ │  │
+│  │                 │ 共享  │ ┌──────────────────┐ │  │
+│  │  端口: 80/443  │      │ │  HTTP API :8081  │ │  │
+│  └─────────────────┘      │ └──────────────────┘ │  │
+│                            └──────────────────────┘  │
+│                    network_mode: host                  │
+└─────────────────────────────────────────────────────┘
+```
+
+### 使用预构建镜像部署
+
+```bash
+# 直接启动（拉取预构建镜像）
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+```
+
+### 从源码构建部署
+
+```bash
+# 从源码构建并启动
+docker compose -f docker-compose-build-run.yml up -d --build
+
+# 查看日志
+docker compose -f docker-compose-build-run.yml logs -f
+```
+
+### 安全说明
+
+- **rho-aias** 使用最小权限能力（`CAP_BPF`、`CAP_PERFMON`、`CAP_NET_ADMIN`、`CAP_NET_RAW`），不使用 privileged 模式
+- **caddy** 仅保留 `NET_BIND_SERVICE` 能力，并启用 `no-new-privileges` 安全选项
+- 两个容器均使用 `network_mode: host` 以支持 XDP 驱动层拦截
+- WAF 日志通过只读卷共享给 rho-aias（`/logs/caddy:/caddy-logs:ro`）
 
 ## API 接口
 
@@ -347,17 +451,17 @@ sudo ./rho-aias
 
 ```bash
 # 1. 获取验证码
-curl http://localhost:8080/api/auth/captcha
+curl http://localhost:8081/api/auth/captcha
 # 返回: {"captcha_id": "xxx", "image": "data:image/png;base64,..."}
 
 # 2. 登录
-curl -X POST http://localhost:8080/api/auth/login \
+curl -X POST http://localhost:8081/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "admin123", "captcha_id": "xxx", "captcha_answer": "abcd"}'
 # 返回: {"token": "eyJhbGciOiJIUzI1NiIs...", "user": {...}, "expires_at": "..."}
 
 # 3. 访问受保护的 API
-curl http://localhost:8080/api/manual/rules \
+curl http://localhost:8081/api/rules \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
@@ -365,25 +469,22 @@ curl http://localhost:8080/api/manual/rules \
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | `/api/manual/rules` | 获取所有规则 | firewall:read |
 | POST | `/api/manual/rules` | 添加过滤规则 | firewall:write |
 | DELETE | `/api/manual/rules` | 删除规则 | firewall:write |
+
+> 查询所有规则（包括手动、威胁情报、地域封禁）请使用 [`GET /api/rules`](#规则查询-api)。
 
 **请求示例：**
 
 ```bash
 # 添加规则
-curl -X POST http://localhost:8080/api/manual/rules \
+curl -X POST http://localhost:8081/api/manual/rules \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"value": "192.168.1.1"}'
 
-# 获取规则
-curl http://localhost:8080/api/manual/rules \
-  -H "Authorization: Bearer <token>"
-
 # 删除规则
-curl -X DELETE http://localhost:8080/api/manual/rules \
+curl -X DELETE http://localhost:8081/api/manual/rules \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"value": "192.168.1.1"}'
@@ -455,15 +556,15 @@ curl -X DELETE http://localhost:8080/api/manual/rules \
 
 ```bash
 # 获取所有数据源状态
-curl http://localhost:8080/api/sources/status \
+curl http://localhost:8081/api/sources/status \
   -H "Authorization: Bearer <token>"
 
 # 获取威胁情报数据源状态
-curl http://localhost:8080/api/sources/intel/status \
+curl http://localhost:8081/api/sources/intel/status \
   -H "Authorization: Bearer <token>"
 
 # 手动刷新 IPSum 数据源
-curl -X POST http://localhost:8080/api/sources/intel/ipsum/refresh \
+curl -X POST http://localhost:8081/api/sources/intel/ipsum/refresh \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -488,11 +589,11 @@ curl -X POST http://localhost:8080/api/sources/intel/ipsum/refresh \
 
 ```bash
 # 获取当前事件配置
-curl http://localhost:8080/api/xdp/events/status \
+curl http://localhost:8081/api/xdp/events/status \
   -H "Authorization: Bearer <token>"
 
 # 设置事件采样率和缓冲区大小
-curl -X POST http://localhost:8080/api/xdp/events/config \
+curl -X POST http://localhost:8081/api/xdp/events/config \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"sample_rate": 100, "buffer_size": 1024}'
@@ -536,7 +637,7 @@ curl -X POST http://localhost:8080/api/xdp/events/config \
 
 ## Cron 表达式
 
-威胁情报和 GeoIP 数据源支持独立的 Cron 定时任务：
+威胁情报和 GeoIP 数据源支持独立的 Cron 定时任务，通过 `periodic` 字段控制是否启用周期性更新：
 
 ```
 ┌───────────── 分钟 (0 - 59)
@@ -554,6 +655,8 @@ curl -X POST http://localhost:8080/api/xdp/events/config \
 - `0 2 * * *` - 每天凌晨 2 点
 - `0 0 * * 0` - 每周日午夜
 - `*/30 * * * *` - 每 30 分钟
+
+> 设置 `periodic: false` 可关闭周期性调度，仅在程序启动时下载一次数据。
 
 ## 性能优化
 
@@ -584,16 +687,24 @@ make run
 make clean
 
 # 运行单元测试
-go test -v -coverprofile=coverage.out ./...
+make test
 
-# 查看测试覆盖率
-go tool cover -html=coverage.out
+# 运行所有（生成 + 编译）
+make all
 
-# 生成 vmlinux.h
+# 生成 vmlinux.h（需要宿主机支持 BTF）
+make vmlinux.h
+
+# 查看帮助
+make help
+
+# 生成 vmlinux.h（手动方式）
 bpftool btf dump file /sys/kernel/btf/vmlinux format c > ebpfs/vmlinux.h
 ```
 
 ## 测试
+
+### 单元测试
 
 项目包含单元测试，覆盖核心模块：
 
@@ -603,12 +714,29 @@ bpftool btf dump file /sys/kernel/btf/vmlinux format c > ebpfs/vmlinux.h
 - `internal/auth/*_test.go` - 认证模块测试
 - `internal/manual/*_test.go` - 手动规则模块测试
 - `internal/blocklog/blocklog_test.go` - 阻断日志模块测试
+- `internal/blocklog/async_test.go` - 异步写入测试
+- `internal/blocklog/writer_test.go` - 持久化写入测试
+- `internal/ebpfs/xdp_type_test.go` - XDP 类型定义测试
+- `internal/kernel/checker_test.go` - 内核版本检测测试
 - `internal/middleware/auth_test.go` - 中间件测试
+- `internal/waf/monitor_test.go` - WAF 日志监控测试
 
 **运行测试：**
 ```bash
+make test
+# 或
 go test -v ./...
 ```
+
+### 集成测试
+
+`test/` 目录下提供基于 Python 的 XDP 阻断集成测试：
+
+- `test/netns.py` - 网络命名空间设置脚本
+- `test/run_tests.sh` - 测试运行脚本
+- `test/test_xdp_block.py` - XDP 阻断功能集成测试
+
+详见 [test/README.md](test/README.md)。
 
 ## 安全建议
 
@@ -619,9 +747,11 @@ go test -v ./...
 
 2. **默认密码**：首次登录后立即修改默认管理员密码
 
-3. **HTTPS**：生产环境建议使用 HTTPS
+3. **HTTPS**：生产环境建议使用 HTTPS（可通过 Caddy 反向代理自动管理证书）
 
 4. **Token 存储**：客户端应安全存储 Token
+
+5. **Docker 安全**：使用 `docker-compose.yml` 部署时，rho-aias 容器仅授予必要的 Linux Capabilities，不使用 privileged 模式
 
 ## 许可证
 
