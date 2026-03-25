@@ -205,11 +205,11 @@ class APIClient:
 
     def add_rule(self, value: str) -> Tuple[bool, dict]:
         """添加阻断规则"""
-        return self._request("POST", "/api/manual/rules", {"value": value})
+        return self._request("POST", "/api/manual/blacklist/rules", {"value": value})
 
     def delete_rule(self, value: str) -> Tuple[bool, dict]:
         """删除阻断规则"""
-        return self._request("DELETE", "/api/manual/rules", {"value": value})
+        return self._request("DELETE", "/api/manual/blacklist/rules", {"value": value})
 
     def get_rules(self, source: str = None) -> Tuple[bool, dict]:
         """获取规则列表"""
