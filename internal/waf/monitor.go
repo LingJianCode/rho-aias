@@ -288,7 +288,12 @@ func (m *Monitor) extractIP(line string, logSource string) string {
 		// 返回 client_ip
 		return entry.Transaction.ClientIP
 	default:
-		return ""
+		// unknown 来源：使用正则提取第一个 IP（向后兼容）
+		matches := m.ipRegex.FindAllString(line, -1)
+		if len(matches) == 0 {
+			return ""
+		}
+		return matches[0]
 	}
 }
 
