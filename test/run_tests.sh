@@ -8,6 +8,8 @@
 #   ./run_tests.sh --use-api-key --api-key sk_live_your-key-here # 使用指定 API Key
 #   ./run_tests.sh --env-only   # 仅运行环境测试（不需要编译 rho-aias）
 #   ./run_tests.sh -t TestXDPIpBlocking.test_01_ipv4_exact_block  # 运行特定测试
+#   ./run_tests.sh --ddos       # 运行 DDoS 检测测试
+#   ./run_tests.sh --ddos --test TestDDoSDetection.test_01_tcp_syn_flood  # 运行特定 DDoS 测试
 #
 # 前置条件:
 #   1. Root 权限
@@ -102,12 +104,12 @@ cleanup() {
     log_info "清理完成"
 }
 
-# 运行测试
-run_tests() {
+# 运行 DDoS 检测测试
+run_ddos_tests() {
     local use_api_key=false
     local api_key=""
     local other_args=()
-    
+
     # 解析参数
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -125,13 +127,77 @@ run_tests() {
                 ;;
         esac
     done
-    
+
     cd "$SCRIPT_DIR"
-    
+
+    log_info "运行 DDoS 检测测试"
+
+    python3 test_ddos_detection.py "${other_args[@]}"
+
+    local exit_code=$?
+
+    if [ $exit_code -eq 0 ]; then
+        echo "========================================"
+        log_info "DDoS 测试完成"
+        return 0
+    else
+        echo "========================================"
+        log_error "DDoS 测试失败"
+        return 1
+    fi
+}
+
+# 运行测试
+run_tests() {
+    local use_api_key=false
+    local api_key=""
+    local run_ddos=false
+    local other_args=()
+
+    # 解析参数
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --use-api-key)
+                use_api_key=true
+                shift
+                ;;
+            --api-key)
+                api_key="$2"
+                shift 2
+                ;;
+            --ddos)
+                run_ddos=true
+                shift
+                ;;
+            *)
+                other_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    cd "$SCRIPT_DIR"
+
+    # 如果运行 DDoS 测试
+    if [ "$run_ddos" = true ]; then
+        log_info "运行 DDoS 检测测试"
+        python3 test_ddos_detection.py "${other_args[@]}"
+        local exit_code=$?
+        if [ $exit_code -eq 0 ]; then
+            echo "========================================"
+            log_info "DDoS 测试完成"
+            return 0
+        else
+            echo "========================================"
+            log_error "DDoS 测试失败"
+            return 1
+        fi
+    fi
+
     # 如果使用 API Key 认证
     if [ "$use_api_key" = true ]; then
         log_info "启用 API Key 认证测试"
-        
+
         # 如果指定了 API Key，传递给 Python 脚本
         if [ -n "$api_key" ]; then
             log_info "使用指定的 API Key"
@@ -147,9 +213,9 @@ run_tests() {
         # 不使用 API Key 认证，只运行 TestXDPIpBlocking 测试
         python3 test_xdp_block.py -t TestXDPIpBlocking "${other_args[@]}"
     fi
-    
+
     local exit_code=$?
-    
+
     if [ $exit_code -eq 0 ]; then
         echo "========================================"
         log_info "测试完成"
@@ -163,26 +229,41 @@ run_tests() {
 
 # 主函数
 main() {
-    log_info "=========================================="
-    log_info "eBPF XDP IP 阻断功能集成测试"
-    log_info "=========================================="
-    
+    # 检测是否运行 DDoS 测试
+    local run_ddos=false
+    for arg in "$@"; do
+        if [ "$arg" = "--ddos" ]; then
+            run_ddos=true
+            break
+        fi
+    done
+
+    if [ "$run_ddos" = true ]; then
+        log_info "=========================================="
+        log_info "DDoS 检测功能集成测试"
+        log_info "=========================================="
+    else
+        log_info "=========================================="
+        log_info "eBPF XDP IP 阻断功能集成测试"
+        log_info "=========================================="
+    fi
+
     # 环境检查
     check_root "$@"
     check_python
     check_kernel
-    
+
     # 如果不是仅环境测试，检查二进制文件
     if [[ "$*" != *"--env-only"* ]]; then
         check_binary
     fi
-    
+
     # 设置清理 trap
     trap cleanup EXIT
-    
+
     # 清理之前可能的残留
     cleanup
-    
+
     # 运行测试
     run_tests "$@"
 }
