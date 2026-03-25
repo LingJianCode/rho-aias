@@ -3,11 +3,11 @@
         auto_https off
         order coraza_waf after rate_limit
         log {
-                output file /logs/access.log {
+                output file /logs/caddy.log {
                         roll_size 100mb
                         roll_keep 5
                         roll_keep_for 720h
-			mode 0644
+                        mode 0644
                 }
                 format json
                 level debug
@@ -19,7 +19,7 @@
                         roll_size 100mb
                         roll_keep 5
                         roll_keep_for 720h
-			mode 0644
+                        mode 0644
                 }
                 format json
                 level info
@@ -29,6 +29,18 @@
 }
 
 
+(access_log) {
+        log {
+                output file /logs/access.log {
+                        roll_size 100mb
+                        roll_keep 5
+                        roll_keep_for 720h
+                        mode 0644
+                }
+                format json
+                level debug
+        }
+}
 # 定义限流策略片段
 (rate_limit_policy) {
         rate_limit {
@@ -77,15 +89,14 @@
 
         handle_errors 403 {
                 header X-Blocked "true"
-		respond "403 Forbidden\n" 403
+                respond "403 Forbidden\n" 403
         }
 }
 
-
-:8080 {
+:8080, :8443, :80, :8888 {
         import rate_limit_policy
         import waf
+        import access_log
         respond "您的IP地址是: {remote_host}
 "
 }
-
