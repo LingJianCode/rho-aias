@@ -26,29 +26,38 @@ func NewUserService(db *gorm.DB) *UserService {
 
 // CreateUser 创建用户
 func (s *UserService) CreateUser(username, passwordStr, nickname, email, role string) (*models.User, error) {
-	// 检查用户名是否存在
-	var count int64
-	s.db.Model(&models.User{}).Where("username = ?", username).Count(&count)
-	if count > 0 {
-		return nil, ErrUserAlreadyExists
-	}
+	var user *models.User
 
-	// 加密密码
-	hashedPassword, err := password.HashPassword(passwordStr)
+	// 使用事务包裹检查和创建操作，避免 TOCTOU 竞态条件
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 检查用户名是否存在
+		var count int64
+		if err := tx.Model(&models.User{}).Where("username = ?", username).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return ErrUserAlreadyExists
+		}
+
+		// 加密密码
+		hashedPassword, err := password.HashPassword(passwordStr)
+		if err != nil {
+			return err
+		}
+
+		user = &models.User{
+			Username: username,
+			Password: hashedPassword,
+			Nickname: nickname,
+			Email:    email,
+			Role:     role,
+			Active:   true,
+		}
+
+		return tx.Create(user).Error
+	})
+
 	if err != nil {
-		return nil, err
-	}
-
-	user := &models.User{
-		Username: username,
-		Password: hashedPassword,
-		Nickname: nickname,
-		Email:    email,
-		Role:     role,
-		Active:   true,
-	}
-
-	if err := s.db.Create(user).Error; err != nil {
 		return nil, err
 	}
 
