@@ -34,13 +34,15 @@ func (protocol IPProtocol) String() string {
 }
 
 type PacketInfo struct {
-	SrcIP     [4]byte
-	DstIP     [4]byte
-	SrcIPv6   [16]byte
-	DstIPv6   [16]byte
-	EthProto  EthernetType
-	PktSize   uint32
-	MatchType MatchType
+	SrcIP      [4]byte
+	DstIP      [4]byte
+	SrcIPv6    [16]byte
+	DstIPv6    [16]byte
+	EthProto   EthernetType
+	IPProtocol uint8    // IP 协议类型 (TCP=6, UDP=17, ICMP=1)
+	TCPFlags   uint8    // TCP 标志位 (SYN=0x02, ACK=0x10, etc.)
+	PktSize    uint32
+	MatchType  MatchType
 }
 
 type Packet struct {

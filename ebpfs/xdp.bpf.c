@@ -62,8 +62,7 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 
 /* Packet information structure for processing and event reporting
  * 总大小: 64 bytes, packed 避免填充
- * 注意: 当前不解析传输层信息，只记录网络层地址
- * TODO: 为数据包增加一个匹配规则来源字段，标记由什么规则封禁
+ * 包含传输层协议信息和 TCP 标志位
  */
 struct packet_info {
     // Network layer - IPv4 addresses (8 bytes)
@@ -74,10 +73,10 @@ struct packet_info {
     __be32 src_ipv6[4];             // 源 IPv6 地址 (128 bits)
     __be32 dst_ipv6[4];             // 目的 IPv6 地址 (128 bits)
 
-    // Protocol information (2 bytes)
+    // Protocol information (4 bytes)
     __u16 eth_proto;                // 以太网协议类型 (ETH_P_IP/ETH_P_IPV6)
-
-    // Padding (2 bytes) - 保持字段对齐
+    __u8 ip_protocol;               // IP 协议类型 (TCP=6, UDP=17, ICMP=1)
+    __u8 tcp_flags;                 // TCP 标志位 (SYN=0x02, ACK=0x10, etc.)
 
     // Metadata (8 bytes)
     __u32 pkt_size;                 // 数据包总大小
@@ -186,6 +185,28 @@ struct {
     __uint(max_entries, 1);
 } event_config SEC(".maps");
 
+// Anomaly detection configuration map
+// Controls whether to sample packets for anomaly detection
+struct anomaly_config {
+    __u32 enabled;        /* Anomaly detection enabled flag (0=disabled, 1=enabled) */
+    __u32 sample_rate;    /* Sample rate: report 1 out of every N packets (e.g., 100 = 1%) */
+    __u32 padding[2];     /* Alignment padding to 16 bytes */
+} __attribute__((packed));
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, __u32);
+    __type(value, struct anomaly_config);
+    __uint(max_entries, 1);
+} anomaly_config SEC(".maps");
+
+// Ring buffer for anomaly detection sampling
+// Samples all passing packets (not blocked) for statistical analysis
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 20);  // 1MB buffer size
+} anomaly_events SEC(".maps");
+
 // IPv4 GeoIP whitelist LPM trie
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
@@ -194,6 +215,62 @@ struct {
     __uint(max_entries, 500000);  /* GeoLite2-Country.mmdb has ~500K+ networks */
     __uint(map_flags, BPF_F_NO_PREALLOC);
 } geo_ipv4_whitelist SEC(".maps");
+
+// ============================================
+// Transport layer parsing helper functions
+// ============================================
+
+// Protocol type constants
+#define IPPROTO_TCP  6
+#define IPPROTO_UDP  17
+#define IPPROTO_ICMP 1
+
+// TCP flag bit masks
+#define TCP_FLAG_FIN 0x01
+#define TCP_FLAG_SYN 0x02
+#define TCP_FLAG_RST 0x04
+#define TCP_FLAG_PSH 0x08
+#define TCP_FLAG_ACK 0x10
+#define TCP_FLAG_URG 0x20
+
+/* 解析传输层头部
+ * @pkt_info: 数据包信息结构体
+ * @ip_data: IP 头部起始位置
+ * @iph_len: IP 头部长度
+ * @data_end: 数据包结束指针
+ * @protocol: IP 协议号
+ * 
+ * 填充 pkt_info->ip_protocol 和 pkt_info->tcp_flags
+ */
+static __always_inline void parse_transport_layer(
+    struct packet_info *pkt_info,
+    void *ip_data,
+    __u32 iph_len,
+    void *data_end,
+    __u8 protocol)
+{
+    pkt_info->ip_protocol = protocol;
+    pkt_info->tcp_flags = 0;
+
+    // 只解析 TCP 的标志位
+    if (protocol == IPPROTO_TCP) {
+        struct tcphdr *tcph = (struct tcphdr *)(ip_data + iph_len);
+        
+        // 验证 TCP 头边界（至少 20 字节）
+        if ((void *)(tcph + 1) > data_end)
+            return;
+        
+        // 提取 TCP 标志位 (tcphdr->tcp_flags 或 th_flags 字段)
+        // flags 字段位于 TCP 头的第 13 字节（偏移 12，从 0 开始）
+        // struct tcphdr 中通常有 th_flags 或 tcp_flags 字段
+        // 使用 bpf_core_read 读取以保持兼容性
+        __u8 flags;
+        if (bpf_core_read(&flags, sizeof(flags), &tcph->tcp_flags) == 0) {
+            pkt_info->tcp_flags = flags;
+        }
+    }
+    // UDP 和 ICMP 不需要特殊处理，只需要记录协议类型
+}
 
 /* 检查数据包是否匹配地域封禁规则
  * @pi: 包含已解析数据包信息的结构体
@@ -351,8 +428,11 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
         // 填充 IPv4 地址信息
         pkt_info->src_ip = iph->saddr;
         pkt_info->dst_ip = iph->daddr;
+        pkt_info->ip_protocol = iph->protocol;
+        pkt_info->tcp_flags = 0;
 
-        // 注意: 传输层解析已注释，XDP 程序当前只处理网络层
+        // 解析传输层（TCP 标志位）
+        parse_transport_layer(pkt_info, ip_data, iph_len, data_end, iph->protocol);
         
     } else if (pkt_info->eth_proto == ETH_P_IPV6) {
         // IPv6 处理
@@ -363,6 +443,8 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
         // 复制 IPv6 地址（128 位 = 4 * 32 位）
         __builtin_memcpy(pkt_info->src_ipv6, ipv6h->saddr.in6_u.u6_addr32, sizeof(pkt_info->src_ipv6));
         __builtin_memcpy(pkt_info->dst_ipv6, ipv6h->daddr.in6_u.u6_addr32, sizeof(pkt_info->dst_ipv6));
+        pkt_info->ip_protocol = 0;
+        pkt_info->tcp_flags = 0;
 
         // 处理 IPv6 扩展头链
         // 跳过所有扩展头直到找到传输层协议或达到限制
@@ -466,6 +548,8 @@ int xdp_prog(struct xdp_md *ctx)
     pkt_info->dst_ip = 0;
     __builtin_memset(pkt_info->src_ipv6, 0, sizeof(pkt_info->src_ipv6));
     __builtin_memset(pkt_info->dst_ipv6, 0, sizeof(pkt_info->dst_ipv6));
+    pkt_info->ip_protocol = 0;
+    pkt_info->tcp_flags = 0;
     pkt_info->pkt_size = data_end - data;
     pkt_info->match_type = 0;
 
@@ -499,8 +583,29 @@ submit:
     pkt_info->match_type = match_type;
 
     // 分支预测优化: 大多数包会通过，使用 LIKELY 提示编译器
-    if (LIKELY(match_type == MATCH_BY_PASS))
+    if (LIKELY(match_type == MATCH_BY_PASS)) {
+        // 异常检测采样：对通过的数据包进行采样上报（用于统计检测）
+        {
+            __u32 config_key = 0;
+            struct anomaly_config *cfg = bpf_map_lookup_elem(&anomaly_config, &config_key);
+            
+            // 只有在配置启用时才上报采样事件
+            if (cfg && cfg->enabled) {
+                __u32 sample_rate = cfg->sample_rate;
+                if (sample_rate == 0) {
+                    sample_rate = 100; // 默认采样率 1%
+                }
+                
+                // 采样逻辑：random % sample_rate == 0 则上报
+                __u32 random_val = bpf_get_prandom_u32();
+                if ((random_val % sample_rate) == 0) {
+                    // 上报到 anomaly_events ring buffer
+                    bpf_ringbuf_output(&anomaly_events, pkt_info, sizeof(*pkt_info), 0);
+                }
+            }
+        }
         return XDP_PASS;
+    }
 
     // 匹配规则则丢弃，并根据配置决定是否上报事件
     {
