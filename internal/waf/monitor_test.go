@@ -214,7 +214,19 @@ func TestExtractIP_RateLimitSource(t *testing.T) {
 		want      string
 	}{
 		{
-			name:      "single IP in rate limit log",
+			name:      "JSON format rate limit log",
+			line:      `{"level":"info","ts":1774432310.799444,"logger":"http.handlers.rate_limit","msg":"rate limit exceeded","zone":"global_zone","wait":9.911422566,"remote_ip":"47.100.232.185"}`,
+			logSource: "rate_limit",
+			want:      "47.100.232.185",
+		},
+		{
+			name:      "JSON format with empty remote_ip - fallback to regex",
+			line:      `{"level":"info","remote_ip":"","msg":"rate limit exceeded for 1.2.3.4"}`,
+			logSource: "rate_limit",
+			want:      "1.2.3.4",
+		},
+		{
+			name:      "non-JSON format - fallback to regex",
 			line:      "rate_limit_exceeded for 1.2.3.4",
 			logSource: "rate_limit",
 			want:      "1.2.3.4",
@@ -321,19 +333,22 @@ func TestExtractIP_IPv4BoundaryValues(t *testing.T) {
 	monitor := NewMonitor(cfg, mockXDP, context.Background())
 
 	tests := []struct {
-		name string
-		line string
-		want string
+		name      string
+		line      string
+		logSource string
+		want      string
 	}{
-		{"min IP", "0.0.0.1", "0.0.0.1"},
-		{"max IP", "255.255.255.255", "255.255.255.255"},
-		{"IP with leading zeros", "001.002.003.004", "001.002.003.004"},
-		{"IP in URL context", "http://192.168.1.1:8080/path", "192.168.1.1"},
+		{"min IP", "0.0.0.1", "rate_limit", "0.0.0.1"},
+		{"max IP", "255.255.255.255", "rate_limit", "255.255.255.255"},
+		{"IP with leading zeros", "001.002.003.004", "rate_limit", "001.002.003.004"},
+		{"IP in URL context", "http://192.168.1.1:8080/path", "rate_limit", "192.168.1.1"},
+		{"JSON min IP", `{"remote_ip":"0.0.0.1"}`, "rate_limit", "0.0.0.1"},
+		{"JSON max IP", `{"remote_ip":"255.255.255.255"}`, "rate_limit", "255.255.255.255"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := monitor.extractIP(tt.line, "rate_limit")
+			got := monitor.extractIP(tt.line, tt.logSource)
 			if got != tt.want {
 				t.Errorf("extractIP(%q) = %q, want %q", tt.line, got, tt.want)
 			}
