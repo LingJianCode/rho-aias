@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -252,13 +253,27 @@ type WAFLogEntry struct {
 	} `json:"transaction"`
 }
 
+// RateLimitLogEntry Caddy rate limit 日志结构
+type RateLimitLogEntry struct {
+	RemoteIP string `json:"remote_ip"`
+	Msg      string `json:"msg"`
+}
+
 // extractIP 从日志行中提取 IP 地址
 // logSource 标识日志来源（"waf" 或 "rate_limit"），用于选择不同的 IP 提取策略
 func (m *Monitor) extractIP(line string, logSource string) string {
 	switch logSource {
 	case "rate_limit":
-		// Rate limit 日志：匹配 IP 地址
-		// 格式示例: "rate_limit_exceeded for 1.2.3.4"
+		// Rate limit 日志：优先使用 JSON 解析精确提取 remote_ip
+		// 格式示例: {"level":"info","remote_ip":"1.2.3.4","msg":"rate limit exceeded"}
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "{") {
+			var entry RateLimitLogEntry
+			if err := json.Unmarshal([]byte(trimmed), &entry); err == nil && entry.RemoteIP != "" {
+				return entry.RemoteIP
+			}
+		}
+		// JSON 解析失败或非 JSON 格式，回退到正则匹配（向后兼容）
 		matches := m.ipRegex.FindAllString(line, -1)
 		if len(matches) == 0 {
 			return ""
