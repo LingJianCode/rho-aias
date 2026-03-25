@@ -49,6 +49,7 @@ type IntelConfig struct {
 // IntelSource 单个情报源配置
 type IntelSource struct {
 	Enabled  bool   `yaml:"enabled"`  // 是否启用
+	Periodic bool   `yaml:"periodic"` // 是否启用周期性调度（默认 true）
 	Schedule string `yaml:"schedule"` // Cron 表达式 (如: "0 * * * *" 表示每小时整点)
 	URL      string `yaml:"url"`      // 数据源 URL
 	Format   string `yaml:"format"`   // 格式类型 (ipsum/spamhaus)
@@ -70,6 +71,7 @@ type GeoBlockingConfig struct {
 // 数据由外部工具下载后托管在 nginx 文件服务器
 type GeoIPSource struct {
 	Enabled  bool   `yaml:"enabled"`  // 是否启用
+	Periodic bool   `yaml:"periodic"` // 是否启用周期性调度（默认 true）
 	Schedule string `yaml:"schedule"` // Cron 表达式
 	URL      string `yaml:"url"`      // CSV 文件 URL
 	Format   string `yaml:"format"`   // maxmind, dbip 等
@@ -175,6 +177,18 @@ func NewConfig(fileName string) *Config {
 	}
 	if config.BlockLog.FlushInterval == 0 {
 		config.BlockLog.FlushInterval = 5 // 默认 5 秒
+	}
+
+	// Intel sources 默认值
+	for name, source := range config.Intel.Sources {
+		source.Periodic = true
+		config.Intel.Sources[name] = source
+	}
+
+	// GeoBlocking sources 默认值
+	for name, source := range config.GeoBlocking.Sources {
+		source.Periodic = true
+		config.GeoBlocking.Sources[name] = source
 	}
 
 	// WAF 默认值
