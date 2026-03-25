@@ -304,7 +304,7 @@ func main() {
 		// 创建解封回调函数
 		unblockCallback := func(ip string) error {
 			// 移除 Anomaly Detection 来源位，如果规则无其他来源则自动删除
-			_, _, _, err := xdp.RemoveSourceFromRule(ip, ebpfs.SourceMaskAnomaly)
+			_, _, _, err := xdp.UpdateRuleSourceMask(ip, ebpfs.SourceMaskAnomaly)
 			if err != nil {
 				logger.Warnf("[AnomalyDetection] Failed to unblock IP %s: %v", ip, err)
 				return err
