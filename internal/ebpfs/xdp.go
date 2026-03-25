@@ -221,7 +221,7 @@ func (x *Xdp) getRuleSourceFromPacket(srcIP [4]byte, srcIPv6 [16]byte, ethProto 
 				return sources[0]
 			}
 		}
-	case MatchByIPv6Exact:
+	case MatchByIP6Exact:
 		var blockValue BlockValue
 		if err := x.objects.BlockIpv6List.Lookup(&srcIPv6, &blockValue); err == nil {
 			sources := MaskToSourceIDs(blockValue.SourceMask)
