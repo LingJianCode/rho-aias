@@ -13,6 +13,10 @@ import (
 // reason: 封禁原因
 type BlockCallback func(ip string, duration int, reason string) error
 
+// UnblockCallback 解封回调函数类型
+// ip: 要解封的 IP
+type UnblockCallback func(ip string) error
+
 // Detector 异常检测器主结构
 // 负责协调各个检测模块，管理协程生命周期
 type Detector struct {
@@ -21,6 +25,7 @@ type Detector struct {
 	baselineDetector *BaselineDetector
 	attackDetector   *AttackDetector
 	blockCallback    BlockCallback
+	unblockCallback  UnblockCallback
 
 	mu              sync.RWMutex
 	running         bool
@@ -31,7 +36,9 @@ type Detector struct {
 }
 
 // NewDetector 创建新的异常检测器
-func NewDetector(config AnomalyDetectionConfig, blockCallback BlockCallback) *Detector {
+// blockCallback: 封禁回调，当检测到攻击时调用
+// unblockCallback: 解封回调，当封禁到期时调用
+func NewDetector(config AnomalyDetectionConfig, blockCallback BlockCallback, unblockCallback UnblockCallback) *Detector {
 	// 设置默认值
 	if config.CheckInterval == 0 {
 		config.CheckInterval = 1
@@ -63,12 +70,18 @@ func NewDetector(config AnomalyDetectionConfig, blockCallback BlockCallback) *De
 		config.Baseline.MaxAge = 1800
 	}
 
+	maxAge := time.Duration(config.Baseline.MaxAge) * time.Second
+	if config.CleanupInterval > 0 && time.Duration(config.CleanupInterval)*time.Second < maxAge {
+		maxAge = time.Duration(config.CleanupInterval) * time.Second
+	}
+
 	return &Detector{
 		config:           config,
-		collector:        NewCollector(60), // 60 秒滑动窗口
+		collector:        NewCollector(60, maxAge), // 60 秒滑动窗口
 		baselineDetector: NewBaselineDetector(config.Baseline),
 		attackDetector:   NewAttackDetector(config.Attacks),
 		blockCallback:    blockCallback,
+		unblockCallback:  unblockCallback,
 		done:             make(chan struct{}),
 	}
 }
@@ -173,12 +186,12 @@ func (d *Detector) runDetection() {
 			isAnomaly, threshold := d.baselineDetector.CheckAnomaly(&stats.Baseline, float64(stats.Window.CurrentPPS))
 			if isAnomaly {
 				result := DetectionResult{
-					IP:           ip,
-					AttackType:   AttackTypeBaselineAnomaly,
-					CurrentPPS:   stats.Window.CurrentPPS,
-					Threshold:    threshold,
+					IP:            ip,
+					AttackType:    AttackTypeBaselineAnomaly,
+					CurrentPPS:    stats.Window.CurrentPPS,
+					Threshold:     threshold,
 					BlockDuration: d.config.BlockDuration,
-					Timestamp:    time.Now(),
+					Timestamp:     time.Now(),
 				}
 				d.handleDetection(result)
 			} else {
@@ -201,11 +214,28 @@ func (d *Detector) handleDetection(result DetectionResult) {
 			logger.Errorf("[AnomalyDetection] Failed to block IP %s: %v", result.IP, err)
 		} else {
 			logger.Infof("[AnomalyDetection] Successfully blocked IP %s for %ds", result.IP, result.BlockDuration)
+
+			// 调度定时解封：封禁到期后自动解封
+			if result.BlockDuration > 0 && d.unblockCallback != nil {
+				d.scheduleUnblock(result.IP, result.BlockDuration)
+			}
 		}
 	}
 
 	// 从统计中移除已封禁的 IP（避免重复封禁）
 	d.collector.RemoveIP(result.IP)
+}
+
+// scheduleUnblock 调度定时解封
+func (d *Detector) scheduleUnblock(ip string, duration int) {
+	timer := time.AfterFunc(time.Duration(duration)*time.Second, func() {
+		if d.unblockCallback != nil {
+			if err := d.unblockCallback(ip); err != nil {
+				logger.Warnf("[AnomalyDetection] Failed to unblock IP %s: %v", ip, err)
+			}
+		}
+	})
+	_ = timer // 保持 timer 引用直到触发
 }
 
 // ppsUpdateLoop PPS 更新循环
@@ -234,8 +264,6 @@ func (d *Detector) cleanupLoop() {
 
 // cleanup 清理过期数据
 func (d *Detector) cleanup() {
-	// 统计信息由 collector 自动清理
-	// 这里可以添加其他清理逻辑
 	logger.Debugf("[AnomalyDetection] Cleanup completed, current stats count: %d", d.collector.GetStatsCount())
 }
 

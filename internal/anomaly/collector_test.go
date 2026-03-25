@@ -2,10 +2,11 @@ package anomaly
 
 import (
 	"testing"
+	"time"
 )
 
 func TestCollector_RecordPacket(t *testing.T) {
-	collector := NewCollector(60)
+	collector := NewCollector(60, 5*time.Minute)
 
 	// 测试记录 TCP SYN 包
 	collector.RecordPacket("192.168.1.1", ProtocolTCP, TCPFlagSYN, 64)
@@ -30,7 +31,7 @@ func TestCollector_RecordPacket(t *testing.T) {
 }
 
 func TestCollector_RecordMultiplePackets(t *testing.T) {
-	collector := NewCollector(60)
+	collector := NewCollector(60, 5*time.Minute)
 
 	// 记录多种类型的包
 	collector.RecordPacket("10.0.0.1", ProtocolTCP, TCPFlagSYN, 64)
@@ -61,7 +62,7 @@ func TestCollector_RecordMultiplePackets(t *testing.T) {
 }
 
 func TestCollector_RemoveIP(t *testing.T) {
-	collector := NewCollector(60)
+	collector := NewCollector(60, 5*time.Minute)
 
 	collector.RecordPacket("192.168.1.1", ProtocolTCP, TCPFlagSYN, 64)
 	collector.RemoveIP("192.168.1.1")
@@ -73,7 +74,7 @@ func TestCollector_RemoveIP(t *testing.T) {
 }
 
 func TestCollector_GetAllStats(t *testing.T) {
-	collector := NewCollector(60)
+	collector := NewCollector(60, 5*time.Minute)
 
 	collector.RecordPacket("10.0.0.1", ProtocolTCP, TCPFlagSYN, 64)
 	collector.RecordPacket("10.0.0.2", ProtocolUDP, 0, 128)
@@ -85,7 +86,7 @@ func TestCollector_GetAllStats(t *testing.T) {
 }
 
 func TestCollector_GetStatsCount(t *testing.T) {
-	collector := NewCollector(60)
+	collector := NewCollector(60, 5*time.Minute)
 
 	if collector.GetStatsCount() != 0 {
 		t.Errorf("Expected 0 IPs initially, got %d", collector.GetStatsCount())

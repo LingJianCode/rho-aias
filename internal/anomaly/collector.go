@@ -11,18 +11,25 @@ type Collector struct {
 	mu            sync.RWMutex
 	statsMap      map[string]*IPStats // IP -> 统计数据
 	windowSize    int                 // 滑动窗口大小（秒）
+	maxAge        time.Duration       // 统计数据最大存活时间
 	cleanupTicker *time.Ticker
 	done          chan struct{}
 }
 
 // NewCollector 创建新的统计收集器
-func NewCollector(windowSize int) *Collector {
+// windowSize: 滑动窗口大小（秒）
+// maxAge: 统计数据最大存活时间（超过此时间未活动的 IP 将被清理）
+func NewCollector(windowSize int, maxAge time.Duration) *Collector {
 	if windowSize <= 0 {
 		windowSize = 60 // 默认 60 秒窗口
+	}
+	if maxAge <= 0 {
+		maxAge = 5 * time.Minute // 默认 5 分钟
 	}
 	return &Collector{
 		statsMap:   make(map[string]*IPStats),
 		windowSize: windowSize,
+		maxAge:     maxAge,
 		done:       make(chan struct{}),
 	}
 }
@@ -101,16 +108,11 @@ func (c *Collector) UpdatePPS() {
 	defer c.mu.Unlock()
 
 	now := time.Now()
-	for ip, stats := range c.statsMap {
-		// 计算当前秒的 PPS
-		elapsed := now.Sub(stats.LastUpdate).Seconds()
-		if elapsed >= 1.0 {
-			// 如果超过 1 秒没有数据，PPS 为 0
-			stats.Window.CurrentPPS = 0
-		} else {
-			// 否则使用当前累计的包数作为 PPS（简化计算）
-			// 更精确的做法是使用差分计算
-		}
+	for _, stats := range c.statsMap {
+		// 使用当前累计的包数作为当前秒的 PPS
+		// RecordPacket 在当前秒内不断累加 TotalPackets
+		// 在下一次 UpdatePPS 之前，TotalPackets 就是当前秒收到的包数
+		stats.Window.CurrentPPS = stats.ProtocolStats.TotalPackets
 
 		// 更新历史数据
 		stats.Window.PPSHistory[stats.Window.PPSIndex] = stats.Window.CurrentPPS
@@ -123,15 +125,14 @@ func (c *Collector) UpdatePPS() {
 		}
 		stats.Window.AvgPPS = float64(sum) / float64(stats.Window.WindowSize)
 
-		// 重置当前秒的统计
+		// 重置当前秒的统计（为下一秒做准备）
 		stats.ProtocolStats.Reset()
 
-		// 使用 ip 变量避免编译器警告
-		_ = ip
+		_ = now // 避免未使用变量警告
 	}
 }
 
-// GetStats 获取指定 IP 的统计信息
+// GetStats 获取指定 IP 的统计信息（深拷贝）
 func (c *Collector) GetStats(ip string) (*IPStats, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -139,21 +140,38 @@ func (c *Collector) GetStats(ip string) (*IPStats, bool) {
 	if !exists {
 		return nil, false
 	}
-	// 返回副本，避免外部修改
-	copy := *stats
-	return &copy, true
+	return deepCopyIPStats(stats), true
 }
 
-// GetAllStats 获取所有 IP 的统计信息
+// GetAllStats 获取所有 IP 的统计信息（深拷贝）
 func (c *Collector) GetAllStats() map[string]*IPStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	result := make(map[string]*IPStats, len(c.statsMap))
 	for ip, stats := range c.statsMap {
-		copy := *stats
-		result[ip] = &copy
+		result[ip] = deepCopyIPStats(stats)
 	}
 	return result
+}
+
+// deepCopyIPStats 深拷贝 IPStats，避免切片共享底层数组导致的数据竞争
+func deepCopyIPStats(stats *IPStats) *IPStats {
+	copy := *stats
+	// 深拷贝 PPSHistory 切片，避免与 UpdatePPS 的写入产生数据竞争
+	copy.Window.PPSHistory = make([]uint64, stats.Window.WindowSize)
+	copySlice(copy.Window.PPSHistory, stats.Window.PPSHistory)
+	return &copy
+}
+
+// copySlice 将 src 切片拷贝到 dst 切片
+func copySlice(dst, src []uint64) {
+	minLen := len(dst)
+	if len(src) < minLen {
+		minLen = len(src)
+	}
+	for i := 0; i < minLen; i++ {
+		dst[i] = src[i]
+	}
 }
 
 // RemoveIP 移除指定 IP 的统计信息
@@ -181,10 +199,9 @@ func (c *Collector) cleanup() {
 	defer c.mu.Unlock()
 
 	now := time.Now()
-	maxAge := 5 * time.Minute // 超过 5 分钟未活动的 IP 清理掉
 
 	for ip, stats := range c.statsMap {
-		if now.Sub(stats.LastUpdate) > maxAge {
+		if now.Sub(stats.LastUpdate) > c.maxAge {
 			delete(c.statsMap, ip)
 		}
 	}
