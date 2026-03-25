@@ -6,8 +6,24 @@ services:
     container_name: caddy
     restart: unless-stopped
     network_mode: host
+    user: root
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+
+    security_opt:
+      - no-new-privileges:true
+
+    read_only: true
+
+    tmpfs:
+      - /tmp
+
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
       - ./logs/caddy:/logs
 
   rho-aias:
@@ -31,3 +47,6 @@ services:
       - ./logs/caddy:/caddy-logs:ro
     command: ["--config", "/app/config/config.yml"]
     restart: unless-stopped
+
+volumes:
+  caddy_data:
