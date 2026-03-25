@@ -306,12 +306,20 @@ static __always_inline void parse_transport_layer(
         if ((void *)(tcph + 1) > data_end)
             return;
         
-        // 提取 TCP 标志位 (tcphdr->tcp_flags 或 th_flags 字段)
-        // flags 字段位于 TCP 头的第 13 字节（偏移 12，从 0 开始）
-        // struct tcphdr 中通常有 th_flags 或 tcp_flags 字段
-        // 使用 bpf_core_read 读取以保持兼容性
-        __u8 flags;
-        if (bpf_core_read(&flags, sizeof(flags), &tcph->tcp_flags) == 0) {
+        // 提取 TCP 标志位
+        // 读取整个 TCP 头部以安全访问标志位
+        struct tcphdr tcp_hdr;
+        if (bpf_core_read(&tcp_hdr, sizeof(tcp_hdr), tcph) == 0) {
+            // 从位域构建标志位
+            __u8 flags = 0;
+            if (tcp_hdr.fin) flags |= 0x01;
+            if (tcp_hdr.syn) flags |= 0x02;
+            if (tcp_hdr.rst) flags |= 0x04;
+            if (tcp_hdr.psh) flags |= 0x08;
+            if (tcp_hdr.ack) flags |= 0x10;
+            if (tcp_hdr.urg) flags |= 0x20;
+            if (tcp_hdr.ece) flags |= 0x40;
+            if (tcp_hdr.cwr) flags |= 0x80;
             pkt_info->tcp_flags = flags;
         }
     }
