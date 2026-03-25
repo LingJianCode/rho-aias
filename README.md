@@ -26,7 +26,7 @@
 | Spamhaus DROP | 国际知名垃圾邮件黑名单 | `0x02` | ✅ 已实现 |
 | Geo-Blocking | 基于国家/地区的地域封禁 | `0x04` | ✅ 已实现 |
 | WAF 自动封禁 | 监控 WAF 审计日志自动封禁 IP | `0x08` | ✅ 已实现 |
-| DDoS 防护 | （预留） | `0x10` | 🔜 预留 |
+| DDoS 防护 | 异常流量检测自动封禁 | `0x10` | ✅ 已实现 |
 
 ## 架构设计
 
@@ -74,6 +74,17 @@
 │  │  WAF 日志监控模块 (internal/waf/)                             │   │
 │  │  - monitor.go: 监控 WAF 审计日志和 Rate Limit 日志            │   │
 │  │  - 自动触发 IP 封禁（带过期时间），定期清理过期封禁              │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                              ↓                                       │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  异常流量检测模块 (internal/anomaly/)                       │   │
+│  │  - detector.go: 检测器主循环                                │   │
+│  │  - collector.go: 采集 eBPF 事件并统计                         │   │
+│  │  - attack_detector.go: 攻击类型检测                          │   │
+│  │  - baseline_detector.go: 3σ 基线异常检测                     │   │
+│  │  - protocol_stats.go: 协议统计分析                          │   │
+│  │  - types.go: 配置和统计类型定义                             │   │
+│  │  - 自动检测 SYN/UDP/ICMP/ACK Flood 并触发临时封禁            │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              ↓                                       │
 │  ┌─────────────────────────────────────────────────────────────┐   │
@@ -153,6 +164,13 @@ rho-aias/
 │   ├── routers/                  # 路由注册
 │   ├── services/                 # 业务逻辑服务
 │   ├── threatintel/              # 威胁情报模块
+│   ├── anomaly/                 # 异常流量检测模块
+│   │   ├── detector.go          # 检测器主循环
+│   │   ├── collector.go         # eBPF 事件采集
+│   │   ├── attack_detector.go   # 攻击类型检测
+│   │   ├── baseline_detector.go # 3σ 基线异常检测
+│   │   ├── protocol_stats.go    # 协议统计
+│   │   └── types.go            # 配置和统计类型
 │   └── waf/                      # WAF 日志监控模块
 │       ├── monitor.go            # WAF 日志监控（自动封禁 + 过期清理）
 │       └── monitor_test.go       # 监控模块测试
@@ -291,6 +309,44 @@ waf:
   waf_log_path: /caddy-logs/waf_audit.log          # WAF 审计日志路径（Caddy + Coraza）
   rate_limit_log_path: /caddy-logs/rate_limit.log  # Rate Limit 日志路径
   ban_duration: 3600             # 封禁时长（秒），默认 3600（1 小时），建议 >= 300
+
+# 异常流量检测配置
+anomaly_detection:
+  enabled: true                 # 总开关（默认 false）
+  sample_rate: 100               # 采样率 1/N（100 表示 1%）
+  check_interval: 1              # 检测间隔（秒）
+  min_packets: 100               # 最小包数（少于此值不检测）
+  cleanup_interval: 300          # 清理过期数据间隔（秒）
+  block_duration: 60             # 临时封禁时长（秒）
+
+  # 3σ 基线检测配置
+  baseline:
+    min_sample_count: 10          # 最小样本数（少于此值不检测）
+    sigma_multiplier: 3.0         # σ 倍数（默认 3σ）
+    min_threshold: 100            # 最小 PPS 阈值（保护低流量 IP）
+    max_age: 1800                 # 基线最大年龄（秒，默认30分钟）
+
+  # 攻击类型封禁配置
+  attacks:
+    syn_flood:
+      enabled: true
+      ratio_threshold: 0.5        # SYN 包占比阈值（50%）
+      block_duration: 60            # 封禁时长（秒）
+
+    udp_flood:
+      enabled: true
+      ratio_threshold: 0.8        # UDP 包占比阈值（80%）
+      block_duration: 60
+
+    icmp_flood:
+      enabled: true
+      ratio_threshold: 0.5        # ICMP 包占比阈值（50%）
+      block_duration: 60
+
+    ack_flood:
+      enabled: true
+      ratio_threshold: 0.8        # ACK 包占比阈值（80%）
+      block_duration: 60
 ```
 
 ### WAF IP 封禁清理机制
@@ -719,6 +775,7 @@ bpftool btf dump file /sys/kernel/btf/vmlinux format c > ebpfs/vmlinux.h
 - `internal/ebpfs/xdp_type_test.go` - XDP 类型定义测试
 - `internal/kernel/checker_test.go` - 内核版本检测测试
 - `internal/middleware/auth_test.go` - 中间件测试
+- `internal/anomaly/*_test.go` - 异常流量检测测试
 - `internal/waf/monitor_test.go` - WAF 日志监控测试
 
 **运行测试：**
