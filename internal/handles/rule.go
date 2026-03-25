@@ -37,6 +37,18 @@ func (h *RuleQueryHandle) GetRules(c *gin.Context) {
 		source = "manual"
 	}
 
+	// 校验 source 参数合法性
+	validSources := map[string]bool{
+		"manual": true, "ipsum": true, "spamhaus": true,
+		"waf": true, "ddos": true, "all": true,
+	}
+	if !validSources[source] {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid source parameter, allowed values: manual, ipsum, spamhaus, waf, ddos, all",
+		})
+		return
+	}
+
 	// 如果 source 为 "all"，返回所有规则
 	if source == "all" {
 		c.JSON(http.StatusOK, gin.H{
