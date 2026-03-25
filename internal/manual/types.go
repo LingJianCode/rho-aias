@@ -75,3 +75,72 @@ func (d *CacheData) GetValues() []string {
 }
 
 var ErrManualCacheNotFound = errors.New("manual cache not found")
+
+// SourceWhitelist 白名单源标识符
+const SourceWhitelist = "whitelist"
+
+// WhitelistRuleEntry 白名单规则条目
+type WhitelistRuleEntry struct {
+	Value   string    // IP/CIDR 值
+	AddedAt time.Time // 添加时间
+	Source  string    // 来源 (始终为 "whitelist")
+}
+
+// WhitelistCacheData 白名单持久化缓存数据结构
+type WhitelistCacheData struct {
+	Version   uint32                          // 版本号
+	Timestamp int64                           // Unix 时间戳
+	Rules     map[string]WhitelistRuleEntry   // key: value (IP/CIDR), value: 规则条目
+}
+
+// NewWhitelistCacheData 创建新的白名单缓存数据
+func NewWhitelistCacheData() *WhitelistCacheData {
+	return &WhitelistCacheData{
+		Version:   1,
+		Timestamp: time.Now().Unix(),
+		Rules:     make(map[string]WhitelistRuleEntry),
+	}
+}
+
+// NewWhitelistRuleEntry 创建新的白名单规则条目
+func NewWhitelistRuleEntry(value string) *WhitelistRuleEntry {
+	return &WhitelistRuleEntry{
+		Value:   value,
+		AddedAt: time.Now(),
+		Source:  SourceWhitelist,
+	}
+}
+
+// AddWhitelistRule 添加白名单规则到缓存数据
+func (d *WhitelistCacheData) AddWhitelistRule(entry WhitelistRuleEntry) {
+	d.Rules[entry.Value] = entry
+	d.Timestamp = time.Now().Unix()
+}
+
+// RemoveWhitelistRule 从缓存数据中移除白名单规则
+func (d *WhitelistCacheData) RemoveWhitelistRule(value string) {
+	delete(d.Rules, value)
+	d.Timestamp = time.Now().Unix()
+}
+
+// HasWhitelistRule 检查白名单规则是否存在
+func (d *WhitelistCacheData) HasWhitelistRule(value string) bool {
+	_, exists := d.Rules[value]
+	return exists
+}
+
+// WhitelistRuleCount 返回白名单规则总数
+func (d *WhitelistCacheData) WhitelistRuleCount() int {
+	return len(d.Rules)
+}
+
+// GetWhitelistValues 获取所有白名单规则的值列表
+func (d *WhitelistCacheData) GetWhitelistValues() []string {
+	values := make([]string, 0, len(d.Rules))
+	for _, entry := range d.Rules {
+		values = append(values, entry.Value)
+	}
+	return values
+}
+
+var ErrWhitelistCacheNotFound = errors.New("whitelist cache not found")

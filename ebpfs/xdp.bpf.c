@@ -44,6 +44,13 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MATCH_BY_IP6_CIDR   4    // Match IPv6 address by CIDR block
 #define MATCH_BY_MAC        5    // Match MAC address exactly
 #define MATCH_BY_GEO_BLOCK  6    // Match by geo-blocking rule
+#define MATCH_BY_WHITELIST  7    // Match by IP whitelist (pass directly)
+
+// Maximum number of entries in whitelist maps
+#define MAX_WHITELIST_IPV4_LIST_ENTRIES 10000    // IPv4 whitelist exact match
+#define MAX_WHITELIST_IPV4_CIDR_ENTRIES 5000     // IPv4 whitelist CIDR
+#define MAX_WHITELIST_IPV6_LIST_ENTRIES 10000    // IPv6 whitelist exact match
+#define MAX_WHITELIST_IPV6_CIDR_ENTRIES 5000     // IPv6 whitelist CIDR
 
 // Maximum number of entries in each map
 // 威胁情报数据量: IPSum ~230K, Spamhaus ~1.5K
@@ -217,6 +224,45 @@ struct {
 } geo_ipv4_whitelist SEC(".maps");
 
 // ============================================
+// IP Whitelist eBPF Maps
+// 白名单优先级最高：命中白名单直接 XDP_PASS，跳过所有后续检查
+// ============================================
+
+// IPv4 whitelist exact match hash table
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __be32);
+    __type(value, struct block_value);
+    __uint(max_entries, MAX_WHITELIST_IPV4_LIST_ENTRIES);
+} whitelist_ipv4_list SEC(".maps");
+
+// IPv4 whitelist CIDR LPM trie
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __type(key, struct ipv4_trie_key);
+    __type(value, struct block_value);
+    __uint(max_entries, MAX_WHITELIST_IPV4_CIDR_ENTRIES);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} whitelist_ipv4_cidr_trie SEC(".maps");
+
+// IPv6 whitelist exact match hash table
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, struct in6_addr);
+    __type(value, struct block_value);
+    __uint(max_entries, MAX_WHITELIST_IPV6_LIST_ENTRIES);
+} whitelist_ipv6_list SEC(".maps");
+
+// IPv6 whitelist CIDR LPM trie
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __type(key, struct ipv6_trie_key);
+    __type(value, struct block_value);
+    __uint(max_entries, MAX_WHITELIST_IPV6_CIDR_ENTRIES);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} whitelist_ipv6_cidr_trie SEC(".maps");
+
+// ============================================
 // Transport layer parsing helper functions
 // ============================================
 
@@ -270,6 +316,46 @@ static __always_inline void parse_transport_layer(
         }
     }
     // UDP 和 ICMP 不需要特殊处理，只需要记录协议类型
+}
+
+/* 检查数据包是否匹配 IP 白名单规则
+ * @pi: 包含已解析数据包信息的结构体
+ * 返回值: 1=命中白名单(应放行), 0=未命中
+ *
+ * 白名单优先级最高：命中白名单的数据包直接 XDP_PASS，
+ * 跳过后续的 geo-blocking 和黑名单检查
+ */
+static __always_inline int check_whitelist(struct packet_info *pi) {
+    // IPv4 白名单检查
+    if (pi->eth_proto == ETH_P_IP) {
+        // 精确匹配
+        struct block_value *val = bpf_map_lookup_elem(&whitelist_ipv4_list, &pi->src_ip);
+        if (val && val->source_mask != 0) return 1;
+
+        // CIDR 匹配
+        struct ipv4_trie_key v4_key = {
+            .prefixlen = DEFAULT_IPV4_PREFIX,
+            .addr = pi->src_ip
+        };
+        val = bpf_map_lookup_elem(&whitelist_ipv4_cidr_trie, &v4_key);
+        if (val && val->source_mask != 0) return 1;
+    } else if (pi->eth_proto == ETH_P_IPV6) {
+        // IPv6 精确匹配
+        struct in6_addr ipv6_addr;
+        __builtin_memcpy(&ipv6_addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(ipv6_addr.in6_u.u6_addr32));
+        struct block_value *val = bpf_map_lookup_elem(&whitelist_ipv6_list, &ipv6_addr);
+        if (val && val->source_mask != 0) return 1;
+
+        // IPv6 CIDR 匹配
+        struct ipv6_trie_key v6_key = {
+            .prefixlen = DEFAULT_IPV6_PREFIX,
+        };
+        __builtin_memcpy(&v6_key.addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(v6_key.addr.in6_u.u6_addr32));
+        val = bpf_map_lookup_elem(&whitelist_ipv6_cidr_trie, &v6_key);
+        if (val && val->source_mask != 0) return 1;
+    }
+
+    return 0; // 未命中白名单
 }
 
 /* 检查数据包是否匹配地域封禁规则
@@ -569,6 +655,15 @@ int xdp_prog(struct xdp_md *ctx)
     }
 
 submit:
+    // IP whitelist check (highest priority - skip all other checks)
+    {
+        int whitelist_result = check_whitelist(pkt_info);
+        if (UNLIKELY(whitelist_result)) {
+            pkt_info->match_type = MATCH_BY_WHITELIST;
+            return XDP_PASS;
+        }
+    }
+
     // Geo-blocking check (before rule matching for early drop)
     {
         int geo_result = check_geo_blocking(pkt_info);
