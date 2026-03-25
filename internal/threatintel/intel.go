@@ -94,12 +94,14 @@ func (m *Manager) Start() error {
 
 	// 3. 为每个启用的源注册独立的 Cron 任务
 	for sourceID, source := range m.config.Sources {
-		if source.Enabled {
+		if source.Enabled && source.Periodic {
 			sid := SourceID(sourceID)
 			if err := m.scheduleSource(sid, source); err != nil {
 				logger.Warnf("[ThreatIntel] Failed to schedule %s: %v", sourceID, err)
 				// 继续尝试其他源，不中断启动
 			}
+		} else if source.Enabled && !source.Periodic {
+			logger.Infof("[ThreatIntel] [%s] Periodic update disabled, skipping cron schedule", sourceID)
 		}
 	}
 
