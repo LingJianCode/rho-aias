@@ -2,6 +2,7 @@ package handles
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -102,7 +103,7 @@ func (h *APIKeyHandle) RevokeAPIKey(c *gin.Context) {
 	}
 
 	if err := h.apiKeyService.RevokeAPIKey(userID, uint(keyID)); err != nil {
-		if err.Error() == "api key not found" {
+		if errors.Is(err, services.ErrAPIKeyNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

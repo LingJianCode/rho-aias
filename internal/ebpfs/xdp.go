@@ -29,6 +29,7 @@ type Xdp struct {
 	doneOnce      sync.Once
 	linkType      string
 	callback      BlockLogCallback // 阻断事件回调
+	closeMu       sync.Mutex       // 保护 Close/Start 的并发安全
 }
 
 func NewXdp(interface_name string) *Xdp {
@@ -129,10 +130,9 @@ func (x *Xdp) MonitorEvents() {
 				x.Close()
 				if err := x.Start(); err != nil {
 					logger.Fatalf("[XDP] Failed to restart eBPF: %s", err.Error())
-				} else {
-					logger.Info("[XDP] eBPF restarted successfully")
 				}
-				return
+				logger.Info("[XDP] eBPF restarted successfully, continuing to monitor")
+				continue // 继续循环监听新事件
 			}
 			// 其他错误，检查 done 后继续
 			select {
@@ -159,8 +159,8 @@ func (x *Xdp) MonitorEvents() {
 
 		// 触发回调
 		if x.callback != nil {
-			// 根据 matchType 确定规则来源
-			ruleSource := getRuleSourceFromMatchType(pi.MatchType)
+			// 从 eBPF map 查询规则来源
+			ruleSource := x.getRuleSourceFromPacket(pi.SrcIP, pi.SrcIPv6, uint16(pi.EthProto), pi.MatchType)
 			countryCode := "" // geo_block 时需要额外处理
 			x.callback(srcIP, dstIP, matchTypeStr, ruleSource, countryCode, pi.PktSize)
 		}
@@ -199,10 +199,41 @@ func matchTypeToString(mt MatchType) string {
 	}
 }
 
-// getRuleSourceFromMatchType 根据匹配类型获取规则来源
-// 注意：这只是默认值，实际来源应该从 eBPF map 中查询
-func getRuleSourceFromMatchType(mt MatchType) string {
-	// 默认返回 unknown，实际应用中需要查询 eBPF map 获取精确来源
+// getRuleSourceFromPacket 根据数据包信息从 eBPF map 中查询规则来源
+// 通过 SrcIP 在 eBPF map 中查找 BlockValue 的 SourceMask，转换为来源名称
+func (x *Xdp) getRuleSourceFromPacket(srcIP [4]byte, srcIPv6 [16]byte, ethProto uint16, mt MatchType) string {
+	switch mt {
+	case MatchByIP4Exact:
+		var blockValue BlockValue
+		if err := x.objects.BlockIpv4List.Lookup(&srcIP, &blockValue); err == nil {
+			sources := MaskToSourceIDs(blockValue.SourceMask)
+			if len(sources) > 0 {
+				return sources[0]
+			}
+		}
+	case MatchByIP4CIDR:
+		// CIDR 匹配：使用 LPM trie lookup 查找最具体的匹配规则
+		var blockValue BlockValue
+		trieKey := IPv4TrieKey{PrefixLen: 32, Addr: srcIP}
+		if err := x.objects.BlockIpv4CidrTrie.Lookup(&trieKey, &blockValue); err == nil {
+			sources := MaskToSourceIDs(blockValue.SourceMask)
+			if len(sources) > 0 {
+				return sources[0]
+			}
+		}
+	case MatchByIPv6Exact:
+		var blockValue BlockValue
+		if err := x.objects.BlockIpv6List.Lookup(&srcIPv6, &blockValue); err == nil {
+			sources := MaskToSourceIDs(blockValue.SourceMask)
+			if len(sources) > 0 {
+				return sources[0]
+			}
+		}
+	case MatchByGeoBlock:
+		return "geo"
+	case MatchByMAC:
+		return "manual"
+	}
 	return "unknown"
 }
 

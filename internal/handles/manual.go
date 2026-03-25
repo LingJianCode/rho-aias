@@ -5,6 +5,9 @@ import (
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
+	"rho-aias/utils"
+	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,6 +20,7 @@ type rule struct {
 type ManualHandle struct {
 	xdp   *ebpfs.Xdp
 	cache *manual.Cache
+	mu    sync.Mutex // 保护缓存 read-modify-write 的原子性
 }
 
 // NewManualHandle 创建新的手动规则处理器
@@ -32,33 +36,39 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "参数错误: " + err.Error(),
+			"error": "参数错误: " + err.Error(),
 		})
 		return
 	}
 	logger.Infof("[Manual] Add rule: %s", req.Value)
 
+	// 校验规则格式（IPv4、IPv6、CIDR、MAC）
+	value := strings.TrimSpace(req.Value)
+	if utils.ParseStringToIPType(value) == utils.IPTypeUnknown {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid rule format: must be a valid IPv4, IPv6, CIDR or MAC address",
+		})
+		return
+	}
+
 	//1. 添加到 eBPF map
-	err := m.xdp.AddRule(req.Value)
+	err := m.xdp.AddRule(value)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": err.Error(),
+			"error": err.Error(),
 		})
 		return
 	}
 
 	// 2. 保存到缓存（如果启用了持久化）
 	if m.cache != nil {
-		if err := m.saveRuleToCache(req.Value); err != nil {
+		if err := m.saveRuleToCache(value); err != nil {
 			logger.Warnf("[Manual] Failed to save rule to cache: %v", err)
 			// 不影响 API 响应，因为 eBPF 已经添加成功
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
 		"message": "ok",
 	})
 }
@@ -68,8 +78,7 @@ func (m *ManualHandle) DelRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "参数错误: " + err.Error(),
+			"error": "参数错误: " + err.Error(),
 		})
 		return
 	}
@@ -79,8 +88,7 @@ func (m *ManualHandle) DelRule(c *gin.Context) {
 	err := m.xdp.DeleteRule(req.Value)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": err.Error(),
+			"error": err.Error(),
 		})
 		return
 	}
@@ -94,13 +102,15 @@ func (m *ManualHandle) DelRule(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
 		"message": "ok",
 	})
 }
 
 // saveRuleToCache 保存规则到缓存
 func (m *ManualHandle) saveRuleToCache(value string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// 加载现有缓存
 	var cacheData *manual.CacheData
 	if m.cache.Exists() {
@@ -124,6 +134,9 @@ func (m *ManualHandle) saveRuleToCache(value string) error {
 
 // removeRuleFromCache 从缓存中删除规则
 func (m *ManualHandle) removeRuleFromCache(value string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// 如果缓存不存在，无需删除
 	if !m.cache.Exists() {
 		return nil

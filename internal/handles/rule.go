@@ -25,9 +25,8 @@ func NewRuleQueryHandle(xdp *ebpfs.Xdp) *RuleQueryHandle {
 func (h *RuleQueryHandle) GetRules(c *gin.Context) {
 	res, err := h.xdp.GetRule()
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code":    500,
-			"message": err.Error(),
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
 		})
 		return
 	}
