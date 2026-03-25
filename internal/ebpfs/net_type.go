@@ -14,6 +14,7 @@ const (
 	MatchByIP6CIDR  MatchType = 4
 	MatchByMAC      MatchType = 5
 	MatchByGeoBlock MatchType = 6 // 地域封禁匹配
+	MatchByWhitelist MatchType = 7 // IP 白名单匹配（直接放行）
 )
 
 type MatchRule struct {
