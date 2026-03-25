@@ -34,9 +34,10 @@ const (
 	SourceMaskIpsum    = 0x01 // Bit 0: IPSum 威胁情报
 	SourceMaskSpamhaus = 0x02 // Bit 1: Spamhaus 威胁情报
 	SourceMaskManual   = 0x04 // Bit 2: 手动添加
-	SourceMaskWAF      = 0x08 // Bit 3: WAF (未来)
-	SourceMaskDDoS     = 0x10 // Bit 4: DDoS 检测 (未来)
-	SourceMaskReserved = 0xE0 // Bits 5-7: 保留给未来使用
+	SourceMaskWAF       = 0x08 // Bit 3: WAF (未来)
+	SourceMaskDDoS      = 0x10 // Bit 4: DDoS 检测 (未来)
+	SourceMaskRateLimit = 0x20 // Bit 5: 频率限制封禁
+	SourceMaskReserved  = 0xC0 // Bits 6-7: 保留给未来使用
 )
 
 // Rule 规则结构体 - 包含来源信息
@@ -75,6 +76,8 @@ func SourceIDToMask(source string) uint32 {
 		return SourceMaskWAF
 	case "ddos":
 		return SourceMaskDDoS
+	case "rate_limit":
+		return SourceMaskRateLimit
 	default:
 		return 0
 	}
@@ -97,6 +100,9 @@ func MaskToSourceIDs(mask uint32) []string {
 	}
 	if mask&SourceMaskDDoS != 0 {
 		sources = append(sources, "ddos")
+	}
+	if mask&SourceMaskRateLimit != 0 {
+		sources = append(sources, "rate_limit")
 	}
 	return sources
 }

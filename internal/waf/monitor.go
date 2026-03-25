@@ -22,10 +22,14 @@ import (
 // sourceMaskWAF WAF 来源掩码，与 ebpfs.SourceMaskWAF (0x08) 保持一致
 const sourceMaskWAF uint32 = 0x08
 
+// sourceMaskRateLimit 频率限制来源掩码，与 ebpfs.SourceMaskRateLimit (0x20) 保持一致
+const sourceMaskRateLimit uint32 = 0x20
+
 // IPBanRecord IP 封禁记录
 type IPBanRecord struct {
-	BannedAt time.Time // 封禁时间
-	Expiry   time.Time // 过期时间
+	BannedAt   time.Time // 封禁时间
+	Expiry     time.Time // 过期时间
+	SourceMask uint32    // 封禁来源掩码，用于清理时使用正确的 mask
 }
 
 // XDPRuleManager 定义 WAF Monitor 所需的 XDP 规则操作接口
@@ -213,7 +217,16 @@ func (m *Monitor) readLogFile(filePath string) error {
 		lineCount++
 
 		if ip := m.extractIP(line, logSource); ip != "" {
-			m.banIP(ip, filePath)
+			var mask uint32
+			switch logSource {
+			case "waf":
+				mask = sourceMaskWAF
+			case "rate_limit":
+				mask = sourceMaskRateLimit
+			default:
+				mask = sourceMaskWAF
+			}
+			m.banIP(ip, filePath, mask)
 		}
 	}
 
@@ -275,7 +288,12 @@ func (m *Monitor) extractIP(line string, logSource string) string {
 		// 返回 client_ip
 		return entry.Transaction.ClientIP
 	default:
-		return ""
+		// unknown 来源：使用正则提取第一个 IP（向后兼容）
+		matches := m.ipRegex.FindAllString(line, -1)
+		if len(matches) == 0 {
+			return ""
+		}
+		return matches[0]
 	}
 }
 
@@ -293,7 +311,7 @@ func (m *Monitor) getLogSource(filePath string) string {
 }
 
 // banIP 封禁 IP 地址（带去重）
-func (m *Monitor) banIP(ip, logFile string) {
+func (m *Monitor) banIP(ip, logFile string, sourceMask uint32) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -311,7 +329,7 @@ func (m *Monitor) banIP(ip, logFile string) {
 	}
 
 	// 调用 XDP 添加封禁规则
-	if err := m.xdp.AddRuleWithSource(ip, sourceMaskWAF); err != nil {
+	if err := m.xdp.AddRuleWithSource(ip, sourceMask); err != nil {
 		logger.Errorf("[WAF] Failed to add XDP rule for IP %s: %v", ip, err)
 		return
 	}
@@ -319,8 +337,9 @@ func (m *Monitor) banIP(ip, logFile string) {
 	// 记录封禁
 	expiry := now.Add(time.Duration(m.cfg.BanDuration) * time.Second)
 	m.bannedIPs[ip] = IPBanRecord{
-		BannedAt: now,
-		Expiry:   expiry,
+		BannedAt:   now,
+		Expiry:     expiry,
+		SourceMask: sourceMask,
 	}
 
 	logger.Infof("[WAF] Banned IP %s (from %s, expires at %v)", ip, logFile, expiry)
@@ -369,7 +388,7 @@ func (m *Monitor) cleanup() {
 	// 第二阶段：释放锁后，逐个调用 XDP 移除规则
 	expiredCount := len(expired)
 	for _, e := range expired {
-		if _, _, _, err := m.xdp.UpdateRuleSourceMask(e.ip, sourceMaskWAF); err != nil {
+		if _, _, _, err := m.xdp.UpdateRuleSourceMask(e.ip, e.record.SourceMask); err != nil {
 			logger.Warnf("[WAF] Failed to remove XDP rule for expired IP %s: %v", e.ip, err)
 		} else {
 			logger.Debugf("[WAF] Removed XDP rule for expired IP %s", e.ip)
