@@ -383,7 +383,7 @@ func TestBanIP_NewBan(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log")
+	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
 
 	// 验证 IP 被封禁
 	if !monitor.IsBanned("1.2.3.4") {
@@ -398,6 +398,9 @@ func TestBanIP_NewBan(t *testing.T) {
 	record := monitor.bannedIPs["1.2.3.4"]
 	if record.Expiry.Before(time.Now()) {
 		t.Error("expiry should be in the future")
+	}
+	if record.SourceMask != sourceMaskWAF {
+		t.Errorf("record SourceMask should be sourceMaskWAF (%d), got %d", sourceMaskWAF, record.SourceMask)
 	}
 
 	// 验证 XDP 被调用
@@ -417,10 +420,10 @@ func TestBanIP_DuplicateBanSkipped(t *testing.T) {
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
 	// 第一次封禁
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log")
+	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
 
 	// 立即再次封禁同一 IP（封禁期内）
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log")
+	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
 
 	// XDP 应该只被调用一次
 	if mockXDP.addCallCount != 1 {
@@ -440,13 +443,13 @@ func TestBanIP_ReBanAfterExpiry(t *testing.T) {
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
 	// 第一次封禁
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log")
+	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
 
 	// 等待封禁过期
 	time.Sleep(1100 * time.Millisecond)
 
 	// 过期后再次封禁
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log")
+	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
 
 	// XDP 应该被调用两次（一次初始，一次过期后重封）
 	if mockXDP.addCallCount != 2 {
@@ -467,7 +470,15 @@ func TestBanIP_MultipleDifferentIPs(t *testing.T) {
 
 	ips := []string{"1.2.3.4", "5.6.7.8", "10.20.30.40"}
 	for _, ip := range ips {
-		monitor.banIP(ip, "/logs/rate_limit.log")
+		monitor.banIP(ip, "/logs/rate_limit.log", sourceMaskRateLimit)
+	}
+
+	// 验证频率限制来源使用了正确的 mask
+	addedIPs := mockXDP.getAddedIPs()
+	for _, ip := range ips {
+		if addedIPs[ip] != sourceMaskRateLimit {
+			t.Errorf("source mask for rate_limit IP %s should be sourceMaskRateLimit (%d), got %d", ip, sourceMaskRateLimit, addedIPs[ip])
+		}
 	}
 
 	// 验证所有 IP 都被封禁
@@ -495,7 +506,7 @@ func TestBanIP_XDPError(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log")
+	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
 
 	// XDP 失败，IP 不应被封禁
 	if monitor.IsBanned("1.2.3.4") {
@@ -519,14 +530,16 @@ func TestCleanup_RemovesExpiredBans(t *testing.T) {
 	// 手动添加一个已过期的封禁记录
 	now := time.Now()
 	monitor.bannedIPs["1.2.3.4"] = IPBanRecord{
-		BannedAt: now.Add(-2 * time.Hour),
-		Expiry:   now.Add(-1 * time.Hour), // 已过期
+		BannedAt:   now.Add(-2 * time.Hour),
+		Expiry:     now.Add(-1 * time.Hour), // 已过期
+		SourceMask: sourceMaskWAF,
 	}
 
 	// 添加一个未过期的封禁记录
 	monitor.bannedIPs["5.6.7.8"] = IPBanRecord{
-		BannedAt: now,
-		Expiry:   now.Add(1 * time.Hour), // 未过期
+		BannedAt:   now,
+		Expiry:     now.Add(1 * time.Hour), // 未过期
+		SourceMask: sourceMaskRateLimit,
 	}
 
 	// 执行清理
@@ -570,8 +583,9 @@ func TestCleanup_RemovesXDPRuleForExpiredIP(t *testing.T) {
 	expiredIPs := []string{"1.2.3.4", "5.6.7.8", "10.20.30.40"}
 	for _, ip := range expiredIPs {
 		monitor.bannedIPs[ip] = IPBanRecord{
-			BannedAt: now.Add(-2 * time.Hour),
-			Expiry:   now.Add(-1 * time.Hour),
+			BannedAt:   now.Add(-2 * time.Hour),
+			Expiry:     now.Add(-1 * time.Hour),
+			SourceMask: sourceMaskWAF,
 		}
 	}
 
@@ -598,8 +612,9 @@ func TestCleanup_NoExpiredBans(t *testing.T) {
 	// 添加未过期的记录
 	now := time.Now()
 	monitor.bannedIPs["1.2.3.4"] = IPBanRecord{
-		BannedAt: now,
-		Expiry:   now.Add(1 * time.Hour),
+		BannedAt:   now,
+		Expiry:     now.Add(1 * time.Hour),
+		SourceMask: sourceMaskWAF,
 	}
 
 	monitor.cleanup()
@@ -644,18 +659,21 @@ func TestGetBannedIPs_ReturnsOnlyActive(t *testing.T) {
 
 	// 活跃的封禁
 	monitor.bannedIPs["1.2.3.4"] = IPBanRecord{
-		BannedAt: now,
-		Expiry:   now.Add(1 * time.Hour),
+		BannedAt:   now,
+		Expiry:     now.Add(1 * time.Hour),
+		SourceMask: sourceMaskWAF,
 	}
 	monitor.bannedIPs["5.6.7.8"] = IPBanRecord{
-		BannedAt: now,
-		Expiry:   now.Add(2 * time.Hour),
+		BannedAt:   now,
+		Expiry:     now.Add(2 * time.Hour),
+		SourceMask: sourceMaskRateLimit,
 	}
 
 	// 已过期的封禁（但仍在 map 中）
 	monitor.bannedIPs["10.20.30.40"] = IPBanRecord{
-		BannedAt: now.Add(-2 * time.Hour),
-		Expiry:   now.Add(-1 * time.Hour),
+		BannedAt:   now.Add(-2 * time.Hour),
+		Expiry:     now.Add(-1 * time.Hour),
+		SourceMask: sourceMaskWAF,
 	}
 
 	ips := monitor.GetBannedIPs()
@@ -689,12 +707,14 @@ func TestGetBanCount(t *testing.T) {
 
 	now := time.Now()
 	monitor.bannedIPs["1.2.3.4"] = IPBanRecord{
-		BannedAt: now,
-		Expiry:   now.Add(1 * time.Hour),
+		BannedAt:   now,
+		Expiry:     now.Add(1 * time.Hour),
+		SourceMask: sourceMaskWAF,
 	}
 	monitor.bannedIPs["10.20.30.40"] = IPBanRecord{
-		BannedAt: now.Add(-2 * time.Hour),
-		Expiry:   now.Add(-1 * time.Hour),
+		BannedAt:   now.Add(-2 * time.Hour),
+		Expiry:     now.Add(-1 * time.Hour),
+		SourceMask: sourceMaskWAF,
 	}
 
 	if monitor.GetBanCount() != 1 {
@@ -717,8 +737,9 @@ func TestIsBanned(t *testing.T) {
 
 	// 活跃封禁
 	monitor.bannedIPs["1.2.3.4"] = IPBanRecord{
-		BannedAt: now,
-		Expiry:   now.Add(1 * time.Hour),
+		BannedAt:   now,
+		Expiry:     now.Add(1 * time.Hour),
+		SourceMask: sourceMaskWAF,
 	}
 	if !monitor.IsBanned("1.2.3.4") {
 		t.Error("active IP should be banned")
@@ -726,8 +747,9 @@ func TestIsBanned(t *testing.T) {
 
 	// 已过期封禁
 	monitor.bannedIPs["5.6.7.8"] = IPBanRecord{
-		BannedAt: now.Add(-2 * time.Hour),
-		Expiry:   now.Add(-1 * time.Hour),
+		BannedAt:   now.Add(-2 * time.Hour),
+		Expiry:     now.Add(-1 * time.Hour),
+		SourceMask: sourceMaskRateLimit,
 	}
 	if monitor.IsBanned("5.6.7.8") {
 		t.Error("expired IP should not be banned")
@@ -914,7 +936,7 @@ func TestConcurrentBanAndQuery(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < opsPerGoroutine; j++ {
 				ip := fmt.Sprintf("10.%d.%d.1", id, j)
-				monitor.banIP(ip, "/logs/waf_audit.log")
+				monitor.banIP(ip, "/logs/waf_audit.log", sourceMaskWAF)
 			}
 		}(i)
 	}
@@ -952,8 +974,8 @@ func TestFullWorkflow_BanAndCleanup(t *testing.T) {
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
 	// 1. 封禁几个 IP
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log")
-	monitor.banIP("5.6.7.8", "/logs/rate_limit.log")
+	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
+	monitor.banIP("5.6.7.8", "/logs/rate_limit.log", sourceMaskRateLimit)
 
 	// 验证封禁
 	if monitor.GetBanCount() != 2 {
@@ -980,7 +1002,7 @@ func TestFullWorkflow_BanAndCleanup(t *testing.T) {
 	}
 
 	// 6. 过期后可以重新封禁
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log")
+	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
 	if !monitor.IsBanned("1.2.3.4") {
 		t.Error("IP should be banned again after cleanup and re-ban")
 	}
