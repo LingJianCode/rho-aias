@@ -69,6 +69,7 @@ func TestSourceIDToMask(t *testing.T) {
 		{"manual source", "manual", SourceMaskManual},
 		{"waf source", "waf", SourceMaskWAF},
 		{"ddos source", "ddos", SourceMaskDDoS},
+		{"rate_limit source", "rate_limit", SourceMaskRateLimit},
 		{"unknown source", "unknown", 0},
 		{"empty source", "", 0},
 	}
@@ -110,8 +111,8 @@ func TestMaskToSourceIDs(t *testing.T) {
 		},
 		{
 			name: "all sources",
-			mask: SourceMaskIpsum | SourceMaskSpamhaus | SourceMaskManual | SourceMaskWAF | SourceMaskDDoS,
-			want: []string{"ipsum", "spamhaus", "manual", "waf", "ddos"},
+			mask: SourceMaskIpsum | SourceMaskSpamhaus | SourceMaskManual | SourceMaskWAF | SourceMaskDDoS | SourceMaskRateLimit,
+			want: []string{"ipsum", "spamhaus", "manual", "waf", "ddos", "rate_limit"},
 		},
 		{
 			name: "no sources",
@@ -343,9 +344,9 @@ func TestGetSourceCount(t *testing.T) {
 			want: 3,
 		},
 		{
-			name: "all five sources",
-			mask: SourceMaskIpsum | SourceMaskSpamhaus | SourceMaskManual | SourceMaskWAF | SourceMaskDDoS,
-			want: 5,
+			name: "all six sources",
+			mask: SourceMaskIpsum | SourceMaskSpamhaus | SourceMaskManual | SourceMaskWAF | SourceMaskDDoS | SourceMaskRateLimit,
+			want: 6,
 		},
 	}
 
