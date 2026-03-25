@@ -1,6 +1,8 @@
 services:
   caddy:
-    image: docker.cnb.cool/makecnbgreatagain/rho-aias/rho-aias-caddy:latest
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
     container_name: caddy
     environment:
       - TZ=Asia/Shanghai
@@ -16,6 +18,7 @@ services:
     security_opt:
       - no-new-privileges:true
 
+    read_only: true
 
     tmpfs:
       - /tmp
@@ -26,7 +29,7 @@ services:
       - ./logs/caddy:/logs
 
   rho-aias:
-    image: docker.cnb.cool/makecnbgreatagain/rho-aias/rho-aias:latest
+    build: .
     container_name: rho-aias
     environment:
       - TZ=Asia/Shanghai
