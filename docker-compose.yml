@@ -22,8 +22,8 @@ services:
 
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./data/caddy/config:/root/.config/caddy/autosave.json
-      - ./data/caddy/data:/root/.local/share/caddy
+      - ./caddy/config:/root/.config/caddy/autosave.json
+      - ./caddy/data:/root/.local/share/caddy
       - ./logs/caddy:/logs
 
   rho-aias:
