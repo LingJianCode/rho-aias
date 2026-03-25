@@ -5,6 +5,7 @@ package waf
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -230,29 +231,51 @@ func (m *Monitor) readLogFile(filePath string) error {
 	return nil
 }
 
+// WAFLogEntry Caddy + Coraza WAF 审计日志结构
+type WAFLogEntry struct {
+	Transaction struct {
+		ClientIP      string `json:"client_ip"`
+		IsInterrupted bool   `json:"is_interrupted"`
+	} `json:"transaction"`
+}
+
 // extractIP 从日志行中提取 IP 地址
 // logSource 标识日志来源（"waf" 或 "rate_limit"），用于选择不同的 IP 提取策略
 func (m *Monitor) extractIP(line string, logSource string) string {
-	matches := m.ipRegex.FindAllString(line, -1)
-	if len(matches) == 0 {
-		return ""
-	}
-
 	switch logSource {
 	case "rate_limit":
-		// Rate limit 日志：第一个 IP 是客户端 IP
+		// Rate limit 日志：匹配 IP 地址
 		// 格式示例: "rate_limit_exceeded for 1.2.3.4"
-		return matches[0]
-	case "waf":
-		// WAF 审计日志可能包含服务端 IP（反向代理场景）
-		// 格式示例: "server: 10.0.0.1 -> client: 1.2.3.4, rule_id: 12345"
-		// 如果有多个 IP，取最后一个（通常是客户端 IP）
-		if len(matches) > 1 {
-			return matches[len(matches)-1]
+		matches := m.ipRegex.FindAllString(line, -1)
+		if len(matches) == 0 {
+			return ""
 		}
 		return matches[0]
+	case "waf":
+		// WAF 审计日志：解析 JSON 格式
+		// 只有 is_interrupted==true 时才封禁 client_ip
+		var entry WAFLogEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			// JSON 解析失败，尝试正则匹配（向后兼容）
+			matches := m.ipRegex.FindAllString(line, -1)
+			if len(matches) == 0 {
+				return ""
+			}
+			if len(matches) > 1 {
+				return matches[len(matches)-1]
+			}
+			return matches[0]
+		}
+
+		// 只有当 is_interrupted==true 时才封禁
+		if !entry.Transaction.IsInterrupted {
+			return ""
+		}
+
+		// 返回 client_ip
+		return entry.Transaction.ClientIP
 	default:
-		return matches[0]
+		return ""
 	}
 }
 
