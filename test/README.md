@@ -1,6 +1,8 @@
 # eBPF XDP IP 阻断功能集成测试
 
-本测试套件使用 Python 编写，通过 Linux Network Namespace 模拟网络环境，测试 rho-aias 的 eBPF XDP IP 阻断核心功能。
+本测试套件使用 Python 编写，通过 Linux Network Namespace 模拟网络环境，测试 rho-aias 的核心功能：
+- eBPF XDP IP 阻断功能
+- DDoS 异常流量检测功能
 
 ## 前置条件
 
@@ -44,6 +46,23 @@ sudo ./test/run_tests.sh --use-api-key
 sudo ./test/run_tests.sh --use-api-key -t TestAPIKeyAuth.test_01_api_key_auth
 ```
 
+### DDoS 异常流量检测测试
+
+```bash
+# 运行所有 DDoS 检测测试
+sudo ./test/run_tests.sh --ddos
+
+# 仅运行环境测试（验证 network namespace 功能）
+sudo ./test/run_tests.sh --ddos --env-only
+
+# 运行特定 DDoS 测试
+sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_01_tcp_syn_flood
+sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_02_udp_flood
+sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_03_icmp_flood
+sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_04_ack_flood
+sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_05_control_without_detection
+```
+
 **注意事项：**
 - `--use-api-key` 参数启用 API Key 认证测试
 - `--api-key` 参数指定测试用的 API Key（可选，优先级高于环境变量）
@@ -72,12 +91,22 @@ sudo ./test/run_tests.sh --use-api-key -t TestAPIKeyAuth.test_01_api_key_auth
 
 ### TestAPIKeyAuth - API Key 认证测试
 
-|| 测试用例 | 描述 |
+| 测试用例 | 描述 |
 |---------|------|
 | `test_01_api_key_auth` | API Key 认证功能测试 - 使用 API Key 添加规则并验证生效 |
 | `test_02_invalid_api_key` | 无效 API Key 测试 - 验证无效 Key 被拒绝 |
 | `test_03_api_key_permissions` | API Key 权限测试 - 验证读写权限控制 |
 | `test_04_api_key_without_auth` | 不启用认证时的 API Key 测试 - 验证 Key 在认证关闭时仍能工作 |
+
+### TestDDoSDetection - DDoS 检测功能测试
+
+| 测试用例 | 描述 |
+|---------|------|
+| `test_01_tcp_syn_flood` | TCP SYN Flood 检测 - 生成 SYN SYN 泛洪流量验证检测 |
+| `test_02_udp_flood` | UDP Flood 检测 - 生成 UDP 泛洪流量验证检测 |
+| `test_03_icmp_flood` | ICMP Flood 检测 - 生成 ICMP 泛洪流量验证检测 |
+| `test_04_ack_flood` | ACK Flood 检测 - 生成 TCP ACK 泛洪流量验证检测 |
+| `test_05_control_without_detection` | 对照组测试 - 不启用检测时系统正常运行 |
 
 ## 测试环境架构
 
@@ -105,7 +134,8 @@ sudo ./test/run_tests.sh --use-api-key -t TestAPIKeyAuth.test_01_api_key_auth
 | 文件 | 说明 |
 |------|------|
 | `run_tests.sh` | **推荐使用的测试入口脚本**，包含环境检查和清理逻辑 |
-| `test_xdp_block.py` | 主测试脚本，包含所有测试用例（由 run_tests.sh 调用） |
+| `test_xdp_block.py` | XDP IP 阻断功能测试脚本（由 run_tests.sh 调用） |
+| `test_ddosser_detection.py` | DDoS 检测功能测试脚本（由 run_tests.sh 调用） |
 | `netns.py` | Network Namespace 管理模块 |
 
 ## 常见问题
@@ -148,6 +178,8 @@ ip netns list | grep rho_ | awk '{print $1}' | xargs -I {} ip netns del {}
 
 ## 测试配置
 
+### XDP IP 阻断测试配置
+
 测试使用临时配置文件，每次运行时自动生成：
 
 - **API 端口**: 18080（避免与生产端口冲突）
@@ -155,6 +187,20 @@ ip netns list | grep rho_ | awk '{print $1}' | xargs -I {} ip netns del {}
 - **情报源**: 关闭
 - **地域封禁**: 关闭
 - **手动规则持久化**: 关闭
+
+### DDoS 检测测试配置
+
+- **API 端口**: 18080（避免与生产端口冲突）
+- **异常检测**: 启用
+- **采样率**: 100%（1:1）
+- **检测间隔**: 1 秒
+- **最小包数**: 50（测试用低阈值）
+- **封禁时长**: 60 秒
+- **攻击检测配置**:
+  - SYN Flood: ratio_threshold=0.5, block_duration=60s
+  - UDP Flood: ratio_threshold=0.7, block_duration=60s
+  - ICMP Flood: ratio_threshold=0.5, block_duration=60s
+  - ACK Flood: ratio_threshold=0.7, block_duration=60s
 
 ## 注意事项
 
