@@ -31,13 +31,14 @@ func NewBlockValueWithPreserve(sourceMask uint32, priority uint32, expiry uint64
 // 每个来源占用一个 bit，支持最多 31 个来源
 // 优先级: Manual > WAF > DDoS > Intel
 const (
-	SourceMaskIpsum    = 0x01 // Bit 0: IPSum 威胁情报
-	SourceMaskSpamhaus = 0x02 // Bit 1: Spamhaus 威胁情报
-	SourceMaskManual   = 0x04 // Bit 2: 手动添加
-	SourceMaskWAF       = 0x08 // Bit 3: WAF (未来)
-	SourceMaskDDoS      = 0x10 // Bit 4: DDoS 检测 (未来)
-	SourceMaskRateLimit = 0x20 // Bit 5: 频率限制封禁
-	SourceMaskReserved  = 0xC0 // Bits 6-7: 保留给未来使用
+	SourceMaskIpsum      = 0x01 // Bit 0: IPSum 威胁情报
+	SourceMaskSpamhaus   = 0x02 // Bit 1: Spamhaus 威胁情报
+	SourceMaskManual     = 0x04 // Bit 2: 手动添加
+	SourceMaskWAF        = 0x08 // Bit 3: WAF
+	SourceMaskDDoS       = 0x10 // Bit 4: DDoS 异常检测
+	SourceMaskRateLimit  = 0x20 // Bit 5: 频率限制封禁
+	SourceMaskAnomaly    = 0x40 // Bit 6: 异常流量检测
+	SourceMaskReserved   = 0x80 // Bit 7: 保留
 )
 
 // Rule 规则结构体 - 包含来源信息
@@ -78,6 +79,8 @@ func SourceIDToMask(source string) uint32 {
 		return SourceMaskDDoS
 	case "rate_limit":
 		return SourceMaskRateLimit
+	case "anomaly":
+		return SourceMaskAnomaly
 	default:
 		return 0
 	}
@@ -103,6 +106,9 @@ func MaskToSourceIDs(mask uint32) []string {
 	}
 	if mask&SourceMaskRateLimit != 0 {
 		sources = append(sources, "rate_limit")
+	}
+	if mask&SourceMaskAnomaly != 0 {
+		sources = append(sources, "anomaly")
 	}
 	return sources
 }
@@ -195,4 +201,38 @@ func NewEventConfig(enabled bool, sampleRate uint32) EventConfig {
 // 默认关闭上报，采样率 1000 (0.1%)
 func DefaultEventConfig() EventConfig {
 	return NewEventConfig(false, 1000)
+}
+
+// ============================================
+// Anomaly Detection 相关类型
+// ============================================
+
+// AnomalyConfig 异常检测采样配置结构 - 与 eBPF C 中的 struct anomaly_config 对应
+type AnomalyConfig struct {
+	Enabled    uint32   // 异常检测采样启用标志 (0=禁用, 1=启用)
+	SampleRate uint32   // 采样率：每 N 个包采样 1 个 (例如 100 = 1%)
+	Padding    [2]uint32 // 对齐填充
+}
+
+// NewAnomalyConfig 创建新的 AnomalyConfig
+func NewAnomalyConfig(enabled bool, sampleRate uint32) AnomalyConfig {
+	enabledVal := uint32(0)
+	if enabled {
+		enabledVal = 1
+	}
+	// 确保采样率至少为 1，防止除零
+	if sampleRate == 0 {
+		sampleRate = 100 // 默认采样率 1%
+	}
+	return AnomalyConfig{
+		Enabled:    enabledVal,
+		SampleRate: sampleRate,
+		Padding:    [2]uint32{0, 0},
+	}
+}
+
+// DefaultAnomalyConfig 返回默认的异常检测配置
+// 默认关闭采样，采样率 100 (1%)
+func DefaultAnomalyConfig() AnomalyConfig {
+	return NewAnomalyConfig(false, 100)
 }
