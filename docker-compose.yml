@@ -8,7 +8,7 @@ services:
     network_mode: host
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-logs:/logs
+      - ./logs/caddy:/logs
 
   rho-aias:
     build: .
@@ -26,12 +26,8 @@ services:
     network_mode: host
     volumes:
       - ./config.yml:/app/config/config.yml:ro
-      - rho-aias-logs:/app/logs
+      - ./logs/rho-aias:/app/logs
       - ./data:/app/data
-      - caddy-logs:/caddy-logs:ro
+      - ./logs/caddy:/caddy-logs:ro
     command: ["--config", "/app/config/config.yml"]
     restart: unless-stopped
-
-volumes:
-  caddy-logs:
-  rho-aias-logs:
