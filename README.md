@@ -237,7 +237,44 @@ blocklog:
   memory_cache_size: 10000      # 内存缓存大小（用于实时查询）
   buffer_size: 1000             # 异步写入缓冲区大小
   flush_interval: 5             # 刷盘间隔（秒）
+
+# WAF 日志监控配置
+waf:
+  enabled: true                 # 是否启用 WAF 日志监控
+  waf_log_path: "/logs/waf_audit.log"          # WAF 审计日志路径（Caddy + Coraza）
+  rate_limit_log_path: "/logs/rate_limit.log"  # Rate Limit 日志路径
+  ban_duration: 3600             # 封禁时长（秒），默认 3600（1 小时），建议 >= 300
 ```
+
+### WAF IP 封禁清理机制
+
+WAF 模块通过监控 Caddy + Coraza WAF 日志和 Rate Limit 日志，自动触发 IP 封禁。封禁的完整生命周期如下：
+
+```
+日志触发 → banIP() 添加 XDP 封禁规则 → 封禁记录写入内存（带过期时间）
+                                                    ↓
+                                        cleanupExpiredBans() 每隔 5 分钟扫描
+                                                    ↓
+                                        过期 IP 移除 XDP 规则 + 清除内存记录
+```
+
+> ⚠️ **重要：清理间隔为固定 5 分钟**
+
+`cleanupExpiredBans()` 使用硬编码的 **5 分钟清理间隔**。当封禁到期后，XDP 规则不会立即移除，而是等待下一个清理周期才执行移除。
+
+这意味着实际封禁时长 = `BanDuration` + 最多 5 分钟的清理延迟。
+
+**配置建议：**
+
+| BanDuration | 实际封禁时长范围 | 建议 |
+|-------------|------------------|------|
+| 30s | 30s ~ 5m30s | ❌ 不推荐，XDP 规则滞留过久 |
+| 60s | 60s ~ 6m | ⚠️ 清理延迟占比过大 |
+| 300s（5 分钟） | 5m ~ 10m | ✅ 可接受 |
+| 600s（10 分钟） | 10m ~ 15m | ✅ 推荐 |
+| 3600s（1 小时，默认） | 1h ~ 1h5m | ✅ 推荐 |
+
+**最佳实践：** 建议将 `ban_duration` 设置为 **300 秒（5 分钟）或更长**，使清理延迟在整体封禁时长中的占比合理。
 
 ### API Key 配置
 
