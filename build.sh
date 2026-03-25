@@ -1,5 +1,5 @@
 #!/bin/bash
 # build
-docker build --no-cache -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/rho-aias .
+docker build --no-cache -t docker.cnb.cool/makecnbgreatagain/rho-aias/rho-aias .
 # push
-docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}/rho-aias
+docker push docker.cnb.cool/makecnbgreatagain/rho-aias/rho-aias 
