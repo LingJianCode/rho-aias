@@ -38,7 +38,7 @@ const (
 	SourceMaskDDoS       = 0x10 // Bit 4: DDoS 异常检测
 	SourceMaskRateLimit  = 0x20 // Bit 5: 频率限制封禁
 	SourceMaskAnomaly    = 0x40 // Bit 6: 异常流量检测
-	SourceMaskReserved   = 0x80 // Bit 7: 保留
+	SourceMaskWhitelist  = 0x80 // Bit 7: IP 白名单
 )
 
 // Rule 规则结构体 - 包含来源信息
@@ -81,6 +81,8 @@ func SourceIDToMask(source string) uint32 {
 		return SourceMaskRateLimit
 	case "anomaly":
 		return SourceMaskAnomaly
+	case "whitelist":
+		return SourceMaskWhitelist
 	default:
 		return 0
 	}
@@ -109,6 +111,9 @@ func MaskToSourceIDs(mask uint32) []string {
 	}
 	if mask&SourceMaskAnomaly != 0 {
 		sources = append(sources, "anomaly")
+	}
+	if mask&SourceMaskWhitelist != 0 {
+		sources = append(sources, "whitelist")
 	}
 	return sources
 }

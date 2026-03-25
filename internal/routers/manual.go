@@ -9,31 +9,74 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterManualRoutes 注册手动规则管理路由
+// RegisterManualRoutes 注册手动规则管理路由（黑名单）
+// 路由路径: /api/manual/blacklist/rules
 func RegisterManualRoutes(group *gin.RouterGroup, manualHandle *handles.ManualHandle, enforcer *casbin.Enforcer, authService *services.AuthService, apiKeyService *services.APIKeyService) {
 	manual := group.Group("/manual")
 
+	blacklist := manual.Group("/blacklist")
+
 	// 如果没有启用认证，直接注册路由
 	if enforcer == nil || authService == nil || apiKeyService == nil {
-		manual.POST("/rules", manualHandle.AddRule)
-		manual.DELETE("/rules", manualHandle.DelRule)
+		blacklist.POST("/rules", manualHandle.AddRule)
+		blacklist.DELETE("/rules", manualHandle.DelRule)
 		return
 	}
 
 	// 启用认证，添加权限控制
 	{
-		// 添加规则 - 需要 firewall:write 权限
-		manual.POST("/rules",
+		// 添加黑名单规则 - 需要 firewall:write 权限
+		blacklist.POST("/rules",
 			middleware.AuthMiddleware(authService, apiKeyService),
 			middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
 			manualHandle.AddRule,
 		)
 
-		// 删除规则 - 需要 firewall:write 权限
-		manual.DELETE("/rules",
+		// 删除黑名单规则 - 需要 firewall:write 权限
+		blacklist.DELETE("/rules",
 			middleware.AuthMiddleware(authService, apiKeyService),
 			middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
 			manualHandle.DelRule,
+		)
+	}
+}
+
+// RegisterWhitelistRoutes 注册白名单管理路由
+// 路由路径: /api/manual/whitelist/rules
+func RegisterWhitelistRoutes(group *gin.RouterGroup, whitelistHandle *handles.WhitelistHandle, enforcer *casbin.Enforcer, authService *services.AuthService, apiKeyService *services.APIKeyService) {
+	manual := group.Group("/manual")
+
+	whitelist := manual.Group("/whitelist")
+
+	// 如果没有启用认证，直接注册路由
+	if enforcer == nil || authService == nil || apiKeyService == nil {
+		whitelist.POST("/rules", whitelistHandle.AddWhitelistRule)
+		whitelist.DELETE("/rules", whitelistHandle.DelWhitelistRule)
+		whitelist.GET("/rules", whitelistHandle.ListWhitelistRules)
+		return
+	}
+
+	// 启用认证，添加权限控制
+	{
+		// 添加白名单规则 - 需要 firewall:write 权限
+		whitelist.POST("/rules",
+			middleware.AuthMiddleware(authService, apiKeyService),
+			middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+			whitelistHandle.AddWhitelistRule,
+		)
+
+		// 删除白名单规则 - 需要 firewall:write 权限
+		whitelist.DELETE("/rules",
+			middleware.AuthMiddleware(authService, apiKeyService),
+			middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+			whitelistHandle.DelWhitelistRule,
+		)
+
+		// 查询白名单规则列表 - 需要 firewall:read 权限
+		whitelist.GET("/rules",
+			middleware.AuthMiddleware(authService, apiKeyService),
+			middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
+			whitelistHandle.ListWhitelistRules,
 		)
 	}
 }

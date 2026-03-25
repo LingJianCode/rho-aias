@@ -103,6 +103,33 @@ func main() {
 	}
 	manualHandle := handles.NewManualHandle(xdp, manualCache)
 
+	// Initialize Whitelist Cache and Load Whitelist Rules
+	var whitelistCache *manual.Cache
+	var whitelistHandle *handles.WhitelistHandle
+	if cfg.Manual.Enabled {
+		whitelistCache = manual.NewCache(cfg.Manual.PersistenceDir)
+
+		// Auto-load whitelist rules on startup
+		if cfg.Manual.AutoLoad && whitelistCache.WhitelistExists() {
+			whitelistData, err := whitelistCache.LoadWhitelist()
+			if err != nil {
+				logger.Warnf("[Whitelist] Failed to load cache: %v", err)
+			} else {
+				logger.Infof("[Whitelist] Loading %d rules from cache...", whitelistData.WhitelistRuleCount())
+				loaded := 0
+				for _, entry := range whitelistData.Rules {
+					if err := xdp.AddWhitelistRule(entry.Value); err != nil {
+						logger.Warnf("[Whitelist] Failed to add rule %s: %v", entry.Value, err)
+					} else {
+						loaded++
+					}
+				}
+				logger.Infof("[Whitelist] Loaded %d/%d rules from cache", loaded, whitelistData.WhitelistRuleCount())
+			}
+		}
+	}
+	whitelistHandle = handles.NewWhitelistHandle(xdp, whitelistCache)
+
 	// Initialize Block Log
 	var blockLog *blocklog.BlockLog
 	if cfg.BlockLog.Enabled {
@@ -417,6 +444,7 @@ func main() {
 
 		// Register protected routes with Casbin middleware
 		routers.RegisterManualRoutes(api, manualHandle, casbinEnforcer, authService, apiKeyService)
+		routers.RegisterWhitelistRoutes(api, whitelistHandle, casbinEnforcer, authService, apiKeyService)
 		routers.RegisterBlockLogRoutes(api, blockLogHandle, casbinEnforcer, authService, apiKeyService)
 
 		// Register Rule query routes
@@ -445,6 +473,7 @@ func main() {
 			logger.Warn("[Security] Enable authentication by setting 'auth.enabled: true' in config.yml for production use")
 		}
 		routers.RegisterManualRoutes(api, manualHandle, nil, nil, nil)
+		routers.RegisterWhitelistRoutes(api, whitelistHandle, nil, nil, nil)
 		routers.RegisterBlockLogRoutes(api, blockLogHandle, nil, nil, nil)
 
 		// Register Rule query routes

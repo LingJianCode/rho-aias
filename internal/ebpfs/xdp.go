@@ -195,6 +195,8 @@ func matchTypeToString(mt MatchType) string {
 		return "mac"
 	case MatchByGeoBlock:
 		return "geo_block"
+	case MatchByWhitelist:
+		return "whitelist"
 	default:
 		return "unknown"
 	}
@@ -800,6 +802,139 @@ func (x *Xdp) IsAnomalyDetectionEnabled() bool {
 		return false
 	}
 	return config.Enabled == 1
+}
+
+// ============================================
+// IP Whitelist 相关方法
+// 白名单优先级最高：命中白名单的 IP 直接 XDP_PASS
+// ============================================
+
+// WhitelistRule 白名单规则结构体
+type WhitelistRule struct {
+	Value   string    // IP/CIDR 值
+	AddedAt time.Time // 添加时间
+}
+
+// updateWhitelistMap 更新白名单内核 map
+// iptype: IP 类型
+// value: 键值（字节数组）
+// add: true=添加/更新, false=删除
+func (x *Xdp) updateWhitelistMap(iptype utils.IPType, value []byte, add bool) error {
+	blockValue := NewBlockValue(SourceMaskWhitelist)
+
+	switch iptype {
+	case utils.IPTypeIPv4:
+		if add {
+			return x.objects.WhitelistIpv4List.Put(value, blockValue)
+		}
+		return x.objects.WhitelistIpv4List.Delete(value)
+	case utils.IPTypeIPV4CIDR:
+		if add {
+			return x.objects.WhitelistIpv4CidrTrie.Put(value, blockValue)
+		}
+		return x.objects.WhitelistIpv4CidrTrie.Delete(value)
+	case utils.IPTypeIPv6:
+		if add {
+			return x.objects.WhitelistIpv6List.Put(value, blockValue)
+		}
+		return x.objects.WhitelistIpv6List.Delete(value)
+	case utils.IPTypeIPv6CIDR:
+		if add {
+			return x.objects.WhitelistIpv6CidrTrie.Put(value, blockValue)
+		}
+		return x.objects.WhitelistIpv6CidrTrie.Delete(value)
+	default:
+		return fmt.Errorf("unsupported IP type for whitelist: %v", iptype)
+	}
+}
+
+// AddWhitelistRule 添加白名单规则（支持 IP 和 CIDR，不支持 MAC）
+func (x *Xdp) AddWhitelistRule(value string) error {
+	value = strings.TrimSpace(value)
+	b, iptype, err := utils.ParseValueToBytes(value)
+	if err != nil {
+		return fmt.Errorf("invalid whitelist value %s: %w", value, err)
+	}
+	// 白名单不支持 MAC 地址
+	if iptype == utils.IPTypeMAC {
+		return fmt.Errorf("whitelist does not support MAC addresses: %s", value)
+	}
+	logger.Debugf("[Whitelist] AddRule: value=%s, iptype=%v", value, iptype)
+	return x.updateWhitelistMap(iptype, b, true)
+}
+
+// DeleteWhitelistRule 删除白名单规则
+func (x *Xdp) DeleteWhitelistRule(value string) error {
+	value = strings.TrimSpace(value)
+	b, iptype, err := utils.ParseValueToBytes(value)
+	if err != nil {
+		return fmt.Errorf("invalid whitelist value %s: %w", value, err)
+	}
+	logger.Debugf("[Whitelist] DeleteRule: value=%s, iptype=%v", value, iptype)
+	return x.updateWhitelistMap(iptype, b, false)
+}
+
+// GetWhitelistRules 获取所有白名单规则
+func (x *Xdp) GetWhitelistRules() ([]string, error) {
+	var rules []string
+
+	// IPv4 精确匹配
+	iter4 := x.objects.WhitelistIpv4List.Iterate()
+	var key4 []byte
+	var val4 BlockValue
+	for iter4.Next(&key4, &val4) {
+		if val4.SourceMask != 0 {
+			ip := net.IP(key4)
+			rules = append(rules, ip.String())
+		}
+	}
+	if err := iter4.Err(); err != nil {
+		return nil, fmt.Errorf("iterate whitelist ipv4 list failed: %w", err)
+	}
+
+	// IPv4 CIDR 匹配
+	iter4Cidr := x.objects.WhitelistIpv4CidrTrie.Iterate()
+	var key4Cidr IPv4TrieKey
+	var val4Cidr BlockValue
+	for iter4Cidr.Next(&key4Cidr, &val4Cidr) {
+		if val4Cidr.SourceMask != 0 {
+			ip := net.IP(key4Cidr.Addr[:])
+			rules = append(rules, fmt.Sprintf("%s/%d", ip.String(), key4Cidr.PrefixLen))
+		}
+	}
+	if err := iter4Cidr.Err(); err != nil {
+		return nil, fmt.Errorf("iterate whitelist ipv4 cidr trie failed: %w", err)
+	}
+
+	// IPv6 精确匹配
+	iter6 := x.objects.WhitelistIpv6List.Iterate()
+	var key6 []byte
+	var val6 BlockValue
+	for iter6.Next(&key6, &val6) {
+		if val6.SourceMask != 0 {
+			ip := net.IP(key6)
+			rules = append(rules, ip.String())
+		}
+	}
+	if err := iter6.Err(); err != nil {
+		return nil, fmt.Errorf("iterate whitelist ipv6 list failed: %w", err)
+	}
+
+	// IPv6 CIDR 匹配
+	iter6Cidr := x.objects.WhitelistIpv6CidrTrie.Iterate()
+	var key6Cidr IPv6TrieKey
+	var val6Cidr BlockValue
+	for iter6Cidr.Next(&key6Cidr, &val6Cidr) {
+		if val6Cidr.SourceMask != 0 {
+			ip := net.IP(key6Cidr.Addr[:])
+			rules = append(rules, fmt.Sprintf("%s/%d", ip.String(), key6Cidr.PrefixLen))
+		}
+	}
+	if err := iter6Cidr.Err(); err != nil {
+		return nil, fmt.Errorf("iterate whitelist ipv6 cidr trie failed: %w", err)
+	}
+
+	return rules, nil
 }
 
 // AnomalyEventCallback 异常检测事件回调函数类型
