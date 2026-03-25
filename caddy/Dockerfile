@@ -20,20 +20,11 @@ FROM alpine:3.20
 # 安装运行依赖
 RUN sed -i "s/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g" /etc/apk/repositories && apk add --no-cache ca-certificates tzdata
 
-# 创建非 root 用户（安全最佳实践）
-RUN addgroup -S caddy && adduser -S -G caddy caddy
-
 # 创建目录
 RUN mkdir -p /etc/caddy /logs
 
 # 拷贝 Caddy 二进制
 COPY --from=builder /caddy /usr/bin/caddy
-
-# 赋权
-RUN chown -R caddy:caddy /etc/caddy /logs
-
-# 切换用户
-USER caddy
 
 # 工作目录
 WORKDIR /etc/caddy
