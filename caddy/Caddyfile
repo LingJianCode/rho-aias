@@ -72,7 +72,6 @@
                 SecAuditEngine On
                 SecAuditLog /logs/waf_audit.log
                 SecAuditLogFormat json
-                SecAuditLogPermissions 644
                 `
         }
 
