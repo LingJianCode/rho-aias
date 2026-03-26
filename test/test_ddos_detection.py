@@ -244,80 +244,60 @@ class TrafficGenerator:
 
     def generate_tcp_syn_flood(self, target_ip: str, target_port: int = 80, pps: int = 100):
         """生成 TCP SYN Flood 流量"""
-        logger.info(f"Starting TCP SYN flood: {target_ip}:{target_port} @ {pps} pps")
+        logger.info(f"Starting TCP SYN flood: {target_ip}:{target_port} @ flood mode")
 
         def flood():
-            interval = 1.0 / pps
-
             while not self.stop_event.is_set():
                 try:
-                    # 在 ns1 中发送 SYN 包
-                    cmd = f"hping3 -S -p {target_port} -c {int(pps)} -i u{max(int(1000000/pps), 10000)} {target_ip} 2>/dev/null || true"
-                    self.env.ns1.exec_cmd(cmd, timeout=5)
+                    cmd = f"hping3 -c 10000 -d 120 -S -w 64 -p {target_port} --flood {target_ip} 2>/dev/null || true"
+                    self.env.ns1.exec_cmd(cmd, timeout=10)
                 except Exception as e:
                     logger.debug(f"Flood error (expected): {e}")
-
-                self.stop_event.wait(interval)
 
         self.thread = threading.Thread(target=flood, daemon=True)
         self.thread.start()
 
     def generate_udp_flood(self, target_ip: str, target_port: int = 53, pps: int = 100):
         """生成 UDP Flood 流量"""
-        logger.info(f"Starting UDP flood: {target_ip}:{target_port} @ {pps} pps")
+        logger.info(f"Starting UDP flood: {target_ip}:{target_port} @ flood mode")
 
         def flood():
-            interval = 1.0 / pps
-
             while not self.stop_event.is_set():
                 try:
-                    # 在 ns1 中发送 UDP 包
-                    cmd = f"hping3 --udp -p {target_port} -c {int(pps)} -i u{max(int(1000000/pps), 10000)} {target_ip} 2>/dev/null || true"
-                    self.env.ns1.exec_cmd(cmd, timeout=5)
+                    cmd = f"hping3 -c 10000 -d 120 --udp -w 64 -p {target_port} --flood {target_ip} 2>/dev/null || true"
+                    self.env.ns1.exec_cmd(cmd, timeout=10)
                 except Exception as e:
                     logger.debug(f"Flood error (expected): {e}")
-
-                self.stop_event.wait(interval)
 
         self.thread = threading.Thread(target=flood, daemon=True)
         self.thread.start()
 
     def generate_icmp_flood(self, target_ip: str, pps: int = 100):
         """生成 ICMP Flood 流量"""
-        logger.info(f"Starting ICMP flood: {target_ip} @ {pps} pps")
+        logger.info(f"Starting ICMP flood: {target_ip} @ flood mode")
 
         def flood():
-            interval = 1.0 / pps
-
             while not self.stop_event.is_set():
                 try:
-                    # 使用 hping3 生成 ICMP 流量
-                    cmd = f"hping3 -1 -c {int(pps)} -i u{max(int(1000000/pps), 10000)} {target_ip} 2>/dev/null || true"
-                    self.env.ns1.exec_cmd(cmd, timeout=5)
+                    cmd = f"hping3 -c 10000 -d 120 --icmp -w 64 -p 80 --flood {target_ip} 2>/dev/null || true"
+                    self.env.ns1.exec_cmd(cmd, timeout=10)
                 except Exception as e:
                     logger.debug(f"Flood error (expected): {e}")
-
-                self.stop_event.wait(interval)
 
         self.thread = threading.Thread(target=flood, daemon=True)
         self.thread.start()
 
     def generate_tcp_ack_flood(self, target_ip: str, target_port: int = 80, pps: int = 100):
         """生成 TCP ACK Flood 流量"""
-        logger.info(f"Starting TCP ACK flood: {target_ip}:{target_port} @ {pps} pps")
+        logger.info(f"Starting TCP ACK flood: {target_ip}:{target_port} @ flood mode")
 
         def flood():
-            interval = 1.0 / pps
-
             while not self.stop_event.is_set():
                 try:
-                    # 使用 hping3 发送 ACK 包
-                    cmd = f"hping3 -A -p {target_port} -c {int(pps)} -i u{max(int(1000000/pps), 10000)} {target_ip} 2>/dev/null || true"
-                    self.env.ns1.exec_cmd(cmd, timeout=5)
+                    cmd = f"hping3 -c 10000 -d 120 -A -w 64 -p {target_port} --flood {target_ip} 2>/dev/null || true"
+                    self.env.ns1.exec_cmd(cmd, timeout=10)
                 except Exception as e:
                     logger.debug(f"Flood error (expected): {e}")
-
-                self.stop_event.wait(interval)
 
         self.thread = threading.Thread(target=flood, daemon=True)
         self.thread.start()
