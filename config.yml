@@ -102,11 +102,11 @@ anomaly_detection:
   enabled: false                    # 总开关（默认关闭）
 
   # 采样配置
-  sample_rate: 100                  # 采样率 1/N（100 表示 1%）
+  sample_rate: 1                    # 采样率 1/N（1 表示 100% 采样，eBPF 开销极小）
 
   # 检测配置
   check_interval: 1                 # 检测间隔（秒）
-  min_packets: 100                  # 最小包数（少于此值不检测）
+  min_packets: 50                   # 最小包数（少于此值不检测）
   cleanup_interval: 300             # 清理过期数据间隔（秒）
 
   # 封禁配置
@@ -124,13 +124,13 @@ anomaly_detection:
     syn_flood:
       enabled: true
       ratio_threshold: 0.5          # SYN 包占比阈值（50%）
-      min_packets: 1000             # 触发检测的最小 SYN 包数（降低此值可提高灵敏度）
+      min_packets: 100              # 触发检测的最小 TCP 包数
       block_duration: 60            # 封禁时长（秒）
 
     udp_flood:
       enabled: true
       ratio_threshold: 0.8          # UDP 包占比阈值（80%）
-      min_packets: 1000             # 触发检测的最小 UDP 包数
+      min_packets: 100              # 触发检测的最小 UDP 包数
       block_duration: 60
 
     icmp_flood:
@@ -142,5 +142,5 @@ anomaly_detection:
     ack_flood:
       enabled: true
       ratio_threshold: 0.8          # ACK 包占比阈值（80%）
-      min_packets: 1000             # 触发检测的最小 ACK 包数
+      min_packets: 100              # 触发检测的最小 TCP 包数
       block_duration: 60
