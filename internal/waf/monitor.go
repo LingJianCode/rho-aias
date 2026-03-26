@@ -40,10 +40,17 @@ type XDPRuleManager interface {
 	UpdateRuleSourceMask(ip string, removeMask uint32) (newMask uint32, exists bool, changed bool, err error)
 }
 
+// BanRecordStore 封禁记录持久化接口
+type BanRecordStore interface {
+	UpsertActiveBan(ip, source, reason string, duration int) error
+	MarkExpired(ip, source string) error
+}
+
 // Monitor WAF 日志监控器
 type Monitor struct {
 	cfg     *config.WAFConfig
 	xdp     XDPRuleManager
+	banStore BanRecordStore // 封禁记录持久化（可选）
 	ctx     context.Context
 	cancel  context.CancelFunc
 	watcher *fsnotify.Watcher
@@ -75,6 +82,11 @@ func NewMonitor(cfg *config.WAFConfig, xdp XDPRuleManager, ctx context.Context) 
 		// 匹配常见 IP 地址格式 (IPv4)
 		ipRegex: regexp.MustCompile(`\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b`),
 	}
+}
+
+// SetBanRecordStore 设置封禁记录持久化存储
+func (m *Monitor) SetBanRecordStore(store BanRecordStore) {
+	m.banStore = store
 }
 
 // Start 启动 WAF 日志监控
@@ -357,6 +369,18 @@ func (m *Monitor) banIP(ip, logFile string, sourceMask uint32) {
 		SourceMask: sourceMask,
 	}
 
+	// 持久化封禁记录到数据库
+	if m.banStore != nil {
+		source := "waf"
+		if sourceMask == sourceMaskRateLimit {
+			source = "rate_limit"
+		}
+		reason := fmt.Sprintf("banned from %s log", m.getLogSource(logFile))
+		if err := m.banStore.UpsertActiveBan(ip, source, reason, m.cfg.BanDuration); err != nil {
+			logger.Errorf("[WAF] Failed to persist ban record for IP %s: %v", ip, err)
+		}
+	}
+
 	logger.Infof("[WAF] Banned IP %s (from %s, expires at %v)", ip, logFile, expiry)
 }
 
@@ -407,6 +431,17 @@ func (m *Monitor) cleanup() {
 			logger.Warnf("[WAF] Failed to remove XDP rule for expired IP %s: %v", e.ip, err)
 		} else {
 			logger.Debugf("[WAF] Removed XDP rule for expired IP %s", e.ip)
+		}
+
+		// 更新数据库中的封禁状态为已过期
+		if m.banStore != nil {
+			source := "waf"
+			if e.record.SourceMask == sourceMaskRateLimit {
+				source = "rate_limit"
+			}
+			if err := m.banStore.MarkExpired(e.ip, source); err != nil {
+				logger.Warnf("[WAF] Failed to mark ban record expired for IP %s: %v", e.ip, err)
+			}
 		}
 	}
 
