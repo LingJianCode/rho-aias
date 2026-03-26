@@ -432,9 +432,9 @@ class TestDDoSDetection(unittest.TestCase):
                     rules = rules.get('rules', [])
                 if isinstance(rules, list):
                     for rule in rules:
-                        ip = rule.get('ip', rule.get('cidr', ''))
+                        ip = rule.get('ip', rule.get('cidr', rule.get('key', '')))
                         if ip == '10.0.1.2':
-                            reason = rule.get('reason', '')
+                            reason = rule.get('reason', rule.get('sources', ''))
                             logger.info(f"IP 10.0.1.2 blocked by anomaly rule: {reason}")
                             return True
                 logger.warning(f"No anomaly rule found for IP 10.0.1.2 after {attack_type}")
