@@ -71,9 +71,12 @@ func (c *Collector) RecordPacket(ip string, protocol uint8, tcpFlags uint8, pktS
 		c.statsMap[ip] = stats
 	}
 
-	// 更新协议统计
+	// 更新协议统计（持续累积，直到 IP 被清理或封禁移除）
 	stats.ProtocolStats.TotalPackets++
 	stats.ProtocolStats.TotalBytes += uint64(pktSize)
+
+	// 更新每秒包计数（用于 PPS 滑动窗口计算）
+	stats.Window.PerSecondPackets++
 
 	switch protocol {
 	case ProtocolTCP:
@@ -109,10 +112,9 @@ func (c *Collector) UpdatePPS() {
 
 	now := time.Now()
 	for _, stats := range c.statsMap {
-		// 使用当前累计的包数作为当前秒的 PPS
-		// RecordPacket 在当前秒内不断累加 TotalPackets
-		// 在下一次 UpdatePPS 之前，TotalPackets 就是当前秒收到的包数
-		stats.Window.CurrentPPS = stats.ProtocolStats.TotalPackets
+		// 使用独立的每秒包计数作为当前秒的 PPS
+		// PerSecondPackets 仅用于 PPS 滑动窗口计算
+		stats.Window.CurrentPPS = stats.Window.PerSecondPackets
 
 		// 更新历史数据
 		stats.Window.PPSHistory[stats.Window.PPSIndex] = stats.Window.CurrentPPS
@@ -125,8 +127,9 @@ func (c *Collector) UpdatePPS() {
 		}
 		stats.Window.AvgPPS = float64(sum) / float64(stats.Window.WindowSize)
 
-		// 重置当前秒的统计（为下一秒做准备）
-		stats.ProtocolStats.Reset()
+		// 仅重置每秒计数（为下一秒做准备）
+		// 注意：不再重置 ProtocolStats，协议统计持续累积供攻击检测使用
+		stats.Window.PerSecondPackets = 0
 
 		_ = now // 避免未使用变量警告
 	}

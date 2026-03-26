@@ -19,12 +19,18 @@ func NewAttackDetector(config AttacksConfig) *AttackDetector {
 	if config.SynFlood.BlockDuration == 0 {
 		config.SynFlood.BlockDuration = 60
 	}
+	if config.SynFlood.MinPackets == 0 {
+		config.SynFlood.MinPackets = 1000
+	}
 
 	if config.UdpFlood.RatioThreshold == 0 {
 		config.UdpFlood.RatioThreshold = 0.8
 	}
 	if config.UdpFlood.BlockDuration == 0 {
 		config.UdpFlood.BlockDuration = 60
+	}
+	if config.UdpFlood.MinPackets == 0 {
+		config.UdpFlood.MinPackets = 1000
 	}
 
 	if config.IcmpFlood.RatioThreshold == 0 {
@@ -33,12 +39,18 @@ func NewAttackDetector(config AttacksConfig) *AttackDetector {
 	if config.IcmpFlood.BlockDuration == 0 {
 		config.IcmpFlood.BlockDuration = 60
 	}
+	if config.IcmpFlood.MinPackets == 0 {
+		config.IcmpFlood.MinPackets = 100
+	}
 
 	if config.AckFlood.RatioThreshold == 0 {
 		config.AckFlood.RatioThreshold = 0.8
 	}
 	if config.AckFlood.BlockDuration == 0 {
 		config.AckFlood.BlockDuration = 60
+	}
+	if config.AckFlood.MinPackets == 0 {
+		config.AckFlood.MinPackets = 1000
 	}
 
 	return &AttackDetector{
@@ -62,7 +74,7 @@ func (d *AttackDetector) DetectAttack(stats *IPProtocolStats, minPackets int) []
 	now := time.Now()
 
 	// SYN Flood 检测：TCP SYN 包占 TCP 总包的比例 > 阈值
-	if d.config.SynFlood.Enabled && stats.TCPCount > 1000 {
+	if d.config.SynFlood.Enabled && stats.TCPCount >= uint64(d.config.SynFlood.MinPackets) {
 		synRatio := float64(stats.TCPSynCount) / float64(stats.TCPCount)
 		if synRatio > d.config.SynFlood.RatioThreshold {
 			results = append(results, DetectionResult{
@@ -76,7 +88,7 @@ func (d *AttackDetector) DetectAttack(stats *IPProtocolStats, minPackets int) []
 	}
 
 	// UDP Flood 检测
-	if d.config.UdpFlood.Enabled && stats.UDPCount > 1000 {
+	if d.config.UdpFlood.Enabled && stats.UDPCount >= uint64(d.config.UdpFlood.MinPackets) {
 		udpRatio := float64(stats.UDPCount) / float64(totalPackets)
 		if udpRatio > d.config.UdpFlood.RatioThreshold {
 			results = append(results, DetectionResult{
@@ -90,7 +102,7 @@ func (d *AttackDetector) DetectAttack(stats *IPProtocolStats, minPackets int) []
 	}
 
 	// ICMP Flood 检测
-	if d.config.IcmpFlood.Enabled && stats.ICMPCount > 100 {
+	if d.config.IcmpFlood.Enabled && stats.ICMPCount >= uint64(d.config.IcmpFlood.MinPackets) {
 		icmpRatio := float64(stats.ICMPCount) / float64(totalPackets)
 		if icmpRatio > d.config.IcmpFlood.RatioThreshold {
 			results = append(results, DetectionResult{
@@ -104,7 +116,7 @@ func (d *AttackDetector) DetectAttack(stats *IPProtocolStats, minPackets int) []
 	}
 
 	// ACK Flood 检测：TCP ACK 包占 TCP 总包的比例 > 阈值
-	if d.config.AckFlood.Enabled && stats.TCPCount > 1000 {
+	if d.config.AckFlood.Enabled && stats.TCPCount >= uint64(d.config.AckFlood.MinPackets) {
 		ackRatio := float64(stats.TCPAckCount) / float64(stats.TCPCount)
 		if ackRatio > d.config.AckFlood.RatioThreshold {
 			results = append(results, DetectionResult{
@@ -126,7 +138,7 @@ func (d *AttackDetector) DetectSynFlood(stats *IPProtocolStats, minPackets int) 
 		return nil
 	}
 
-	if stats.TotalPackets < uint64(minPackets) || stats.TCPCount < 1000 {
+	if stats.TotalPackets < uint64(minPackets) || stats.TCPCount < uint64(d.config.SynFlood.MinPackets) {
 		return nil
 	}
 
@@ -150,7 +162,7 @@ func (d *AttackDetector) DetectUdpFlood(stats *IPProtocolStats, minPackets int) 
 		return nil
 	}
 
-	if stats.TotalPackets < uint64(minPackets) || stats.UDPCount < 1000 {
+	if stats.TotalPackets < uint64(minPackets) || stats.UDPCount < uint64(d.config.UdpFlood.MinPackets) {
 		return nil
 	}
 
@@ -174,7 +186,7 @@ func (d *AttackDetector) DetectIcmpFlood(stats *IPProtocolStats, minPackets int)
 		return nil
 	}
 
-	if stats.TotalPackets < uint64(minPackets) || stats.ICMPCount < 100 {
+	if stats.TotalPackets < uint64(minPackets) || stats.ICMPCount < uint64(d.config.IcmpFlood.MinPackets) {
 		return nil
 	}
 
@@ -198,7 +210,7 @@ func (d *AttackDetector) DetectAckFlood(stats *IPProtocolStats, minPackets int) 
 		return nil
 	}
 
-	if stats.TotalPackets < uint64(minPackets) || stats.TCPCount < 1000 {
+	if stats.TotalPackets < uint64(minPackets) || stats.TCPCount < uint64(d.config.AckFlood.MinPackets) {
 		return nil
 	}
 
