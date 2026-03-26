@@ -260,20 +260,6 @@ func (l *Logger) Close() error {
 	return nil
 }
 
-// GetZapLogger 获取 zap.Logger
-func (l *Logger) GetZapLogger() *zap.Logger {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.zap
-}
-
-// GetSugar 获取 SugaredLogger
-func (l *Logger) GetSugar() *zap.SugaredLogger {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.sugar
-}
-
 // ========== 全局日志函数 ==========
 
 // Debug 输出 Debug 级别日志
@@ -420,27 +406,6 @@ func Sync() error {
 func Close() error {
 	if globalLogger != nil {
 		return globalLogger.Close()
-	}
-	return nil
-}
-
-// GetLogger 获取全局日志管理器
-func GetLogger() *Logger {
-	return globalLogger
-}
-
-// With 创建带有预设字段的子 logger
-func With(fields ...zap.Field) *zap.Logger {
-	if globalLogger != nil {
-		return globalLogger.zap.With(fields...)
-	}
-	return nil
-}
-
-// Named 创建命名 logger
-func Named(name string) *zap.Logger {
-	if globalLogger != nil {
-		return globalLogger.zap.Named(name)
 	}
 	return nil
 }

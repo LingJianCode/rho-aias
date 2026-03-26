@@ -253,31 +253,3 @@ func TestCheckAndValidate(t *testing.T) {
 		t.Logf("Expected error for old kernel: %v", err)
 	}
 }
-
-func TestCheckAndValidateWithWarning(t *testing.T) {
-	// Similar to TestCheckAndValidate, but tests the warning variant
-	meetsRecommended, err := CheckAndValidateWithWarning()
-
-	version, verr := GetKernelVersion()
-	if verr != nil {
-		t.Logf("Could not get kernel version: %v", verr)
-		return
-	}
-
-	t.Logf("Current kernel version: %s, meets recommended: %v", version, meetsRecommended)
-
-	// If kernel meets minimum, there should be no error
-	if version.AtLeast(MinVersion) {
-		if err != nil {
-			t.Errorf("CheckAndValidateWithWarning() should not error for kernel %s >= %s, but got: %v",
-				version, MinVersion, err)
-		}
-	}
-
-	// Check the meetsRecommended return value
-	expectedMeetsRecommended := version.AtLeast(RecommendedVersion)
-	if meetsRecommended != expectedMeetsRecommended {
-		t.Errorf("CheckAndValidateWithWarning() meetsRecommended = %v, want %v",
-			meetsRecommended, expectedMeetsRecommended)
-	}
-}

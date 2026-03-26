@@ -140,34 +140,7 @@ sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_05_control_without
 
 ## 常见问题
 
-### 1. 权限错误
-
-```
-ERROR: This test requires root privileges
-```
-
-**解决方法**: 使用 `sudo` 运行测试脚本。
-
-### 2. 二进制文件未找到
-
-```
-Binary not found: /workspace/rho-aias
-```
-
-**解决方法**: 先编译程序
-```bash
-make build
-```
-
-### 3. 内核版本不支持
-
-```
-WARN: 内核版本 4.x 可能不支持 BPF CO-RE
-```
-
-**解决方法**: 升级内核到 5.8 或更高版本。
-
-### 4. Network Namespace 残留
+###  Network Namespace 残留
 
 如果上次测试异常退出，可能有残留的 namespace：
 
@@ -202,8 +175,24 @@ ip netns list | grep rho_ | awk '{print $1}' | xargs -I {} ip netns del {}
   - ICMP Flood: ratio_threshold=0.5, block_duration=60s
   - ACK Flood: ratio_threshold=0.7, block_duration=60s
 
-## 注意事项
+# 手动测试
 
-1. **阻断事件上报已关闭** - 测试配置中 `bpf_perf_event_output` 被注释，不会产生大量事件数据
-2. **端口冲突** - 如果 18080 端口被占用，修改 `test_xdp_block.py` 中的 `api_port`
-3. **测试隔离** - 每个测试用例都会创建独立的环境，测试结束后自动清理
+- UDP ddos攻击：
+```bash
+hping3 -c 10000 -d 120 --udp -w 64 -p 80 --flood x.x.x.x
+```
+
+- ICMP ddos攻击：
+```bash
+hping3 -c 10000 -d 120 --icmp -w 64 -p 80 --flood x.x.x.x
+```
+
+- SYN ddos攻击：
+```bash
+hping3 -c 10000 -d 120 -S -w 64 -p 80 --flood x.x.x.x
+```
+
+- ACK ddos攻击：
+```bash
+hping3 -c 10000 -d 120 -A -w 64 -p 80 --flood x.x.x.x
+ ```

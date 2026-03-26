@@ -11,7 +11,6 @@ import (
 
 var (
 	ErrPasswordIncorrect = errors.New("current password is incorrect")
-	ErrPasswordTooWeak   = errors.New("password is too weak")
 )
 
 // UserService 用户服务
@@ -128,9 +127,4 @@ func (s *UserService) ChangePassword(userID uint, oldPassword, newPassword strin
 // DeleteUser 删除用户（软删除）
 func (s *UserService) DeleteUser(id uint) error {
 	return s.db.Delete(&models.User{}, id).Error
-}
-
-// SetUserActive 设置用户状态
-func (s *UserService) SetUserActive(id uint, active bool) error {
-	return s.db.Model(&models.User{}).Where("id = ?", id).Update("active", active).Error
 }

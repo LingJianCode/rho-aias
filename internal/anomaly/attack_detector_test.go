@@ -13,28 +13,27 @@ func TestAttackDetector_DetectSynFlood(t *testing.T) {
 		},
 	})
 
-	// 测试 SYN Flood 攻击检测
 	stats := &IPProtocolStats{
 		TCPCount:     2000,
 		TCPSynCount:  1500, // 75% SYN 包
 		TotalPackets: 2000,
 	}
 
-	result := detector.DetectSynFlood(stats, 100)
-	if result == nil {
+	results := detector.DetectAttack(stats, 100)
+	if len(results) == 0 {
 		t.Fatal("Expected SYN flood detection")
 	}
 
-	if result.AttackType != AttackTypeSynFlood {
-		t.Errorf("Expected AttackTypeSynFlood, got %v", result.AttackType)
+	if results[0].AttackType != AttackTypeSynFlood {
+		t.Errorf("Expected AttackTypeSynFlood, got %v", results[0].AttackType)
 	}
 
-	if result.BlockDuration != 60 {
-		t.Errorf("Expected BlockDuration=60, got %d", result.BlockDuration)
+	if results[0].BlockDuration != 60 {
+		t.Errorf("Expected BlockDuration=60, got %d", results[0].BlockDuration)
 	}
 }
 
-func TestAttackDetector_DetectSynFlow_BelowThreshold(t *testing.T) {
+func TestAttackDetector_DetectSynFlood_BelowThreshold(t *testing.T) {
 	detector := NewAttackDetector(AttacksConfig{
 		SynFlood: AttackConfig{
 			Enabled:        true,
@@ -43,15 +42,21 @@ func TestAttackDetector_DetectSynFlow_BelowThreshold(t *testing.T) {
 		},
 	})
 
-	// 测试正常流量（SYN 包比例低）
+	// 正常流量（SYN 包比例低）
 	stats := &IPProtocolStats{
 		TCPCount:     2000,
 		TCPSynCount:  100, // 5% SYN 包
 		TotalPackets: 2000,
 	}
 
-	result := detector.DetectSynFlood(stats, 100)
-	if result != nil {
+	results := detector.DetectAttack(stats, 100)
+	hasSynFlood := false
+	for _, r := range results {
+		if r.AttackType == AttackTypeSynFlood {
+			hasSynFlood = true
+		}
+	}
+	if hasSynFlood {
 		t.Error("Expected no SYN flood detection for normal traffic")
 	}
 }
@@ -65,19 +70,18 @@ func TestAttackDetector_DetectUdpFlood(t *testing.T) {
 		},
 	})
 
-	// 测试 UDP Flood 攻击检测
 	stats := &IPProtocolStats{
 		UDPCount:     5000, // 90% UDP 包
 		TotalPackets: 5555,
 	}
 
-	result := detector.DetectUdpFlood(stats, 100)
-	if result == nil {
+	results := detector.DetectAttack(stats, 100)
+	if len(results) == 0 {
 		t.Fatal("Expected UDP flood detection")
 	}
 
-	if result.AttackType != AttackTypeUdpFlood {
-		t.Errorf("Expected AttackTypeUdpFlood, got %v", result.AttackType)
+	if results[0].AttackType != AttackTypeUdpFlood {
+		t.Errorf("Expected AttackTypeUdpFlood, got %v", results[0].AttackType)
 	}
 }
 
@@ -90,19 +94,18 @@ func TestAttackDetector_DetectIcmpFlood(t *testing.T) {
 		},
 	})
 
-	// 测试 ICMP Flood 攻击检测
 	stats := &IPProtocolStats{
 		ICMPCount:    500, // 80% ICMP 包
 		TotalPackets: 625,
 	}
 
-	result := detector.DetectIcmpFlood(stats, 100)
-	if result == nil {
+	results := detector.DetectAttack(stats, 100)
+	if len(results) == 0 {
 		t.Fatal("Expected ICMP flood detection")
 	}
 
-	if result.AttackType != AttackTypeIcmpFlood {
-		t.Errorf("Expected AttackTypeIcmpFlood, got %v", result.AttackType)
+	if results[0].AttackType != AttackTypeIcmpFlood {
+		t.Errorf("Expected AttackTypeIcmpFlood, got %v", results[0].AttackType)
 	}
 }
 
@@ -115,20 +118,19 @@ func TestAttackDetector_DetectAckFlood(t *testing.T) {
 		},
 	})
 
-	// 测试 ACK Flood 攻击检测
 	stats := &IPProtocolStats{
 		TCPCount:     3000,
 		TCPAckCount:  2500, // 83% ACK 包
 		TotalPackets: 3000,
 	}
 
-	result := detector.DetectAckFlood(stats, 100)
-	if result == nil {
+	results := detector.DetectAttack(stats, 100)
+	if len(results) == 0 {
 		t.Fatal("Expected ACK flood detection")
 	}
 
-	if result.AttackType != AttackTypeAckFlood {
-		t.Errorf("Expected AttackTypeAckFlood, got %v", result.AttackType)
+	if results[0].AttackType != AttackTypeAckFlood {
+		t.Errorf("Expected AttackTypeAckFlood, got %v", results[0].AttackType)
 	}
 }
 
@@ -156,7 +158,7 @@ func TestAttackDetector_DetectAttack_MultipleAttacks(t *testing.T) {
 		},
 	})
 
-	// 测试同时存在 SYN 和 ACK Flood（SYN 包比例更高）
+	// 同时存在 SYN 和 ACK Flood
 	stats := &IPProtocolStats{
 		TCPCount:     3000,
 		TCPSynCount:  2000, // 67% SYN 包
@@ -169,7 +171,6 @@ func TestAttackDetector_DetectAttack_MultipleAttacks(t *testing.T) {
 		t.Fatal("Expected at least one attack detection")
 	}
 
-	// 应该检测到 SYN Flood 和 ACK Flood
 	attackTypes := make(map[AttackType]bool)
 	for _, r := range results {
 		attackTypes[r.AttackType] = true
@@ -192,9 +193,8 @@ func TestAttackDetector_DetectAttack_InsufficientPackets(t *testing.T) {
 		},
 	})
 
-	// 测试包数不足
 	stats := &IPProtocolStats{
-		TCPCount:     50, // 少于 minPackets
+		TCPCount:     50,
 		TCPSynCount:  40,
 		TotalPackets: 50,
 	}
@@ -208,7 +208,7 @@ func TestAttackDetector_DetectAttack_InsufficientPackets(t *testing.T) {
 func TestAttackDetector_DisabledDetection(t *testing.T) {
 	detector := NewAttackDetector(AttacksConfig{
 		SynFlood: AttackConfig{
-			Enabled:        false, // 禁用
+			Enabled:        false,
 			RatioThreshold: 0.5,
 			BlockDuration:  60,
 		},
@@ -220,9 +220,11 @@ func TestAttackDetector_DisabledDetection(t *testing.T) {
 		TotalPackets: 2000,
 	}
 
-	result := detector.DetectSynFlood(stats, 100)
-	if result != nil {
-		t.Error("Expected no detection when disabled")
+	results := detector.DetectAttack(stats, 100)
+	for _, r := range results {
+		if r.AttackType == AttackTypeSynFlood {
+			t.Error("Expected no SYN flood detection when disabled")
+		}
 	}
 }
 
@@ -260,9 +262,11 @@ func TestAttackDetector_DetectSynFlood_ExactThreshold(t *testing.T) {
 		TotalPackets: 2000,
 	}
 
-	result := detector.DetectSynFlood(stats, 100)
-	if result != nil {
-		t.Error("Expected no detection when ratio equals threshold (not strictly greater)")
+	results := detector.DetectAttack(stats, 100)
+	for _, r := range results {
+		if r.AttackType == AttackTypeSynFlood {
+			t.Error("Expected no detection when ratio equals threshold (not strictly greater)")
+		}
 	}
 }
 
@@ -276,15 +280,16 @@ func TestAttackDetector_DetectUdpFlood_BelowThreshold(t *testing.T) {
 		},
 	})
 
-	// UDP 占比低于阈值
 	stats := &IPProtocolStats{
 		UDPCount:     3000,
 		TotalPackets: 10000, // 30% UDP
 	}
 
-	result := detector.DetectUdpFlood(stats, 100)
-	if result != nil {
-		t.Error("Expected no detection when ratio below threshold")
+	results := detector.DetectAttack(stats, 100)
+	for _, r := range results {
+		if r.AttackType == AttackTypeUdpFlood {
+			t.Error("Expected no detection when ratio below threshold")
+		}
 	}
 }
 
@@ -298,15 +303,16 @@ func TestAttackDetector_DetectIcmpFlood_BelowThreshold(t *testing.T) {
 		},
 	})
 
-	// ICMP 占比低于阈值
 	stats := &IPProtocolStats{
 		ICMPCount:    200,
 		TotalPackets: 1000, // 20% ICMP
 	}
 
-	result := detector.DetectIcmpFlood(stats, 100)
-	if result != nil {
-		t.Error("Expected no detection when ratio below threshold")
+	results := detector.DetectAttack(stats, 100)
+	for _, r := range results {
+		if r.AttackType == AttackTypeIcmpFlood {
+			t.Error("Expected no detection when ratio below threshold")
+		}
 	}
 }
 
@@ -320,16 +326,17 @@ func TestAttackDetector_DetectAckFlood_BelowThreshold(t *testing.T) {
 		},
 	})
 
-	// ACK 占比低于阈值
 	stats := &IPProtocolStats{
 		TCPCount:     2000,
 		TCPAckCount:  1000, // 50% ACK
 		TotalPackets: 2000,
 	}
 
-	result := detector.DetectAckFlood(stats, 100)
-	if result != nil {
-		t.Error("Expected no detection when ratio below threshold")
+	results := detector.DetectAttack(stats, 100)
+	for _, r := range results {
+		if r.AttackType == AttackTypeAckFlood {
+			t.Error("Expected no detection when ratio below threshold")
+		}
 	}
 }
 
@@ -350,9 +357,12 @@ func TestAttackDetector_DetectSynFlood_ZeroTCPCount(t *testing.T) {
 		TotalPackets: 500,
 	}
 
-	result := detector.DetectSynFlood(stats, 100)
-	if result != nil {
-		t.Error("Expected no detection when TCPCount is 0")
+	// DetectAttack 中 SYN Flood 检查 stats.TCPCount >= MinPackets，0 < 100 不触发
+	results := detector.DetectAttack(stats, 100)
+	for _, r := range results {
+		if r.AttackType == AttackTypeSynFlood {
+			t.Error("Expected no detection when TCPCount is 0")
+		}
 	}
 }
 
@@ -434,9 +444,11 @@ func TestAttackDetector_MinPackets_PerAttackType(t *testing.T) {
 		TotalPackets: 2000,
 	}
 
-	result := detector.DetectSynFlood(stats, 100)
-	if result != nil {
-		t.Error("Expected no detection when TCPCount < SynFlood.MinPackets")
+	results := detector.DetectAttack(stats, 100)
+	for _, r := range results {
+		if r.AttackType == AttackTypeSynFlood {
+			t.Error("Expected no detection when TCPCount < SynFlood.MinPackets")
+		}
 	}
 
 	// 满足 SynFlood.MinPackets
@@ -446,8 +458,14 @@ func TestAttackDetector_MinPackets_PerAttackType(t *testing.T) {
 		TotalPackets: 5000,
 	}
 
-	result2 := detector.DetectSynFlood(stats2, 100)
-	if result2 == nil {
+	results2 := detector.DetectAttack(stats2, 100)
+	hasSynFlood := false
+	for _, r := range results2 {
+		if r.AttackType == AttackTypeSynFlood {
+			hasSynFlood = true
+		}
+	}
+	if !hasSynFlood {
 		t.Error("Expected detection when TCPCount >= SynFlood.MinPackets")
 	}
 }

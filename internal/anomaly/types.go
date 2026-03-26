@@ -185,7 +185,5 @@ const (
 	TCPFlagFIN = 0x01
 	TCPFlagSYN = 0x02
 	TCPFlagRST = 0x04
-	TCPFlagPSH = 0x08
 	TCPFlagACK = 0x10
-	TCPFlagURG = 0x20
 )

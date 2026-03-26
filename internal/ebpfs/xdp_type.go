@@ -64,30 +64,6 @@ type IPv6TrieKey struct {
 // 位掩码操作辅助函数
 // ============================================
 
-// SourceIDToMask 将来源标识符转换为位掩码
-func SourceIDToMask(source string) uint32 {
-	switch source {
-	case "ipsum":
-		return SourceMaskIpsum
-	case "spamhaus":
-		return SourceMaskSpamhaus
-	case "manual":
-		return SourceMaskManual
-	case "waf":
-		return SourceMaskWAF
-	case "ddos":
-		return SourceMaskDDoS
-	case "rate_limit":
-		return SourceMaskRateLimit
-	case "anomaly":
-		return SourceMaskAnomaly
-	case "whitelist":
-		return SourceMaskWhitelist
-	default:
-		return 0
-	}
-}
-
 // MaskToSourceIDs 将位掩码转换为来源标识符列表
 func MaskToSourceIDs(mask uint32) []string {
 	var sources []string
@@ -116,38 +92,6 @@ func MaskToSourceIDs(mask uint32) []string {
 		sources = append(sources, "whitelist")
 	}
 	return sources
-}
-
-// AddSource 添加来源到掩码
-// new_mask = old_mask | source_bit
-func AddSource(mask uint32, source string) uint32 {
-	return mask | SourceIDToMask(source)
-}
-
-// RemoveSource 从掩码中移除来源
-// new_mask = old_mask & ~source_bit
-func RemoveSource(mask uint32, source string) uint32 {
-	return mask &^ SourceIDToMask(source)
-}
-
-// HasSource 检查掩码是否包含指定来源
-func HasSource(mask uint32, source string) bool {
-	return mask&SourceIDToMask(source) != 0
-}
-
-// IsOnlySource 检查掩码是否仅包含指定来源
-func IsOnlySource(mask uint32, source string) bool {
-	return mask == SourceIDToMask(source)
-}
-
-// GetSourceCount 获取掩码中包含的来源数量
-func GetSourceCount(mask uint32) int {
-	count := 0
-	for mask != 0 {
-		count += int(mask & 1)
-		mask >>= 1
-	}
-	return count
 }
 
 // ============================================
@@ -214,9 +158,10 @@ func DefaultEventConfig() EventConfig {
 
 // AnomalyConfig 异常检测采样配置结构 - 与 eBPF C 中的 struct anomaly_config 对应
 type AnomalyConfig struct {
-	Enabled    uint32   // 异常检测采样启用标志 (0=禁用, 1=启用)
-	SampleRate uint32   // 采样率：每 N 个包采样 1 个 (例如 100 = 1%)
-	Padding    [2]uint32 // 对齐填充
+	Enabled           uint32   // 异常检测采样启用标志 (0=禁用, 1=启用)
+	SampleRate        uint32   // 采样率：每 N 个包采样 1 个 (例如 100 = 1%)
+	PortFilterEnabled uint32   // 端口过滤启用标志 (0=监控所有端口, 1=仅监控配置的端口)
+	Padding           uint32   // 对齐填充
 }
 
 // NewAnomalyConfig 创建新的 AnomalyConfig
@@ -230,9 +175,10 @@ func NewAnomalyConfig(enabled bool, sampleRate uint32) AnomalyConfig {
 		sampleRate = 100 // 默认采样率 1%
 	}
 	return AnomalyConfig{
-		Enabled:    enabledVal,
-		SampleRate: sampleRate,
-		Padding:    [2]uint32{0, 0},
+		Enabled:           enabledVal,
+		SampleRate:        sampleRate,
+		PortFilterEnabled: 0,
+		Padding:           0,
 	}
 }
 

@@ -175,8 +175,3 @@ func (aw *AsyncWriter) writeBatch(records []BlockRecord) {
 		}
 	}
 }
-
-// GetFileWriter 获取文件写入器（用于测试）
-func (aw *AsyncWriter) GetFileWriter() *FileWriter {
-	return aw.fileWriter
-}
