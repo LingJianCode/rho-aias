@@ -112,6 +112,13 @@ anomaly_detection:
   # 封禁配置
   block_duration: 60                # 临时封禁时长（秒）
 
+  # 端口过滤配置（仅对指定端口进行异常检测，同时应用于 TCP/UDP，为空则检测所有端口）
+  ports:
+    - 80
+    - 443
+    - 8080
+    - 53
+
   # 3σ 基线配置
   baseline:
     min_sample_count: 10            # 最小样本数（少于此值不检测）

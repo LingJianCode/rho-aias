@@ -40,8 +40,9 @@ type PacketInfo struct {
 	SrcIPv6    [16]byte
 	DstIPv6    [16]byte
 	EthProto   EthernetType
-	IPProtocol uint8    // IP 协议类型 (TCP=6, UDP=17, ICMP=1)
-	TCPFlags   uint8    // TCP 标志位 (SYN=0x02, ACK=0x10, etc.)
+	IPProtocol uint8      // IP 协议类型 (TCP=6, UDP=17, ICMP=1)
+	TCPFlags   uint8      // TCP 标志位 (SYN=0x02, ACK=0x10, etc.)
+	DstPort    uint16     // 目标端口 (TCP/UDP, 网络字节序)
 	PktSize    uint32
 	MatchType  MatchType
 }

@@ -348,6 +348,16 @@ func main() {
 				logger.Warnf("[Main] Failed to set anomaly config: %v", err)
 			}
 
+			// 配置 eBPF 异常检测端口过滤
+			ports := make([]uint32, len(cfg.AnomalyDetection.Ports))
+			for i, p := range cfg.AnomalyDetection.Ports {
+				ports[i] = uint32(p)
+			}
+			portFilterEnabled := len(ports) > 0
+			if err := xdp.SetAnomalyPortFilter(portFilterEnabled, ports); err != nil {
+				logger.Warnf("[Main] Failed to set anomaly port filter: %v", err)
+			}
+
 			// 启动异常检测事件监听
 			go xdp.MonitorAnomalyEvents(func(srcIP string, protocol uint8, tcpFlags uint8, pktSize uint32) {
 				anomalyDetector.RecordPacket(srcIP, protocol, tcpFlags, pktSize)

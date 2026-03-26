@@ -68,8 +68,8 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MAX_IPV6_EXT_HEADERS 8   // 最多处理的扩展头数量
 
 /* Packet information structure for processing and event reporting
- * 总大小: 64 bytes, packed 避免填充
- * 包含传输层协议信息和 TCP 标志位
+ * 总大小: 54 bytes, packed 避免填充
+ * 包含传输层协议信息、TCP 标志位和目标端口
  */
 struct packet_info {
     // Network layer - IPv4 addresses (8 bytes)
@@ -85,10 +85,13 @@ struct packet_info {
     __u8 ip_protocol;               // IP 协议类型 (TCP=6, UDP=17, ICMP=1)
     __u8 tcp_flags;                 // TCP 标志位 (SYN=0x02, ACK=0x10, etc.)
 
+    // Transport layer (2 bytes)
+    __be16 dst_port;                // 目标端口 (TCP/UDP, 网络字节序)
+
     // Metadata (8 bytes)
     __u32 pkt_size;                 // 数据包总大小
     __u32 match_type;               // 匹配的规则类型
-} __attribute__((packed));          // 64 bytes
+} __attribute__((packed));          // 54 bytes
 
 /* eBPF maps definitions
  * All maps are limited to MAX_ENTRIES_SIZE entries
@@ -195,9 +198,10 @@ struct {
 // Anomaly detection configuration map
 // Controls whether to sample packets for anomaly detection
 struct anomaly_config {
-    __u32 enabled;        /* Anomaly detection enabled flag (0=disabled, 1=enabled) */
-    __u32 sample_rate;    /* Sample rate: report 1 out of every N packets (e.g., 100 = 1%) */
-    __u32 padding[2];     /* Alignment padding to 16 bytes */
+    __u32 enabled;            /* Anomaly detection enabled flag (0=disabled, 1=enabled) */
+    __u32 sample_rate;        /* Sample rate: report 1 out of every N packets (e.g., 100 = 1%) */
+    __u32 port_filter_enabled; /* Port filter enabled flag (0=monitor all ports, 1=only monitored ports) */
+    __u32 padding;            /* Alignment padding */
 } __attribute__((packed));
 
 struct {
@@ -213,6 +217,18 @@ struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 1 << 20);  // 1MB buffer size
 } anomaly_events SEC(".maps");
+
+// Anomaly detection port filter map
+// Key: port number (host byte order), Value: flag (1 = monitored)
+// Only packets destined to these ports will be sampled for anomaly detection
+// (when port_filter_enabled is set in anomaly_config)
+#define MAX_ANOMALY_PORT_ENTRIES 256
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __u32);
+    __type(value, __u32);
+    __uint(max_entries, MAX_ANOMALY_PORT_ENTRIES);
+} anomaly_ports SEC(".maps");
 
 // IPv4 GeoIP whitelist LPM trie
 struct {
@@ -286,7 +302,7 @@ struct {
  * @data_end: 数据包结束指针
  * @protocol: IP 协议号
  * 
- * 填充 pkt_info->ip_protocol 和 pkt_info->tcp_flags
+ * 填充 pkt_info->ip_protocol, pkt_info->tcp_flags 和 pkt_info->dst_port
  */
 static __always_inline void parse_transport_layer(
     struct packet_info *pkt_info,
@@ -297,8 +313,9 @@ static __always_inline void parse_transport_layer(
 {
     pkt_info->ip_protocol = protocol;
     pkt_info->tcp_flags = 0;
+    pkt_info->dst_port = 0;
 
-    // 只解析 TCP 的标志位
+    // 只解析 TCP 的标志位和端口
     if (protocol == IPPROTO_TCP) {
         struct tcphdr *tcph = (struct tcphdr *)(ip_data + iph_len);
         
@@ -306,8 +323,7 @@ static __always_inline void parse_transport_layer(
         if ((void *)(tcph + 1) > data_end)
             return;
         
-        // 提取 TCP 标志位
-        // 读取整个 TCP 头部以安全访问标志位
+        // 提取 TCP 标志位和目标端口
         struct tcphdr tcp_hdr;
         if (bpf_core_read(&tcp_hdr, sizeof(tcp_hdr), tcph) == 0) {
             // 从位域构建标志位
@@ -321,9 +337,22 @@ static __always_inline void parse_transport_layer(
             if (tcp_hdr.ece) flags |= 0x40;
             if (tcp_hdr.cwr) flags |= 0x80;
             pkt_info->tcp_flags = flags;
+            pkt_info->dst_port = tcp_hdr.dest;
+        }
+    } else if (protocol == IPPROTO_UDP) {
+        // 解析 UDP 目标端口
+        struct udphdr *udph = (struct udphdr *)(ip_data + iph_len);
+        
+        // 验证 UDP 头边界（至少 8 字节）
+        if ((void *)(udph + 1) > data_end)
+            return;
+        
+        struct udphdr udp_hdr;
+        if (bpf_core_read(&udp_hdr, sizeof(udp_hdr), udph) == 0) {
+            pkt_info->dst_port = udp_hdr.dest;
         }
     }
-    // UDP 和 ICMP 不需要特殊处理，只需要记录协议类型
+    // ICMP 不需要特殊处理，只需要记录协议类型
 }
 
 /* 检查数据包是否匹配 IP 白名单规则
@@ -644,6 +673,7 @@ int xdp_prog(struct xdp_md *ctx)
     __builtin_memset(pkt_info->dst_ipv6, 0, sizeof(pkt_info->dst_ipv6));
     pkt_info->ip_protocol = 0;
     pkt_info->tcp_flags = 0;
+    pkt_info->dst_port = 0;
     pkt_info->pkt_size = data_end - data;
     pkt_info->match_type = 0;
 
@@ -702,8 +732,20 @@ submit:
                 // 采样逻辑：random % sample_rate == 0 则上报
                 __u32 random_val = bpf_get_prandom_u32();
                 if ((random_val % sample_rate) == 0) {
-                    // 上报到 anomaly_events ring buffer
-                    bpf_ringbuf_output(&anomaly_events, pkt_info, sizeof(*pkt_info), 0);
+                    // 端口过滤检查：如果启用了端口过滤，只上报匹配端口的数据包
+                    int pass_port_check = 1;
+                    if (cfg->port_filter_enabled) {
+                        __u32 port_key = bpf_ntohs(pkt_info->dst_port);
+                        __u32 *port_val = bpf_map_lookup_elem(&anomaly_ports, &port_key);
+                        if (!port_val) {
+                            pass_port_check = 0;
+                        }
+                    }
+                    
+                    if (pass_port_check) {
+                        // 上报到 anomaly_events ring buffer
+                        bpf_ringbuf_output(&anomaly_events, pkt_info, sizeof(*pkt_info), 0);
+                    }
                 }
             }
         }
