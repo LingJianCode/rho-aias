@@ -158,9 +158,10 @@ func DefaultEventConfig() EventConfig {
 
 // AnomalyConfig 异常检测采样配置结构 - 与 eBPF C 中的 struct anomaly_config 对应
 type AnomalyConfig struct {
-	Enabled    uint32   // 异常检测采样启用标志 (0=禁用, 1=启用)
-	SampleRate uint32   // 采样率：每 N 个包采样 1 个 (例如 100 = 1%)
-	Padding    [2]uint32 // 对齐填充
+	Enabled           uint32   // 异常检测采样启用标志 (0=禁用, 1=启用)
+	SampleRate        uint32   // 采样率：每 N 个包采样 1 个 (例如 100 = 1%)
+	PortFilterEnabled uint32   // 端口过滤启用标志 (0=监控所有端口, 1=仅监控配置的端口)
+	Padding           uint32   // 对齐填充
 }
 
 // NewAnomalyConfig 创建新的 AnomalyConfig
@@ -174,9 +175,10 @@ func NewAnomalyConfig(enabled bool, sampleRate uint32) AnomalyConfig {
 		sampleRate = 100 // 默认采样率 1%
 	}
 	return AnomalyConfig{
-		Enabled:    enabledVal,
-		SampleRate: sampleRate,
-		Padding:    [2]uint32{0, 0},
+		Enabled:           enabledVal,
+		SampleRate:        sampleRate,
+		PortFilterEnabled: 0,
+		Padding:           0,
 	}
 }
 
