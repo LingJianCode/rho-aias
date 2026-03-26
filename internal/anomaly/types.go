@@ -36,9 +36,10 @@ type AttacksConfig struct {
 
 // AttackConfig 单个攻击类型配置
 type AttackConfig struct {
-	Enabled           bool    `yaml:"enabled"`
-	RatioThreshold    float64 `yaml:"ratio_threshold"` // 协议占比阈值
-	BlockDuration     int     `yaml:"block_duration"`  // 封禁时长（秒）
+	Enabled        bool    `yaml:"enabled"`
+	RatioThreshold float64 `yaml:"ratio_threshold"` // 协议占比阈值
+	BlockDuration  int     `yaml:"block_duration"`  // 封禁时长（秒）
+	MinPackets     int     `yaml:"min_packets"`     // 触发检测的最小包数（0 表示使用默认值）
 }
 
 // ============================================
@@ -99,11 +100,12 @@ type IPStats struct {
 
 // SlidingWindow 滑动窗口统计
 type SlidingWindow struct {
-	PPSHistory []uint64 // 历史 PPS 数据（环形数组）
-	PPSIndex   int      // 当前索引
-	WindowSize int      // 窗口大小（秒）
-	CurrentPPS uint64   // 当前 PPS
-	AvgPPS     float64  // 平均 PPS
+	PPSHistory       []uint64 // 历史 PPS 数据（环形数组）
+	PPSIndex         int      // 当前索引
+	WindowSize       int      // 窗口大小（秒）
+	CurrentPPS       uint64   // 当前 PPS
+	AvgPPS           float64  // 平均 PPS
+	PerSecondPackets uint64   // 当前秒收到的包数（每秒重置，用于 PPS 计算）
 }
 
 // Baseline 3σ 基线数据（Welford 算法）

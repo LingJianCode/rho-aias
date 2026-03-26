@@ -124,19 +124,23 @@ anomaly_detection:
     syn_flood:
       enabled: true
       ratio_threshold: 0.5          # SYN 包占比阈值（50%）
+      min_packets: 1000             # 触发检测的最小 SYN 包数（降低此值可提高灵敏度）
       block_duration: 60            # 封禁时长（秒）
 
     udp_flood:
       enabled: true
       ratio_threshold: 0.8          # UDP 包占比阈值（80%）
+      min_packets: 1000             # 触发检测的最小 UDP 包数
       block_duration: 60
 
     icmp_flood:
       enabled: true
       ratio_threshold: 0.5          # ICMP 包占比阈值（50%）
+      min_packets: 100              # 触发检测的最小 ICMP 包数
       block_duration: 60
 
     ack_flood:
       enabled: true
       ratio_threshold: 0.8          # ACK 包占比阈值（80%）
+      min_packets: 1000             # 触发检测的最小 ACK 包数
       block_duration: 60

@@ -102,18 +102,22 @@ class RhoAiasProcess:
         # 配置各种攻击检测
         config['anomaly_detection']['attacks']['syn_flood']['enabled'] = True
         config['anomaly_detection']['attacks']['syn_flood']['ratio_threshold'] = 0.5
+        config['anomaly_detection']['attacks']['syn_flood']['min_packets'] = 200
         config['anomaly_detection']['attacks']['syn_flood']['block_duration'] = 60
 
         config['anomaly_detection']['attacks']['udp_flood']['enabled'] = True
         config['anomaly_detection']['attacks']['udp_flood']['ratio_threshold'] = 0.7
+        config['anomaly_detection']['attacks']['udp_flood']['min_packets'] = 200
         config['anomaly_detection']['attacks']['udp_flood']['block_duration'] = 60
 
         config['anomaly_detection']['attacks']['icmp_flood']['enabled'] = True
         config['anomaly_detection']['attacks']['icmp_flood']['ratio_threshold'] = 0.5
+        config['anomaly_detection']['attacks']['icmp_flood']['min_packets'] = 100
         config['anomaly_detection']['attacks']['icmp_flood']['block_duration'] = 60
 
         config['anomaly_detection']['attacks']['ack_flood']['enabled'] = True
         config['anomaly_detection']['attacks']['ack_flood']['ratio_threshold'] = 0.7
+        config['anomaly_detection']['attacks']['ack_flood']['min_packets'] = 200
         config['anomaly_detection']['attacks']['ack_flood']['block_duration'] = 60
 
         # 禁用认证
@@ -167,7 +171,7 @@ class RhoAiasProcess:
                 self.process.wait(timeout=5)
                 logger.info("rho-aias stopped")
             except subprocess.TimeoutExpired:
-                os.killpg(os.get.getpgid(self.process.pid), signal.SIGKILL)
+                os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
                 logger.info("rho-aias killed")
             except Exception as e:
                 logger.error(f"Error stopping process: {e}")
@@ -416,12 +420,38 @@ class TestDDoSDetection(unittest.TestCase):
         )
         return self.rho_process.start()
 
-    def test_01_tcp_syn_flood(self):
-        """测试 TCP SYN Flood 检测"""
+    def _verify_ip_blocked(self, attack_type: str) -> bool:
+        """验证攻击源 IP 是否被 anomaly 规则封禁"""
+        if not self.api_client:
+            return False
+        try:
+            success, result = self.api_client.get_rules(source="anomaly")
+            if success and result:
+                rules = result.get('data', result) if isinstance(result, dict) else []
+                if isinstance(rules, dict):
+                    rules = rules.get('rules', [])
+                if isinstance(rules, list):
+                    for rule in rules:
+                        ip = rule.get('ip', rule.get('cidr', ''))
+                        if ip == '10.0.1.2':
+                            reason = rule.get('reason', '')
+                            logger.info(f"IP 10.0.1.2 blocked by anomaly rule: {reason}")
+                            return True
+                logger.warning(f"No anomaly rule found for IP 10.0.1.2 after {attack_type}")
+                return False
+            else:
+                logger.warning(f"Failed to query anomaly rules: {result}")
+                return False
+        except Exception as e:
+            logger.warning(f"Error verifying IP block: {e}")
+            return False
+
+    def _run_flood_test(self, attack_type: str, flood_func, *args, **kwargs):
+        """通用的 flood 测试流程：启动服务 -> 发送流量 -> 验证封禁"""
         # 启动 rho-aias
         self.assertTrue(
             self._start_rho_with_anomaly(),
-            "Failed to start rho-aias"
+            f"Failed to start rho-aias for {attack_type} test"
         )
 
         # 等待初始化完成
@@ -430,11 +460,11 @@ class TestDDoSDetection(unittest.TestCase):
         # 创建流量生成器
         self.traffic_gen = TrafficGenerator(self.env)
 
-        # 生成 TCP SYN Flood 流量
-        self.traffic_gen.generate_tcp_syn_flood("10.0.1.1", 80, 200)
+        # 生成攻击流量
+        flood_func(*args, **kwargs)
 
         # 持续一段时间让检测系统工作
-        logger.info("Running SYN flood for 10 seconds...")
+        logger.info(f"Running {attack_type} for 10 seconds...")
         time.sleep(10)
 
         # 停止流量
@@ -443,90 +473,46 @@ class TestDDoSDetection(unittest.TestCase):
         # 等待检测生效
         time.sleep(3)
 
-        # 验证检测生效（ns1 的 IP 应该被暂时封禁）
-        # 注意：实际检测可能需要更长时间，这里只是验证功能不崩溃
-        logger.info("TCP SYN Flood test completed")
+        # 验证封禁
+        blocked = self._verify_ip_blocked(attack_type)
+        self.assertTrue(
+            blocked,
+            f"{attack_type}: attack source IP 10.0.1.2 should be blocked by anomaly detection"
+        )
+
+        logger.info(f"{attack_type} test completed successfully")
+
+    def test_01_tcp_syn_flood(self):
+        """测试 TCP SYN Flood 检测"""
+        self._run_flood_test(
+            "TCP SYN Flood",
+            self.traffic_gen.generate_tcp_syn_flood if self.traffic_gen else TrafficGenerator(self.env).generate_tcp_syn_flood,
+            "10.0.1.1", 80, 200
+        )
 
     def test_02_udp_flood(self):
         """测试 UDP Flood 检测"""
-        # 启动 rho-aias
-        self.assertTrue(
-            self._start_rho_with_anomaly(),
-            "Failed to start rho-aias"
+        self._run_flood_test(
+            "UDP Flood",
+            self.traffic_gen.generate_udp_flood if self.traffic_gen else TrafficGenerator(self.env).generate_udp_flood,
+            "10.0.1.1", 53, 200
         )
-
-        # 等待初始化完成
-        time.sleep(3)
-
-        # 创建流量生成器
-        self.traffic_gen = TrafficGenerator(self.env)
-
-        # 生成 UDP Flood 流量
-        self.traffic_gen.generate_udp_flood("10.0.1.1", 53, 200)
-
-        # 持续一段时间
-        logger.info("Running UDP flood for 10 seconds...")
-        time.sleep(10)
-
-        # 停止流量
-        self.traffic_gen.stop()
-
-        time.sleep(3)
-        logger.info("UDP Flood test completed")
 
     def test_03_icmp_flood(self):
         """测试 ICMP Flood 检测"""
-        # 启动 rho-aias
-        self.assertTrue(
-            self._start_rho_with_anomaly(),
-            "Failed to start rho-aias"
+        self._run_flood_test(
+            "ICMP Flood",
+            self.traffic_gen.generate_icmp_flood if self.traffic_gen else TrafficGenerator(self.env).generate_icmp_flood,
+            "10.0.1.1", 200
         )
-
-        # 等待初始化完成
-        time.sleep(3)
-
-        # 创建流量生成器
-        self.traffic_gen = TrafficGenerator(self.env)
-
-        # 生成 ICMP Flood 流量
-        self.traffic_gen.generate_icmp_flood("10.0.1.1", 200)
-
-        # 持续一段时间
-        logger.info("Running ICMP flood for 10 seconds...")
-        time.sleep(10)
-
-        # 停止流量
-        self.traffic_gen.stop()
-
-        time.sleep(3)
-        logger.info("ICMP Flood test completed")
 
     def test_04_ack_flood(self):
         """测试 ACK Flood 检测"""
-        # 启动 rho-aias
-        self.assertTrue(
-            self._start_rho_with_anomaly(),
-            "Failed to start rho-aias"
+        self._run_flood_test(
+            "ACK Flood",
+            self.traffic_gen.generate_tcp_ack_flood if self.traffic_gen else TrafficGenerator(self.env).generate_tcp_ack_flood,
+            "10.0.1.1", 80, 200
         )
-
-        # 等待初始化完成
-        time.sleep(3)
-
-        # 创建流量生成器
-        self.traffic_gen = TrafficGenerator(self.env)
-
-        # 生成 ACK Flood 流量
-        self.traffic_gen.generate_tcp_ack_flood("10.0.1.1", 80, 200)
-
-        # 持续一段时间
-        logger.info("Running ACK flood for 10 seconds...")
-        time.sleep(10)
-
-        # 停止流量
-        self.traffic_gen.stop()
-
-        time.sleep(3)
-        logger.info("ACK Flood test completed")
 
     def test_05_control_without_detection(self):
         """对照组：不启用检测时系统应正常运行"""
