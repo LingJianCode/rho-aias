@@ -108,10 +108,6 @@ func (x *Xdp) Close() {
 	})
 }
 
-func (x *Xdp) GetLinkType() string {
-	return x.linkType
-}
-
 func (x *Xdp) MonitorEvents() {
 	logger.Info("[XDP] MonitorEvents started")
 	for {
@@ -782,6 +778,46 @@ func (x *Xdp) SetAnomalyConfig(enabled bool, sampleRate uint32) error {
 	config := NewAnomalyConfig(enabled, sampleRate)
 	key := uint32(0)
 	return x.objects.AnomalyConfig.Put(&key, &config)
+}
+
+// SetAnomalyPortFilter 设置异常检测端口过滤
+// enabled: 是否启用端口过滤 (true=仅检测配置的端口, false=检测所有端口)
+// ports: 需要检测的端口列表（同时应用于 TCP 和 UDP）
+func (x *Xdp) SetAnomalyPortFilter(enabled bool, ports []uint32) error {
+	// 更新配置中的 port_filter_enabled 标志
+	key := uint32(0)
+	config := AnomalyConfig{}
+	if err := x.objects.AnomalyConfig.Lookup(&key, &config); err != nil {
+		return err
+	}
+
+	if enabled && len(ports) > 0 {
+		config.PortFilterEnabled = 1
+	} else {
+		config.PortFilterEnabled = 0
+	}
+	if err := x.objects.AnomalyConfig.Put(&key, &config); err != nil {
+		return err
+	}
+
+	if config.PortFilterEnabled == 0 {
+		logger.Info("[XDP] Anomaly port filter disabled")
+		return nil
+	}
+
+	// 删除旧的端口条目并添加新的
+	x.objects.AnomalyPorts.Delete(&key)
+
+	// 添加端口到 map
+	flag := uint32(1)
+	for _, port := range ports {
+		if err := x.objects.AnomalyPorts.Put(&port, &flag); err != nil {
+			logger.Warnf("[XDP] Failed to add anomaly port %d: %v", port, err)
+		}
+	}
+
+	logger.Infof("[XDP] Anomaly port filter enabled, ports: %v", ports)
+	return nil
 }
 
 // GetAnomalyConfig 获取当前异常检测采样配置

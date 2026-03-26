@@ -20,6 +20,7 @@ import (
 	"rho-aias/internal/kernel"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
+	"rho-aias/internal/models"
 	"rho-aias/internal/routers"
 	"rho-aias/internal/services"
 	"rho-aias/internal/threatintel"
@@ -240,6 +241,10 @@ func main() {
 	var wafMonitor *waf.Monitor
 	if cfg.WAF.Enabled {
 		wafMonitor = waf.NewMonitor(&cfg.WAF, xdp, ctx)
+		if db != nil {
+			banRecordService := services.NewBanRecordService(db.DB)
+			wafMonitor.SetBanRecordStore(banRecordService)
+		}
 		if err := wafMonitor.Start(); err != nil {
 			logger.Warnf("[Main] WAF monitor start failed: %v", err)
 		} else {
@@ -301,6 +306,13 @@ func main() {
 				logger.Errorf("[AnomalyDetection] Failed to block IP %s: %v", ip, err)
 				return err
 			}
+			// 持久化封禁记录到数据库
+			if db != nil {
+				banRecordService := services.NewBanRecordService(db.DB)
+				if err := banRecordService.UpsertActiveBan(ip, models.BanSourceAnomaly, reason, duration); err != nil {
+					logger.Warnf("[AnomalyDetection] Failed to persist ban record for IP %s: %v", ip, err)
+				}
+			}
 			logger.Infof("[AnomalyDetection] Blocked IP %s for %ds, reason: %s", ip, duration, reason)
 			return nil
 		}
@@ -312,6 +324,13 @@ func main() {
 			if err != nil {
 				logger.Warnf("[AnomalyDetection] Failed to unblock IP %s: %v", ip, err)
 				return err
+			}
+			// 更新数据库中的封禁状态为已过期
+			if db != nil {
+				banRecordService := services.NewBanRecordService(db.DB)
+				if err := banRecordService.MarkExpired(ip, models.BanSourceAnomaly); err != nil {
+					logger.Warnf("[AnomalyDetection] Failed to mark ban record expired for IP %s: %v", ip, err)
+				}
 			}
 			logger.Infof("[AnomalyDetection] Unblocked IP %s (ban expired)", ip)
 			return nil
@@ -327,6 +346,16 @@ func main() {
 			// 配置 eBPF 异常检测采样
 			if err := xdp.SetAnomalyConfig(true, uint32(cfg.AnomalyDetection.SampleRate)); err != nil {
 				logger.Warnf("[Main] Failed to set anomaly config: %v", err)
+			}
+
+			// 配置 eBPF 异常检测端口过滤
+			ports := make([]uint32, len(cfg.AnomalyDetection.Ports))
+			for i, p := range cfg.AnomalyDetection.Ports {
+				ports[i] = uint32(p)
+			}
+			portFilterEnabled := len(ports) > 0
+			if err := xdp.SetAnomalyPortFilter(portFilterEnabled, ports); err != nil {
+				logger.Warnf("[Main] Failed to set anomaly port filter: %v", err)
 			}
 
 			// 启动异常检测事件监听
@@ -470,6 +499,13 @@ func main() {
 			geoHandle := handles.NewGeoBlockingHandle(geoMgr)
 			routers.RegisterGeoBlockingRoutes(api, geoHandle, casbinEnforcer, authService, apiKeyService)
 		}
+
+		// Register Ban Record routes (需要数据库)
+		if db != nil {
+			banRecordService := services.NewBanRecordService(db.DB)
+			banRecordHandle := handles.NewBanRecordHandle(banRecordService)
+			routers.RegisterBanRecordRoutes(api, banRecordHandle, casbinEnforcer, authService, apiKeyService)
+		}
 	} else {
 		// 认证未启用，所有 API 无保护暴露
 		if !cfg.Auth.Enabled {
@@ -502,6 +538,13 @@ func main() {
 		if cfg.GeoBlocking.Enabled && geoMgr != nil {
 			geoHandle := handles.NewGeoBlockingHandle(geoMgr)
 			routers.RegisterGeoBlockingRoutes(api, geoHandle, nil, nil, nil)
+		}
+
+		// Register Ban Record routes (需要数据库)
+		if db != nil {
+			banRecordService := services.NewBanRecordService(db.DB)
+			banRecordHandle := handles.NewBanRecordHandle(banRecordService)
+			routers.RegisterBanRecordRoutes(api, banRecordHandle, nil, nil, nil)
 		}
 	}
 

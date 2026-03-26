@@ -191,12 +191,6 @@ func TestSourceManualConstant(t *testing.T) {
 	}
 }
 
-func TestErrManualCacheNotFound(t *testing.T) {
-	if ErrManualCacheNotFound.Error() != "manual cache not found" {
-		t.Errorf("Error message = %v, want 'manual cache not found'", ErrManualCacheNotFound)
-	}
-}
-
 func TestManualRuleEntry_Fields(t *testing.T) {
 	entry := ManualRuleEntry{
 		Value:   "192.168.1.0/24",

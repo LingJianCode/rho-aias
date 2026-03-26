@@ -30,7 +30,6 @@ type Detector struct {
 	mu              sync.RWMutex
 	running         bool
 	done            chan struct{}
-	cleanupTicker   *time.Ticker
 	checkTicker     *time.Ticker
 	unblockTimers   map[string]*time.Timer // 保持 timer 引用防止 GC 回收
 	unblockTimersMu sync.Mutex
@@ -55,20 +54,6 @@ func NewDetector(config AnomalyDetectionConfig, blockCallback BlockCallback, unb
 	}
 	if config.SampleRate == 0 {
 		config.SampleRate = 100
-	}
-
-	// 基线配置默认值
-	if config.Baseline.MinSampleCount == 0 {
-		config.Baseline.MinSampleCount = 10
-	}
-	if config.Baseline.SigmaMultiplier == 0 {
-		config.Baseline.SigmaMultiplier = 3.0
-	}
-	if config.Baseline.MinThreshold == 0 {
-		config.Baseline.MinThreshold = 100
-	}
-	if config.Baseline.MaxAge == 0 {
-		config.Baseline.MaxAge = 1800
 	}
 
 	cleanupInterval := time.Duration(config.CleanupInterval) * time.Second
@@ -111,14 +96,12 @@ func (d *Detector) Start() error {
 
 	// 启动定时器
 	d.checkTicker = time.NewTicker(time.Duration(d.config.CheckInterval) * time.Second)
-	d.cleanupTicker = time.NewTicker(time.Duration(d.config.CleanupInterval) * time.Second)
 
 	// 启动协程
 	// 注意：UpdatePPS 和 runDetection 合并在同一个循环中执行，
 	// 先检测再重置 ProtocolStats，避免独立的 ppsTicker 和 checkTicker
 	// 之间的时序竞争导致检测时 ProtocolStats 已被重置。
 	go d.detectionLoop()
-	go d.cleanupLoop()
 
 	d.running = true
 	logger.Info("[AnomalyDetection] Started successfully")
@@ -142,9 +125,6 @@ func (d *Detector) Stop() {
 
 	if d.checkTicker != nil {
 		d.checkTicker.Stop()
-	}
-	if d.cleanupTicker != nil {
-		d.cleanupTicker.Stop()
 	}
 
 	// 停止所有未触发的 unblock timers
@@ -271,26 +251,6 @@ func (d *Detector) scheduleUnblock(ip string, duration int) {
 	})
 	d.unblockTimers[ip] = timer
 	d.unblockTimersMu.Unlock()
-}
-
-// cleanupLoop 清理循环
-func (d *Detector) cleanupLoop() {
-	for {
-		select {
-		case <-d.done:
-			return
-		case <-d.cleanupTicker.C:
-			d.cleanup()
-		}
-	}
-}
-
-// cleanup 清理过期数据
-func (d *Detector) cleanup() {
-	count := d.collector.GetStatsCount()
-	if count > 0 {
-		logger.Debugf("[AnomalyDetection] Cleanup completed, current stats count: %d", count)
-	}
 }
 
 // GetStats 获取检测器统计信息

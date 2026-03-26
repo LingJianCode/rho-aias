@@ -3,7 +3,6 @@
 package manual
 
 import (
-	"errors"
 	"time"
 )
 
@@ -74,8 +73,6 @@ func (d *CacheData) GetValues() []string {
 	return values
 }
 
-var ErrManualCacheNotFound = errors.New("manual cache not found")
-
 // SourceWhitelist 白名单源标识符
 const SourceWhitelist = "whitelist"
 
@@ -123,24 +120,9 @@ func (d *WhitelistCacheData) RemoveWhitelistRule(value string) {
 	d.Timestamp = time.Now().Unix()
 }
 
-// HasWhitelistRule 检查白名单规则是否存在
-func (d *WhitelistCacheData) HasWhitelistRule(value string) bool {
-	_, exists := d.Rules[value]
-	return exists
-}
-
 // WhitelistRuleCount 返回白名单规则总数
 func (d *WhitelistCacheData) WhitelistRuleCount() int {
 	return len(d.Rules)
 }
 
-// GetWhitelistValues 获取所有白名单规则的值列表
-func (d *WhitelistCacheData) GetWhitelistValues() []string {
-	values := make([]string, 0, len(d.Rules))
-	for _, entry := range d.Rules {
-		values = append(values, entry.Value)
-	}
-	return values
-}
 
-var ErrWhitelistCacheNotFound = errors.New("whitelist cache not found")

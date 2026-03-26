@@ -158,8 +158,3 @@ func (fw *FileWriter) GetCurrentFilePath() string {
 	}
 	return ""
 }
-
-// GetLogDir 获取日志目录
-func (fw *FileWriter) GetLogDir() string {
-	return fw.logDir
-}

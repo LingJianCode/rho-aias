@@ -208,30 +208,3 @@ func CheckAndValidate() (CheckResult, error) {
 
 	return result, nil
 }
-
-// CheckAndValidateWithWarning checks the kernel version and logs a warning if below recommended.
-// Returns error only if below minimum requirement.
-func CheckAndValidateWithWarning() (bool, error) {
-	result, err := Check()
-	if err != nil {
-		return false, fmt.Errorf("failed to check kernel version: %w", err)
-	}
-
-	if !result.MeetsMinimum {
-		return false, fmt.Errorf(
-			"kernel version %s does not meet minimum requirements.\n"+
-				"  Current:    %s\n"+
-				"  Minimum:    %s (required for eBPF/XDP support)\n"+
-				"  Recommended: %s (for best stability)\n"+
-				"\n"+
-				"Please upgrade your kernel to at least version %s to run this application.",
-			result.CurrentVersion,
-			result.CurrentVersion,
-			result.MinimumVersion,
-			result.RecommendedVersion,
-			result.MinimumVersion,
-		)
-	}
-
-	return result.MeetsRecommended, nil
-}
