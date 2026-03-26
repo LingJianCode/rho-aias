@@ -8,14 +8,14 @@ import "time"
 
 // AnomalyDetectionConfig 异常检测配置
 type AnomalyDetectionConfig struct {
-	Enabled        bool                 `yaml:"enabled"`         // 总开关
-	SampleRate     int                  `yaml:"sample_rate"`     // 采样率 1/N（100 表示 1%）
-	CheckInterval  int                  `yaml:"check_interval"`  // 检测间隔（秒）
-	MinPackets     int                  `yaml:"min_packets"`     // 最小包数（少于此值不检测）
-	CleanupInterval int                 `yaml:"cleanup_interval"` // 清理过期数据间隔（秒）
-	BlockDuration  int                  `yaml:"block_duration"`  // 临时封禁时长（秒）
-	Baseline       BaselineConfig       `yaml:"baseline"`        // 3σ 基线配置
-	Attacks        AttacksConfig        `yaml:"attacks"`         // 攻击类型配置
+	Enabled         bool           `yaml:"enabled"`          // 总开关
+	SampleRate      int            `yaml:"sample_rate"`      // 采样率 1/N（100 表示 1%）
+	CheckInterval   int            `yaml:"check_interval"`   // 检测间隔（秒）
+	MinPackets      int            `yaml:"min_packets"`      // 最小包数（少于此值不检测）
+	CleanupInterval int            `yaml:"cleanup_interval"` // 清理过期数据间隔（秒）
+	BlockDuration   int            `yaml:"block_duration"`   // 临时封禁时长（秒）
+	Baseline        BaselineConfig `yaml:"baseline"`        // 3σ 基线配置
+	Attacks         AttacksConfig  `yaml:"attacks"`         // 攻击类型配置
 }
 
 // BaselineConfig 3σ 基线检测配置
@@ -46,7 +46,7 @@ type AttackConfig struct {
 // 统计数据类型
 // ============================================
 
-// IPProtocolStats IP 协议统计
+// IPProtocolStats IP 协议统计（按秒窗口，每秒重置）
 type IPProtocolStats struct {
 	TCPCount     uint64 // TCP 包总数
 	TCPSynCount  uint64 // TCP SYN 包数
@@ -90,12 +90,12 @@ func (s *IPProtocolStats) Reset() {
 
 // IPStats IP 统计数据（包含滑动窗口）
 type IPStats struct {
-	IP           string
-	ProtocolStats IPProtocolStats
-	Window       SlidingWindow // 滑动窗口统计
-	Baseline     Baseline      // 基线数据
-	LastUpdate   time.Time
-	FirstSeen    time.Time
+	IP                string
+	ProtocolStats     IPProtocolStats // 当前秒窗口内的协议统计（每秒重置）
+	Window            SlidingWindow   // 滑动窗口统计
+	Baseline          Baseline        // 基线数据
+	LastUpdate        time.Time
+	FirstSeen         time.Time
 }
 
 // SlidingWindow 滑动窗口统计
@@ -151,12 +151,12 @@ func (a AttackType) String() string {
 
 // DetectionResult 检测结果
 type DetectionResult struct {
-	IP           string
-	AttackType   AttackType
-	CurrentPPS   uint64
-	Threshold    float64
-	BlockDuration int // 封禁时长（秒）
-	Timestamp    time.Time
+	IP            string
+	AttackType    AttackType
+	CurrentPPS    uint64
+	Threshold     float64
+	BlockDuration int        // 封禁时长（秒）
+	Timestamp     time.Time
 }
 
 // ============================================
@@ -165,12 +165,12 @@ type DetectionResult struct {
 
 // PacketSample 采样数据包事件（从 eBPF 上报）
 type PacketSample struct {
-	SrcIP      [4]byte // 源 IPv4 地址
-	Protocol   uint8   // 协议类型 (TCP=6, UDP=17, ICMP=1)
-	TCPFlags   uint8   // TCP 标志位 (SYN=0x02, ACK=0x10, etc.)
-	PktSize    uint32  // 数据包大小
-	Timestamp  uint64  // 时间戳（纳秒）
-	Reserved   [2]uint32 // 保留字段
+	SrcIP    [4]byte   // 源 IPv4 地址
+	Protocol uint8     // 协议类型 (TCP=6, UDP=17, ICMP=1)
+	TCPFlags uint8     // TCP 标志位 (SYN=0x02, ACK=0x10, etc.)
+	PktSize  uint32    // 数据包大小
+	Timestamp uint64   // 时间戳（纳秒）
+	Reserved [2]uint32 // 保留字段
 }
 
 // 协议类型常量

@@ -36,7 +36,7 @@ func NewCollector(windowSize int, maxAge time.Duration) *Collector {
 
 // Start 启动收集器
 func (c *Collector) Start() {
-	c.cleanupTicker = time.NewTicker(60 * time.Second)
+	c.cleanupTicker = time.NewTicker(c.maxAge)
 	go c.cleanupLoop()
 }
 
@@ -46,6 +46,17 @@ func (c *Collector) Stop() {
 	if c.cleanupTicker != nil {
 		c.cleanupTicker.Stop()
 	}
+}
+
+// SetCleanupInterval 更新清理间隔
+func (c *Collector) SetCleanupInterval(interval time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cleanupTicker != nil {
+		c.cleanupTicker.Stop()
+	}
+	c.maxAge = interval
+	c.cleanupTicker = time.NewTicker(interval)
 }
 
 // RecordPacket 记录数据包
@@ -71,7 +82,7 @@ func (c *Collector) RecordPacket(ip string, protocol uint8, tcpFlags uint8, pktS
 		c.statsMap[ip] = stats
 	}
 
-	// 更新协议统计（持续累积，直到 IP 被清理或封禁移除）
+	// 更新当前秒窗口内的协议统计（每秒由 UpdatePPS 重置）
 	stats.ProtocolStats.TotalPackets++
 	stats.ProtocolStats.TotalBytes += uint64(pktSize)
 
@@ -110,10 +121,8 @@ func (c *Collector) UpdatePPS() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	now := time.Now()
 	for _, stats := range c.statsMap {
 		// 使用独立的每秒包计数作为当前秒的 PPS
-		// PerSecondPackets 仅用于 PPS 滑动窗口计算
 		stats.Window.CurrentPPS = stats.Window.PerSecondPackets
 
 		// 更新历史数据
@@ -127,11 +136,9 @@ func (c *Collector) UpdatePPS() {
 		}
 		stats.Window.AvgPPS = float64(sum) / float64(stats.Window.WindowSize)
 
-		// 仅重置每秒计数（为下一秒做准备）
-		// 注意：不再重置 ProtocolStats，协议统计持续累积供攻击检测使用
+		// 重置每秒计数和当前秒窗口的协议统计（为下一秒做准备）
 		stats.Window.PerSecondPackets = 0
-
-		_ = now // 避免未使用变量警告
+		stats.ProtocolStats.Reset()
 	}
 }
 
@@ -157,24 +164,35 @@ func (c *Collector) GetAllStats() map[string]*IPStats {
 	return result
 }
 
-// deepCopyIPStats 深拷贝 IPStats，避免切片共享底层数组导致的数据竞争
-func deepCopyIPStats(stats *IPStats) *IPStats {
-	copy := *stats
-	// 深拷贝 PPSHistory 切片，避免与 UpdatePPS 的写入产生数据竞争
-	copy.Window.PPSHistory = make([]uint64, stats.Window.WindowSize)
-	copySlice(copy.Window.PPSHistory, stats.Window.PPSHistory)
-	return &copy
+// UpdateBaseline 更新指定 IP 的基线数据（直接操作原始数据，非深拷贝）
+func (c *Collector) UpdateBaseline(ip string, updateFn func(*Baseline)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	stats, exists := c.statsMap[ip]
+	if exists {
+		updateFn(&stats.Baseline)
+	}
 }
 
-// copySlice 将 src 切片拷贝到 dst 切片
-func copySlice(dst, src []uint64) {
-	minLen := len(dst)
-	if len(src) < minLen {
-		minLen = len(src)
+// GetBaseline 获取指定 IP 的基线数据深拷贝
+func (c *Collector) GetBaseline(ip string) (*Baseline, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	stats, exists := c.statsMap[ip]
+	if !exists {
+		return nil, false
 	}
-	for i := 0; i < minLen; i++ {
-		dst[i] = src[i]
-	}
+	b := stats.Baseline
+	return &b, true
+}
+
+// deepCopyIPStats 深拷贝 IPStats，避免切片共享底层数组导致的数据竞争
+func deepCopyIPStats(stats *IPStats) *IPStats {
+	cp := *stats
+	// 深拷贝 PPSHistory 切片，避免与 UpdatePPS 的写入产生数据竞争
+	cp.Window.PPSHistory = make([]uint64, stats.Window.WindowSize)
+	copy(cp.Window.PPSHistory, stats.Window.PPSHistory)
+	return &cp
 }
 
 // RemoveIP 移除指定 IP 的统计信息

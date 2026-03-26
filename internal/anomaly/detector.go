@@ -33,6 +33,8 @@ type Detector struct {
 	ppsTicker       *time.Ticker
 	cleanupTicker   *time.Ticker
 	checkTicker     *time.Ticker
+	unblockTimers   map[string]*time.Timer // 保持 timer 引用防止 GC 回收
+	unblockTimersMu sync.Mutex
 }
 
 // NewDetector 创建新的异常检测器
@@ -70,19 +72,21 @@ func NewDetector(config AnomalyDetectionConfig, blockCallback BlockCallback, unb
 		config.Baseline.MaxAge = 1800
 	}
 
+	cleanupInterval := time.Duration(config.CleanupInterval) * time.Second
 	maxAge := time.Duration(config.Baseline.MaxAge) * time.Second
-	if config.CleanupInterval > 0 && time.Duration(config.CleanupInterval)*time.Second < maxAge {
-		maxAge = time.Duration(config.CleanupInterval) * time.Second
+	if cleanupInterval < maxAge {
+		maxAge = cleanupInterval
 	}
 
 	return &Detector{
 		config:           config,
-		collector:        NewCollector(60, maxAge), // 60 秒滑动窗口
+		collector:        NewCollector(60, maxAge),
 		baselineDetector: NewBaselineDetector(config.Baseline),
 		attackDetector:   NewAttackDetector(config.Attacks),
 		blockCallback:    blockCallback,
 		unblockCallback:  unblockCallback,
 		done:             make(chan struct{}),
+		unblockTimers:    make(map[string]*time.Timer),
 	}
 }
 
@@ -102,7 +106,8 @@ func (d *Detector) Start() error {
 
 	logger.Info("[AnomalyDetection] Starting anomaly detection system")
 
-	// 启动统计收集器
+	// 启动统计收集器（使用 CleanupInterval 控制清理间隔）
+	d.collector.SetCleanupInterval(time.Duration(d.config.CleanupInterval) * time.Second)
 	d.collector.Start()
 
 	// 启动定时器
@@ -145,6 +150,14 @@ func (d *Detector) Stop() {
 		d.ppsTicker.Stop()
 	}
 
+	// 停止所有未触发的 unblock timers
+	d.unblockTimersMu.Lock()
+	for ip, timer := range d.unblockTimers {
+		timer.Stop()
+		delete(d.unblockTimers, ip)
+	}
+	d.unblockTimersMu.Unlock()
+
 	d.running = false
 	logger.Info("[AnomalyDetection] Stopped")
 }
@@ -174,16 +187,22 @@ func (d *Detector) runDetection() {
 	allStats := d.collector.GetAllStats()
 
 	for ip, stats := range allStats {
-		// 1. 攻击类型检测
+		// 1. 攻击类型检测（使用当前秒窗口的协议统计）
 		attackResults := d.attackDetector.DetectAttack(&stats.ProtocolStats, d.config.MinPackets)
 		for _, result := range attackResults {
 			result.IP = ip
 			d.handleDetection(result)
 		}
 
-		// 2. 3σ 基线检测
+		// 2. 3σ 基线检测（使用当前 PPS）
 		if len(attackResults) == 0 && stats.Window.CurrentPPS > 0 {
-			isAnomaly, threshold := d.baselineDetector.CheckAnomaly(&stats.Baseline, float64(stats.Window.CurrentPPS))
+			// 获取原始基线数据进行检测（非深拷贝，通过 collector 直接访问）
+			baseline, exists := d.collector.GetBaseline(ip)
+			if !exists {
+				continue
+			}
+
+			isAnomaly, threshold := d.baselineDetector.CheckAnomaly(baseline, float64(stats.Window.CurrentPPS))
 			if isAnomaly {
 				result := DetectionResult{
 					IP:            ip,
@@ -195,8 +214,10 @@ func (d *Detector) runDetection() {
 				}
 				d.handleDetection(result)
 			} else {
-				// 更新基线（只有在没有检测到攻击时才更新）
-				d.baselineDetector.UpdateBaseline(&stats.Baseline, float64(stats.Window.CurrentPPS))
+				// 更新基线（通过 collector 直接操作原始数据，避免写入深拷贝丢失）
+				d.collector.UpdateBaseline(ip, func(bl *Baseline) {
+					d.baselineDetector.UpdateBaseline(bl, float64(stats.Window.CurrentPPS))
+				})
 			}
 		}
 	}
@@ -228,14 +249,26 @@ func (d *Detector) handleDetection(result DetectionResult) {
 
 // scheduleUnblock 调度定时解封
 func (d *Detector) scheduleUnblock(ip string, duration int) {
+	// 如果已有该 IP 的 timer，先取消
+	d.unblockTimersMu.Lock()
+	if old, exists := d.unblockTimers[ip]; exists {
+		old.Stop()
+		delete(d.unblockTimers, ip)
+	}
+
 	timer := time.AfterFunc(time.Duration(duration)*time.Second, func() {
 		if d.unblockCallback != nil {
 			if err := d.unblockCallback(ip); err != nil {
 				logger.Warnf("[AnomalyDetection] Failed to unblock IP %s: %v", ip, err)
 			}
 		}
+		// timer 触发后从 map 中移除
+		d.unblockTimersMu.Lock()
+		delete(d.unblockTimers, ip)
+		d.unblockTimersMu.Unlock()
 	})
-	_ = timer // 保持 timer 引用直到触发
+	d.unblockTimers[ip] = timer
+	d.unblockTimersMu.Unlock()
 }
 
 // ppsUpdateLoop PPS 更新循环
@@ -264,7 +297,10 @@ func (d *Detector) cleanupLoop() {
 
 // cleanup 清理过期数据
 func (d *Detector) cleanup() {
-	logger.Debugf("[AnomalyDetection] Cleanup completed, current stats count: %d", d.collector.GetStatsCount())
+	count := d.collector.GetStatsCount()
+	if count > 0 {
+		logger.Debugf("[AnomalyDetection] Cleanup completed, current stats count: %d", count)
+	}
 }
 
 // GetStats 获取检测器统计信息

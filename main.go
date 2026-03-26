@@ -270,21 +270,25 @@ func main() {
 					Enabled:        cfg.AnomalyDetection.Attacks.SynFlood.Enabled,
 					RatioThreshold: cfg.AnomalyDetection.Attacks.SynFlood.RatioThreshold,
 					BlockDuration:  cfg.AnomalyDetection.Attacks.SynFlood.BlockDuration,
+					MinPackets:     cfg.AnomalyDetection.Attacks.SynFlood.MinPackets,
 				},
 				UdpFlood: anomaly.AttackConfig{
 					Enabled:        cfg.AnomalyDetection.Attacks.UdpFlood.Enabled,
 					RatioThreshold: cfg.AnomalyDetection.Attacks.UdpFlood.RatioThreshold,
 					BlockDuration:  cfg.AnomalyDetection.Attacks.UdpFlood.BlockDuration,
+					MinPackets:     cfg.AnomalyDetection.Attacks.UdpFlood.MinPackets,
 				},
 				IcmpFlood: anomaly.AttackConfig{
 					Enabled:        cfg.AnomalyDetection.Attacks.IcmpFlood.Enabled,
 					RatioThreshold: cfg.AnomalyDetection.Attacks.IcmpFlood.RatioThreshold,
 					BlockDuration:  cfg.AnomalyDetection.Attacks.IcmpFlood.BlockDuration,
+					MinPackets:     cfg.AnomalyDetection.Attacks.IcmpFlood.MinPackets,
 				},
 				AckFlood: anomaly.AttackConfig{
 					Enabled:        cfg.AnomalyDetection.Attacks.AckFlood.Enabled,
 					RatioThreshold: cfg.AnomalyDetection.Attacks.AckFlood.RatioThreshold,
 					BlockDuration:  cfg.AnomalyDetection.Attacks.AckFlood.BlockDuration,
+					MinPackets:     cfg.AnomalyDetection.Attacks.AckFlood.MinPackets,
 				},
 			},
 		}
