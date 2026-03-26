@@ -154,6 +154,7 @@ type AttackConfig struct {
 	Enabled        bool    `yaml:"enabled"`
 	RatioThreshold float64 `yaml:"ratio_threshold"` // 协议占比阈值
 	BlockDuration  int     `yaml:"block_duration"`  // 封禁时长（秒）
+	MinPackets     int     `yaml:"min_packets"`     // 触发检测的最小包数（0 表示使用默认值）
 }
 
 func NewConfig(fileName string) *Config {
@@ -276,11 +277,17 @@ func NewConfig(fileName string) *Config {
 	if config.AnomalyDetection.Attacks.SynFlood.BlockDuration == 0 {
 		config.AnomalyDetection.Attacks.SynFlood.BlockDuration = 60
 	}
+	if config.AnomalyDetection.Attacks.SynFlood.MinPackets == 0 {
+		config.AnomalyDetection.Attacks.SynFlood.MinPackets = 1000
+	}
 	if config.AnomalyDetection.Attacks.UdpFlood.RatioThreshold == 0 {
 		config.AnomalyDetection.Attacks.UdpFlood.RatioThreshold = 0.8
 	}
 	if config.AnomalyDetection.Attacks.UdpFlood.BlockDuration == 0 {
 		config.AnomalyDetection.Attacks.UdpFlood.BlockDuration = 60
+	}
+	if config.AnomalyDetection.Attacks.UdpFlood.MinPackets == 0 {
+		config.AnomalyDetection.Attacks.UdpFlood.MinPackets = 1000
 	}
 	if config.AnomalyDetection.Attacks.IcmpFlood.RatioThreshold == 0 {
 		config.AnomalyDetection.Attacks.IcmpFlood.RatioThreshold = 0.5
@@ -288,11 +295,17 @@ func NewConfig(fileName string) *Config {
 	if config.AnomalyDetection.Attacks.IcmpFlood.BlockDuration == 0 {
 		config.AnomalyDetection.Attacks.IcmpFlood.BlockDuration = 60
 	}
+	if config.AnomalyDetection.Attacks.IcmpFlood.MinPackets == 0 {
+		config.AnomalyDetection.Attacks.IcmpFlood.MinPackets = 100
+	}
 	if config.AnomalyDetection.Attacks.AckFlood.RatioThreshold == 0 {
 		config.AnomalyDetection.Attacks.AckFlood.RatioThreshold = 0.8
 	}
 	if config.AnomalyDetection.Attacks.AckFlood.BlockDuration == 0 {
 		config.AnomalyDetection.Attacks.AckFlood.BlockDuration = 60
+	}
+	if config.AnomalyDetection.Attacks.AckFlood.MinPackets == 0 {
+		config.AnomalyDetection.Attacks.AckFlood.MinPackets = 1000
 	}
 
 	// 展开环境变量
