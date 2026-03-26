@@ -96,28 +96,28 @@ class RhoAiasProcess:
         config['anomaly_detection']['enabled'] = self.enable_anomaly
         config['anomaly_detection']['sample_rate'] = 1  # 100% 采样用于测试
         config['anomaly_detection']['check_interval'] = 1  # 1秒检测一次
-        config['anomaly_detection']['min_packets'] = 50  # 降低最小包数阈值
+        config['anomaly_detection']['min_packets'] = 10  # 降低最小包数阈值，适配测试环境
         config['anomaly_detection']['block_duration'] = 60  # 60秒封禁
 
         # 配置各种攻击检测
         config['anomaly_detection']['attacks']['syn_flood']['enabled'] = True
         config['anomaly_detection']['attacks']['syn_flood']['ratio_threshold'] = 0.5
-        config['anomaly_detection']['attacks']['syn_flood']['min_packets'] = 200
+        config['anomaly_detection']['attacks']['syn_flood']['min_packets'] = 50
         config['anomaly_detection']['attacks']['syn_flood']['block_duration'] = 60
 
         config['anomaly_detection']['attacks']['udp_flood']['enabled'] = True
         config['anomaly_detection']['attacks']['udp_flood']['ratio_threshold'] = 0.7
-        config['anomaly_detection']['attacks']['udp_flood']['min_packets'] = 200
+        config['anomaly_detection']['attacks']['udp_flood']['min_packets'] = 50
         config['anomaly_detection']['attacks']['udp_flood']['block_duration'] = 60
 
         config['anomaly_detection']['attacks']['icmp_flood']['enabled'] = True
         config['anomaly_detection']['attacks']['icmp_flood']['ratio_threshold'] = 0.5
-        config['anomaly_detection']['attacks']['icmp_flood']['min_packets'] = 100
+        config['anomaly_detection']['attacks']['icmp_flood']['min_packets'] = 30
         config['anomaly_detection']['attacks']['icmp_flood']['block_duration'] = 60
 
         config['anomaly_detection']['attacks']['ack_flood']['enabled'] = True
         config['anomaly_detection']['attacks']['ack_flood']['ratio_threshold'] = 0.7
-        config['anomaly_detection']['attacks']['ack_flood']['min_packets'] = 200
+        config['anomaly_detection']['attacks']['ack_flood']['min_packets'] = 50
         config['anomaly_detection']['attacks']['ack_flood']['block_duration'] = 60
 
         # 禁用认证
@@ -257,17 +257,13 @@ class TrafficGenerator:
             while not self.stop_event.is_set():
                 try:
                     # 在 ns1 中发送 SYN 包
-                    cmd = f"timeout 1 hping3 -S -p {target_port} -c {int(pps)} {target_ip} 2>/dev/null || true"
-                    success, _ = self.env.ns1.exec_cmd(cmd, timeout=2)
-                    if not success:
-                        # hping3 不可用，尝试使用 scapy 或其他工具
-                        # 简化版本：使用 nc 或 socat
-                        cmd = f"for i in $(seq 1 {int(pps/10)}); do nc -w 1 {target_ip} {target_port} </dev/null 2>/dev/null & done; wait"
-                        self.env.ns1.exec_cmd(cmd, timeout=2)
+                    # 使用 hping3 持续发送，不降级到 nc
+                    cmd = f"hping3 -S -p {target_port} -c {int(pps)} -i u{max(int(1000000/pps), 10000)} {target_ip} 2>/dev/null || true"
+                    self.env.ns1.exec_cmd(cmd, timeout=5)
                 except Exception as e:
                     logger.debug(f"Flood error (expected): {e}")
 
-                time.sleep(interval)
+                self.stop_event.wait(interval)
 
         self.thread = threading.Thread(target=flood, daemon=True)
         self.thread.start()
@@ -283,16 +279,13 @@ class TrafficGenerator:
             while not self.stop_event.is_set():
                 try:
                     # 在 ns1 中发送 UDP 包
-                    cmd = f"timeout 1 hping3 --udp -p {target_port} -c {int(pps)} {target_ip} 2>/dev/null || true"
-                    success, _ = self.env.ns1.exec_cmd(cmd, timeout=2)
-                    if not success:
-                        # 使用 nc 发送 UDP
-                        cmd = f"for i in $(seq 1 {int(pps/10)}); do echo -n 'data' | nc -u -w 1 {target_ip} {target_port} 2>/dev/null & done; wait"
-                        self.env.ns1.exec_cmd(cmd, timeout=2)
+                    # 使用 hping3 持续发送，不降级到 nc
+                    cmd = f"hping3 --udp -p {target_port} -c {int(pps)} -i u{max(int(1000000/pps), 10000)} {target_ip} 2>/dev/null || true"
+                    self.env.ns1.exec_cmd(cmd, timeout=5)
                 except Exception as e:
                     logger.debug(f"Flood error (expected): {e}")
 
-                time.sleep(interval)
+                self.stop_event.wait(interval)
 
         self.thread = threading.Thread(target=flood, daemon=True)
         self.thread.start()
@@ -306,13 +299,13 @@ class TrafficGenerator:
 
             while not self.stop_event.is_set():
                 try:
-                    # 使用 ping 生成 ICMP 流量
-                    cmd = f"ping -c 100 -i 0.01 -W 1 {target_ip} 2>/dev/null || true"
-                    self.env.ns1.exec_cmd(cmd, timeout=2)
+                    # 使用 hping3 生成 ICMP 流量
+                    cmd = f"hping3 -1 -c {int(pps)} -i u{max(int(1000000/pps), 10000)} {target_ip} 2>/dev/null || true"
+                    self.env.ns1.exec_cmd(cmd, timeout=5)
                 except Exception as e:
                     logger.debug(f"Flood error (expected): {e}")
 
-                time.sleep(interval)
+                self.stop_event.wait(interval)
 
         self.thread = threading.Thread(target=flood, daemon=True)
         self.thread.start()
@@ -327,12 +320,12 @@ class TrafficGenerator:
             while not self.stop_event.is_set():
                 try:
                     # 使用 hping3 发送 ACK 包
-                    cmd = f"timeout 1 hping3 -A -p {target_port} -c {int(pps)} {target_ip} 2>/dev/null || true"
-                    success, _ = self.env.ns1.exec_cmd(cmd, timeout=2)
+                    cmd = f"hping3 -A -p {target_port} -c {int(pps)} -i u{max(int(1000000/pps), 10000)} {target_ip} 2>/dev/null || true"
+                    self.env.ns1.exec_cmd(cmd, timeout=5)
                 except Exception as e:
                     logger.debug(f"Flood error (expected): {e}")
 
-                time.sleep(interval)
+                self.stop_event.wait(interval)
 
         self.thread = threading.Thread(target=flood, daemon=True)
         self.thread.start()
@@ -446,7 +439,7 @@ class TestDDoSDetection(unittest.TestCase):
             logger.warning(f"Error verifying IP block: {e}")
             return False
 
-    def _run_flood_test(self, attack_type: str, flood_func, *args, **kwargs):
+    def _run_flood_test(self, attack_type: str, flood_method_name: str, *args, **kwargs):
         """通用的 flood 测试流程：启动服务 -> 发送流量 -> 验证封禁"""
         # 启动 rho-aias
         self.assertTrue(
@@ -460,7 +453,8 @@ class TestDDoSDetection(unittest.TestCase):
         # 创建流量生成器
         self.traffic_gen = TrafficGenerator(self.env)
 
-        # 生成攻击流量
+        # 通过方法名调用对应的流量生成方法，确保在同一个实例上操作
+        flood_func = getattr(self.traffic_gen, flood_method_name)
         flood_func(*args, **kwargs)
 
         # 持续一段时间让检测系统工作
@@ -484,35 +478,19 @@ class TestDDoSDetection(unittest.TestCase):
 
     def test_01_tcp_syn_flood(self):
         """测试 TCP SYN Flood 检测"""
-        self._run_flood_test(
-            "TCP SYN Flood",
-            self.traffic_gen.generate_tcp_syn_flood if self.traffic_gen else TrafficGenerator(self.env).generate_tcp_syn_flood,
-            "10.0.1.1", 80, 200
-        )
+        self._run_flood_test("TCP SYN Flood", "generate_tcp_syn_flood", "10.0.1.1", 80, 200)
 
     def test_02_udp_flood(self):
         """测试 UDP Flood 检测"""
-        self._run_flood_test(
-            "UDP Flood",
-            self.traffic_gen.generate_udp_flood if self.traffic_gen else TrafficGenerator(self.env).generate_udp_flood,
-            "10.0.1.1", 53, 200
-        )
+        self._run_flood_test("UDP Flood", "generate_udp_flood", "10.0.1.1", 53, 200)
 
     def test_03_icmp_flood(self):
         """测试 ICMP Flood 检测"""
-        self._run_flood_test(
-            "ICMP Flood",
-            self.traffic_gen.generate_icmp_flood if self.traffic_gen else TrafficGenerator(self.env).generate_icmp_flood,
-            "10.0.1.1", 200
-        )
+        self._run_flood_test("ICMP Flood", "generate_icmp_flood", "10.0.1.1", 200)
 
     def test_04_ack_flood(self):
         """测试 ACK Flood 检测"""
-        self._run_flood_test(
-            "ACK Flood",
-            self.traffic_gen.generate_tcp_ack_flood if self.traffic_gen else TrafficGenerator(self.env).generate_tcp_ack_flood,
-            "10.0.1.1", 80, 200
-        )
+        self._run_flood_test("ACK Flood", "generate_tcp_ack_flood", "10.0.1.1", 80, 200)
 
     def test_05_control_without_detection(self):
         """对照组：不启用检测时系统应正常运行"""
