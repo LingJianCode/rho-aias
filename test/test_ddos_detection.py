@@ -206,10 +206,6 @@ class APIClient:
             url += f"?source={source}"
         return self._request("GET", url)
 
-    def get_blocklog_stats(self) -> Tuple[bool, dict]:
-        """获取阻断日志统计"""
-        return self._request("GET", "/api/blocklog/stats")
-
     def _request(self, method: str, path: str, data: dict = None) -> Tuple[bool, dict]:
         """发送 HTTP 请求"""
         import urllib.request
@@ -251,13 +247,11 @@ class TrafficGenerator:
         logger.info(f"Starting TCP SYN flood: {target_ip}:{target_port} @ {pps} pps")
 
         def flood():
-            import socket
             interval = 1.0 / pps
 
             while not self.stop_event.is_set():
                 try:
                     # 在 ns1 中发送 SYN 包
-                    # 使用 hping3 持续发送，不降级到 nc
                     cmd = f"hping3 -S -p {target_port} -c {int(pps)} -i u{max(int(1000000/pps), 10000)} {target_ip} 2>/dev/null || true"
                     self.env.ns1.exec_cmd(cmd, timeout=5)
                 except Exception as e:
@@ -273,13 +267,11 @@ class TrafficGenerator:
         logger.info(f"Starting UDP flood: {target_ip}:{target_port} @ {pps} pps")
 
         def flood():
-            import socket
             interval = 1.0 / pps
 
             while not self.stop_event.is_set():
                 try:
                     # 在 ns1 中发送 UDP 包
-                    # 使用 hping3 持续发送，不降级到 nc
                     cmd = f"hping3 --udp -p {target_port} -c {int(pps)} -i u{max(int(1000000/pps), 10000)} {target_ip} 2>/dev/null || true"
                     self.env.ns1.exec_cmd(cmd, timeout=5)
                 except Exception as e:
