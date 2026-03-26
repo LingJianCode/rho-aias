@@ -55,10 +55,3 @@ func (f *Fetcher) Fetch(url string) ([]byte, error) {
 
 	return data, nil
 }
-
-// FetchWithRetry 带重试的获取数据（当前实现不重试，直接返回）
-// 根据需求，失败后等待下一周期，不进行重试
-// maxRetries: 最大重试次数（当前未使用）
-func (f *Fetcher) FetchWithRetry(url string, maxRetries int) ([]byte, error) {
-	return f.Fetch(url)
-}

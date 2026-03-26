@@ -3,8 +3,6 @@ package geoblocking
 
 import (
 	"fmt"
-	"net"
-	"strings"
 	"sync"
 
 	"rho-aias/internal/ebpfs"
@@ -193,45 +191,6 @@ func (s *Syncer) LoadAll(data *GeoIPData, config *GeoConfig) error {
 	}
 
 	return nil
-}
-
-// countryToCode 将国家代码转换为 uint32
-// 例如: "CN" -> 0x434e0000 ('C' << 24 | 'N' << 16)
-func countryToCode(country string) uint32 {
-	if len(country) < 2 {
-		return 0
-	}
-	// 将两个字符转换为 uint32 (大端序)
-	code := uint32(country[0])<<24 | uint32(country[1])<<16
-	return code
-}
-
-// cidrToLPMKey 将 CIDR 字符串转换为 LPM trie key
-// 格式: "1.0.0.0/24,CN" -> prefixlen=24, addr=1.0.0.0
-func cidrToLPMKey(cidrWithCountry string) (uint32, []byte, error) {
-	// 分离 CIDR 和国家代码
-	parts := strings.Split(cidrWithCountry, ",")
-	if len(parts) < 1 {
-		return 0, nil, fmt.Errorf("invalid format")
-	}
-
-	cidr := parts[0]
-
-	// 解析 CIDR
-	_, ipNet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return 0, nil, fmt.Errorf("parse CIDR failed: %w", err)
-	}
-
-	ones, _ := ipNet.Mask.Size()
-
-	// 将 IP 地址转换为 4 字节
-	ip := ipNet.IP.To4()
-	if ip == nil {
-		return 0, nil, fmt.Errorf("not an IPv4 address")
-	}
-
-	return uint32(ones), ip, nil
 }
 
 // addPrivateNetworks 添加私有网段到 GeoIP whitelist
