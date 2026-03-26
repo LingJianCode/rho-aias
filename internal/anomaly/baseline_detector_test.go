@@ -3,6 +3,7 @@ package anomaly
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func TestBaselineDetector_UpdateBaseline(t *testing.T) {
@@ -183,5 +184,186 @@ func TestBaselineDetector_DefaultConfig(t *testing.T) {
 	}
 	if detector.config.MaxAge != 1800 {
 		t.Errorf("Expected default MaxAge=1800, got %d", detector.config.MaxAge)
+	}
+}
+
+// ============================================
+// 补充测试：零方差、过期、重置
+// ============================================
+
+func TestBaselineDetector_ZeroVariance(t *testing.T) {
+	// 所有值相同 → 方差为 0，标准差为 0
+	detector := NewBaselineDetector(BaselineConfig{
+		MinSampleCount:  5,
+		SigmaMultiplier: 3.0,
+		MinThreshold:    10,
+	})
+
+	baseline := &Baseline{}
+	for i := 0; i < 10; i++ {
+		detector.UpdateBaseline(baseline, 100.0)
+	}
+
+	// 均值应为 100
+	if math.Abs(baseline.Mean-100.0) > 0.001 {
+		t.Errorf("Expected Mean=100.0, got %f", baseline.Mean)
+	}
+
+	// M2 应接近 0（数值精度范围内）
+	if baseline.M2 > 1e-10 {
+		t.Errorf("Expected M2≈0 for constant values, got %f", baseline.M2)
+	}
+
+	// 检查异常：value=100 不应触发（阈值 = 100 + 3*0 = 100，不严格大于）
+	isAnomaly, threshold := detector.CheckAnomaly(baseline, 100)
+	if isAnomaly {
+		t.Error("Expected no anomaly for value equal to mean with zero variance")
+	}
+	if math.Abs(threshold-100.0) > 0.001 {
+		t.Errorf("Expected threshold=100.0, got %f", threshold)
+	}
+
+	// value=101 应触发（101 > 100）
+	isAnomaly, threshold = detector.CheckAnomaly(baseline, 101)
+	if !isAnomaly {
+		t.Error("Expected anomaly for value slightly above mean with zero variance")
+	}
+}
+
+func TestBaselineDetector_ShouldReset(t *testing.T) {
+	detector := NewBaselineDetector(BaselineConfig{
+		MinSampleCount:  5,
+		SigmaMultiplier: 3.0,
+		MinThreshold:    0,
+		MaxAge:          1, // 1秒过期
+	})
+
+	baseline := &Baseline{}
+
+	// 空基线不应重置
+	if detector.ShouldReset(baseline) {
+		t.Error("Expected ShouldReset=false for empty baseline")
+	}
+
+	// 更新基线
+	detector.UpdateBaseline(baseline, 100.0)
+
+	// 刚更新，不应重置
+	if detector.ShouldReset(baseline) {
+		t.Error("Expected ShouldReset=false for freshly updated baseline")
+	}
+
+	// 等待过期
+	time.Sleep(1500 * time.Millisecond)
+
+	// 过期后应重置
+	if !detector.ShouldReset(baseline) {
+		t.Error("Expected ShouldReset=true for expired baseline")
+	}
+}
+
+func TestBaselineDetector_ResetBaseline(t *testing.T) {
+	detector := NewBaselineDetector(BaselineConfig{
+		MinSampleCount:  5,
+		SigmaMultiplier: 3.0,
+		MinThreshold:    0,
+	})
+
+	baseline := &Baseline{}
+	// 填充数据
+	for i := 0; i < 20; i++ {
+		detector.UpdateBaseline(baseline, float64(100+i))
+	}
+
+	// 确认有数据
+	if baseline.Count != 20 {
+		t.Fatalf("Expected Count=20, got %d", baseline.Count)
+	}
+
+	// 重置
+	detector.ResetBaseline(baseline)
+
+	if baseline.Mean != 0 {
+		t.Errorf("Expected Mean=0 after reset, got %f", baseline.Mean)
+	}
+	if baseline.M2 != 0 {
+		t.Errorf("Expected M2=0 after reset, got %f", baseline.M2)
+	}
+	if baseline.Count != 0 {
+		t.Errorf("Expected Count=0 after reset, got %d", baseline.Count)
+	}
+	if !baseline.LastUpdated.IsZero() {
+		t.Error("Expected LastUpdated to be zero after reset")
+	}
+
+	// 重置后不应检测到异常
+	isAnomaly, _ := detector.CheckAnomaly(baseline, 1000)
+	if isAnomaly {
+		t.Error("Expected no anomaly after baseline reset (insufficient samples)")
+	}
+}
+
+func TestBaselineDetector_UpdateResetOnExpired(t *testing.T) {
+	detector := NewBaselineDetector(BaselineConfig{
+		MinSampleCount:  5,
+		SigmaMultiplier: 3.0,
+		MinThreshold:    0,
+		MaxAge:          1, // 1秒过期
+	})
+
+	baseline := &Baseline{}
+	// 建立基线
+	for i := 0; i < 10; i++ {
+		detector.UpdateBaseline(baseline, 100.0)
+	}
+
+	if baseline.Count != 10 {
+		t.Fatalf("Expected Count=10, got %d", baseline.Count)
+	}
+
+	// 等待过期
+	time.Sleep(1500 * time.Millisecond)
+
+	// 再次更新（应自动重置后重新计算）
+	detector.UpdateBaseline(baseline, 200.0)
+
+	// Count 应为 1（重置后重新开始）
+	if baseline.Count != 1 {
+		t.Errorf("Expected Count=1 after auto-reset, got %d", baseline.Count)
+	}
+	// Mean 应为 200.0
+	if math.Abs(baseline.Mean-200.0) > 0.001 {
+		t.Errorf("Expected Mean=200.0 after auto-reset, got %f", baseline.Mean)
+	}
+}
+
+func TestBaselineDetector_CheckAnomaly_ExactThreshold(t *testing.T) {
+	detector := NewBaselineDetector(BaselineConfig{
+		MinSampleCount:  3,
+		SigmaMultiplier: 2.0,
+		MinThreshold:    50, // 设置足够低的阈值
+	})
+
+	// 均值=50, 方差=M2/(n-1), 用固定基线
+	baseline := &Baseline{
+		Mean:  50.0,
+		M2:    200.0, // 方差 = 200/2 = 100, 标准差 = 10
+		Count: 3,
+	}
+
+	// 阈值 = 50 + 2*10 = 70
+	isAnomaly, threshold := detector.CheckAnomaly(baseline, 70)
+	if threshold != 70.0 {
+		t.Errorf("Expected threshold=70.0, got %f", threshold)
+	}
+	// 恰好等于阈值，不触发（使用 >）
+	if isAnomaly {
+		t.Error("Expected no anomaly when value equals threshold")
+	}
+
+	// 超过阈值，触发
+	isAnomaly, _ = detector.CheckAnomaly(baseline, 71)
+	if !isAnomaly {
+		t.Error("Expected anomaly when value exceeds threshold")
 	}
 }
