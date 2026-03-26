@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
@@ -31,6 +32,7 @@ type Xdp struct {
 	linkType      string
 	callback      BlockLogCallback // 阻断事件回调
 	closeMu       sync.Mutex       // 保护 Close/Start 的并发安全
+	anomalyPorts  []uint32         // 已配置的异常检测端口列表（用于 ARRAY 清理）
 }
 
 func NewXdp(interface_name string) *Xdp {
@@ -106,6 +108,54 @@ func (x *Xdp) Close() {
 			x.objects.Close()
 		}
 	})
+}
+
+// ============================================
+// Feature Flags 相关方法 (空 map 快速跳过优化)
+// ============================================
+
+const (
+	featureWhitelist = 1 << 0 // whitelist maps have entries
+	featureBlacklist = 1 << 1 // blacklist maps have entries
+)
+
+// updateFeatureFlags 扫描所有白名单/黑名单 map，更新 feature_flags 位图
+// 由用户空间在规则增删后调用，使 eBPF 跳过空 map 的无用 lookup
+func (x *Xdp) updateFeatureFlags() {
+	if x.objects == nil {
+		return
+	}
+
+	flags := uint32(0)
+
+	// 检查白名单 maps 是否有条目
+	if x.mapHasEntries(x.objects.WhitelistIpv4List) ||
+		x.mapHasEntries(x.objects.WhitelistIpv4CidrTrie) ||
+		x.mapHasEntries(x.objects.WhitelistIpv6List) ||
+		x.mapHasEntries(x.objects.WhitelistIpv6CidrTrie) {
+		flags |= featureWhitelist
+	}
+
+	// 检查黑名单 maps 是否有条目
+	if x.mapHasEntries(x.objects.BlockIpv4List) ||
+		x.mapHasEntries(x.objects.BlockIpv4CidrTrie) ||
+		x.mapHasEntries(x.objects.BlockIpv6List) ||
+		x.mapHasEntries(x.objects.BlockIpv6CidrTrie) {
+		flags |= featureBlacklist
+	}
+
+	key := uint32(0)
+	if err := x.objects.FeatureFlags.Put(&key, &flags); err != nil {
+		logger.Warnf("[XDP] Failed to update feature flags: %v", err)
+	}
+}
+
+// mapHasEntries 检查 eBPF map 是否包含任何条目
+func (x *Xdp) mapHasEntries(m *ebpf.Map) bool {
+	iter := m.Iterate()
+	var k, v []byte
+	has := iter.Next(&k, &v)
+	return has
 }
 
 func (x *Xdp) MonitorEvents() {
@@ -282,7 +332,11 @@ func (x *Xdp) AddRule(value string) error {
 	logger.Debugf("[XDP] AddRule: bytes=%v, iptype=%v", bytes, iptype)
 	// 手动规则设置 MANUAL 位 (0x04)
 	blockValue := NewBlockValue(SourceMaskManual)
-	return x.updateMap(iptype, bytes, blockValue, true)
+	err = x.updateMap(iptype, bytes, blockValue, true)
+	if err == nil {
+		x.updateFeatureFlags()
+	}
+	return err
 }
 
 // DeleteRule 删除规则（完全删除，不论来源）
@@ -292,7 +346,11 @@ func (x *Xdp) DeleteRule(value string) error {
 		return err
 	}
 	// 传入空的 BlockValue 用于删除（实际不会使用）
-	return x.updateMap(iptype, bytes, BlockValue{}, false)
+	err = x.updateMap(iptype, bytes, BlockValue{}, false)
+	if err == nil {
+		x.updateFeatureFlags()
+	}
+	return err
 }
 
 // AddRuleWithSource 添加指定来源的规则
@@ -302,7 +360,11 @@ func (x *Xdp) AddRuleWithSource(value string, sourceMask uint32) error {
 		return err
 	}
 	blockValue := NewBlockValue(sourceMask)
-	return x.updateMap(iptype, bytes, blockValue, true)
+	err = x.updateMap(iptype, bytes, blockValue, true)
+	if err == nil {
+		x.updateFeatureFlags()
+	}
+	return err
 }
 
 // AddRuleWithSourceAndExpiry 添加带过期时间的规则
@@ -316,7 +378,11 @@ func (x *Xdp) AddRuleWithSourceAndExpiry(value string, sourceMask uint32, durati
 	if duration > 0 {
 		blockValue.Expiry = uint64(time.Now().Unix()) + uint64(duration)
 	}
-	return x.updateMap(iptype, bytes, blockValue, true)
+	err = x.updateMap(iptype, bytes, blockValue, true)
+	if err == nil {
+		x.updateFeatureFlags()
+	}
+	return err
 }
 
 func (x *Xdp) GetRule() ([]Rule, error) {
@@ -429,6 +495,7 @@ func (x *Xdp) BatchAddRules(values []string, sourceMask uint32) error {
 		}
 	}
 
+	x.updateFeatureFlags()
 	return nil
 }
 
@@ -440,6 +507,7 @@ func (x *Xdp) BatchDeleteRules(values []string) error {
 			errs = append(errs, err)
 		}
 	}
+	// DeleteRule 已在每次成功删除后调用 updateFeatureFlags
 	if len(errs) > 0 {
 		return fmt.Errorf("batch delete failed with %d errors, first: %v", len(errs), errs[0])
 	}
@@ -801,20 +869,31 @@ func (x *Xdp) SetAnomalyPortFilter(enabled bool, ports []uint32) error {
 	}
 
 	if config.PortFilterEnabled == 0 {
+		// 清除之前设置的端口（ARRAY map 需要逐个清零）
+		for _, oldPort := range x.anomalyPorts {
+			zero := uint32(0)
+			x.objects.AnomalyPorts.Put(&oldPort, &zero)
+		}
+		x.anomalyPorts = nil
 		logger.Info("[XDP] Anomaly port filter disabled")
 		return nil
 	}
 
-	// 删除旧的端口条目并添加新的
-	x.objects.AnomalyPorts.Delete(&key)
+	// 清除旧端口，设置新端口（ARRAY map 需要显式清零旧条目）
+	for _, oldPort := range x.anomalyPorts {
+		zero := uint32(0)
+		x.objects.AnomalyPorts.Put(&oldPort, &zero)
+	}
 
-	// 添加端口到 map
+	// 添加端口到 ARRAY map
 	flag := uint32(1)
 	for _, port := range ports {
 		if err := x.objects.AnomalyPorts.Put(&port, &flag); err != nil {
 			logger.Warnf("[XDP] Failed to add anomaly port %d: %v", port, err)
 		}
 	}
+	x.anomalyPorts = make([]uint32, len(ports))
+	copy(x.anomalyPorts, ports)
 
 	logger.Infof("[XDP] Anomaly port filter enabled, ports: %v", ports)
 	return nil
@@ -896,7 +975,11 @@ func (x *Xdp) AddWhitelistRule(value string) error {
 		return fmt.Errorf("whitelist does not support MAC addresses: %s", value)
 	}
 	logger.Debugf("[Whitelist] AddRule: value=%s, iptype=%v", value, iptype)
-	return x.updateWhitelistMap(iptype, b, true)
+	err = x.updateWhitelistMap(iptype, b, true)
+	if err == nil {
+		x.updateFeatureFlags()
+	}
+	return err
 }
 
 // DeleteWhitelistRule 删除白名单规则
@@ -907,7 +990,11 @@ func (x *Xdp) DeleteWhitelistRule(value string) error {
 		return fmt.Errorf("invalid whitelist value %s: %w", value, err)
 	}
 	logger.Debugf("[Whitelist] DeleteRule: value=%s, iptype=%v", value, iptype)
-	return x.updateWhitelistMap(iptype, b, false)
+	err = x.updateWhitelistMap(iptype, b, false)
+	if err == nil {
+		x.updateFeatureFlags()
+	}
+	return err
 }
 
 // GetWhitelistRules 获取所有白名单规则
@@ -1026,8 +1113,8 @@ func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback) {
 			continue
 		}
 
-		// 解析源 IP 地址（仅 IPv4）
-		srcIP := formatIP(pi.SrcIP, [16]byte{}, 0x0800) // ETH_P_IP
+		// 解析源 IP 地址（支持 IPv4 和 IPv6）
+		srcIP := formatIP(pi.SrcIP, pi.SrcIPv6, uint16(pi.EthProto))
 
 		// 触发回调
 		if callback != nil {
