@@ -30,7 +30,6 @@ type Detector struct {
 	mu              sync.RWMutex
 	running         bool
 	done            chan struct{}
-	ppsTicker       *time.Ticker
 	cleanupTicker   *time.Ticker
 	checkTicker     *time.Ticker
 	unblockTimers   map[string]*time.Timer // 保持 timer 引用防止 GC 回收
@@ -113,11 +112,12 @@ func (d *Detector) Start() error {
 	// 启动定时器
 	d.checkTicker = time.NewTicker(time.Duration(d.config.CheckInterval) * time.Second)
 	d.cleanupTicker = time.NewTicker(time.Duration(d.config.CleanupInterval) * time.Second)
-	d.ppsTicker = time.NewTicker(1 * time.Second) // 每秒更新 PPS
 
-	// 启动检测协程
+	// 启动协程
+	// 注意：UpdatePPS 和 runDetection 合并在同一个循环中执行，
+	// 先检测再重置 ProtocolStats，避免独立的 ppsTicker 和 checkTicker
+	// 之间的时序竞争导致检测时 ProtocolStats 已被重置。
 	go d.detectionLoop()
-	go d.ppsUpdateLoop()
 	go d.cleanupLoop()
 
 	d.running = true
@@ -146,9 +146,6 @@ func (d *Detector) Stop() {
 	if d.cleanupTicker != nil {
 		d.cleanupTicker.Stop()
 	}
-	if d.ppsTicker != nil {
-		d.ppsTicker.Stop()
-	}
 
 	// 停止所有未触发的 unblock timers
 	d.unblockTimersMu.Lock()
@@ -171,13 +168,18 @@ func (d *Detector) RecordPacket(ip string, protocol uint8, tcpFlags uint8, pktSi
 }
 
 // detectionLoop 检测循环
+// UpdatePPS 和 runDetection 合并在同一个循环中，先检测再重置 ProtocolStats，
+// 避免独立的 ppsTicker 和 checkTicker 之间的时序竞争导致检测时数据已被重置。
 func (d *Detector) detectionLoop() {
 	for {
 		select {
 		case <-d.done:
 			return
 		case <-d.checkTicker.C:
+			// 先执行检测（使用当前窗口累积的 ProtocolStats）
 			d.runDetection()
+			// 检测完成后再更新 PPS（重置 ProtocolStats，为下一个窗口做准备）
+			d.collector.UpdatePPS()
 		}
 	}
 }
@@ -269,18 +271,6 @@ func (d *Detector) scheduleUnblock(ip string, duration int) {
 	})
 	d.unblockTimers[ip] = timer
 	d.unblockTimersMu.Unlock()
-}
-
-// ppsUpdateLoop PPS 更新循环
-func (d *Detector) ppsUpdateLoop() {
-	for {
-		select {
-		case <-d.done:
-			return
-		case <-d.ppsTicker.C:
-			d.collector.UpdatePPS()
-		}
-	}
 }
 
 // cleanupLoop 清理循环
