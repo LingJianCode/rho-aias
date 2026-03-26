@@ -108,10 +108,6 @@ func (x *Xdp) Close() {
 	})
 }
 
-func (x *Xdp) GetLinkType() string {
-	return x.linkType
-}
-
 func (x *Xdp) MonitorEvents() {
 	logger.Info("[XDP] MonitorEvents started")
 	for {

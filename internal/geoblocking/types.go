@@ -41,14 +41,6 @@ type GeoConfig struct {
 	AllowPrivateNetworks bool // 允许私有网段绕过地域检查
 }
 
-// Validate 验证配置
-func (c *GeoConfig) Validate() error {
-	if c.Enabled && c.Mode == "whitelist" && len(c.AllowedCountries) == 0 {
-		return errors.New("whitelist mode requires allowed_countries")
-	}
-	return nil
-}
-
 // Status 地域封禁模块状态
 type Status struct {
 	Enabled          bool                      // 实际是否在过滤（数据已加载并激活）

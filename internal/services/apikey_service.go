@@ -208,18 +208,3 @@ func (s *APIKeyService) ValidateAPIKey(key string) (*models.APIKey, error) {
 
 	return &apiKey, nil
 }
-
-// GetAPIKeyPermissions 获取 API Key 的权限列表
-func (s *APIKeyService) GetAPIKeyPermissions(keyHash string) ([]string, error) {
-	var apiKey models.APIKey
-	if err := s.db.Where("key = ?", keyHash).First(&apiKey).Error; err != nil {
-		return nil, fmt.Errorf("failed to find api key: %w", err)
-	}
-
-	var permissions []string
-	if err := json.Unmarshal([]byte(apiKey.Permissions), &permissions); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal permissions: %w", err)
-	}
-
-	return permissions, nil
-}

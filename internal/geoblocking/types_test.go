@@ -102,69 +102,6 @@ func TestSourceIDConstants(t *testing.T) {
 	}
 }
 
-func TestGeoConfig_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  GeoConfig
-		wantErr bool
-	}{
-		{
-			name: "valid whitelist with countries",
-			config: GeoConfig{
-				Enabled:          true,
-				Mode:             "whitelist",
-				AllowedCountries: []string{"CN", "US"},
-			},
-			wantErr: false,
-		},
-		{
-			name: "whitelist without countries",
-			config: GeoConfig{
-				Enabled:          true,
-				Mode:             "whitelist",
-				AllowedCountries: []string{},
-			},
-			wantErr: true,
-		},
-		{
-			name: "whitelist with nil countries",
-			config: GeoConfig{
-				Enabled:          true,
-				Mode:             "whitelist",
-				AllowedCountries: nil,
-			},
-			wantErr: true,
-		},
-		{
-			name: "disabled whitelist without countries",
-			config: GeoConfig{
-				Enabled:          false,
-				Mode:             "whitelist",
-				AllowedCountries: []string{},
-			},
-			wantErr: false, // Disabled, so no error
-		},
-		{
-			name: "blacklist mode",
-			config: GeoConfig{
-				Enabled:          true,
-				Mode:             "blacklist",
-				AllowedCountries: []string{},
-			},
-			wantErr: false, // Blacklist doesn't require countries
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestStatus_Struct(t *testing.T) {
 	status := Status{
 		Enabled:          true,

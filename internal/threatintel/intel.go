@@ -3,7 +3,6 @@ package threatintel
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -408,11 +407,6 @@ func (m *Manager) Stop() {
 	}
 	close(m.done)
 	logger.Info("[ThreatIntel] Stopped")
-}
-
-// containsCIDR 检查字符串是否是 CIDR 格式（包含 /）
-func containsCIDR(s string) bool {
-	return strings.Contains(s, "/")
 }
 
 // sourceIDToMask 将 SourceID 转换为来源掩码
