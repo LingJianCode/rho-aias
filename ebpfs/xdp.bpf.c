@@ -316,7 +316,7 @@ struct {
  * @iph_len: IP 头部长度
  * @data_end: 数据包结束指针
  * @protocol: IP 协议号
- * 
+ *
  * 填充 pkt_info->ip_protocol, pkt_info->tcp_flags 和 pkt_info->dst_port
  */
 static __always_inline void parse_transport_layer(
@@ -333,25 +333,40 @@ static __always_inline void parse_transport_layer(
     // 只解析 TCP 的标志位和端口
     if (protocol == IPPROTO_TCP) {
         struct tcphdr *tcph = (struct tcphdr *)(ip_data + iph_len);
-        
+
         // 验证 TCP 头边界（至少 20 字节）
         if ((void *)(tcph + 1) > data_end)
             return;
-        
-        // XDP 中直接读取包数据（边界检查已通过，无需 bpf_core_read）
-        // TCP flags 位于 TCP header 第 13 字节，一次读取替代 8 次位域判断
-        pkt_info->tcp_flags = *((__u8 *)tcph + 13);
-        pkt_info->dst_port = tcph->dest;
+
+        // 使用 bpf_core_read 安全读取，避免 eBPF 验证器拒绝直接内存访问
+        struct tcphdr tcp_hdr;
+        if (bpf_core_read(&tcp_hdr, sizeof(tcp_hdr), tcph) == 0) {
+            // 从位域构建标志位
+            __u8 flags = 0;
+            if (tcp_hdr.fin) flags |= 0x01;
+            if (tcp_hdr.syn) flags |= 0x02;
+            if (tcp_hdr.rst) flags |= 0x04;
+            if (tcp_hdr.psh) flags |= 0x08;
+            if (tcp_hdr.ack) flags |= 0x10;
+            if (tcp_hdr.urg) flags |= 0x20;
+            if (tcp_hdr.ece) flags |= 0x40;
+            if (tcp_hdr.cwr) flags |= 0x80;
+            pkt_info->tcp_flags = flags;
+            pkt_info->dst_port = tcp_hdr.dest;
+        }
     } else if (protocol == IPPROTO_UDP) {
         // 解析 UDP 目标端口
         struct udphdr *udph = (struct udphdr *)(ip_data + iph_len);
-        
+
         // 验证 UDP 头边界（至少 8 字节）
         if ((void *)(udph + 1) > data_end)
             return;
-        
-        // XDP 中直接读取包数据（边界检查已通过，无需 bpf_core_read）
-        pkt_info->dst_port = udph->dest;
+
+        // 使用 bpf_core_read 安全读取
+        struct udphdr udp_hdr;
+        if (bpf_core_read(&udp_hdr, sizeof(udp_hdr), udph) == 0) {
+            pkt_info->dst_port = udp_hdr.dest;
+        }
     }
     // ICMP 不需要特殊处理，只需要记录协议类型
 }
@@ -612,16 +627,27 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
                         return 1;
                 }
 
+                // 读取扩展头长度并验证边界
+                __u8 hdrlen = *(__u8 *)(ext_hdr + 1);
+                __u32 ext_hdr_len = (__u32)(hdrlen + 1) * 8;
+
+                // 验证跳过扩展头后仍然在数据包边界内
+                if (ext_hdr + ext_hdr_len > data_end)
+                    return 1;
+
                 // 更新 nexthdr
                 nexthdr = next;
 
                 // 跳过扩展头: 实际长度 = (Hdr Ext Len + 1) × 8 字节
-                __u8 hdrlen = *(__u8 *)(ext_hdr + 1);
-                ext_hdr += (__u32)(hdrlen + 1) * 8;
+                ext_hdr += ext_hdr_len;
             }
         }
 
         // 解析 IPv6 传输层（支持 TCP/UDP 端口和标志位提取，用于异常检测）
+        // 首先验证 ext_hdr 仍然在数据包边界内
+        if (ext_hdr > data_end)
+            return 1;
+
         __u32 ipv6_hdr_len = (__u32)(ext_hdr - (void *)ipv6h);
         parse_transport_layer(pkt_info, (void *)ipv6h, ipv6_hdr_len, data_end, nexthdr);
     } else {
@@ -724,16 +750,21 @@ submit:
                 __u32 random_val = bpf_get_prandom_u32();
                 if ((random_val % sample_rate) == 0) {
                     // 端口过滤检查：如果启用了端口过滤，只上报匹配端口的数据包
+                    // 但是 ICMP/ICMPv6 没有端口，应该始终上报用于 Flood 检测
                     int pass_port_check = 1;
                     if (cfg->port_filter_enabled) {
-                        __u32 port_key = bpf_ntohs(pkt_info->dst_port);
-                        __u32 *port_val = bpf_map_lookup_elem(&anomaly_ports, &port_key);
-                        // ARRAY map: 未设置的端口值为 0
-                        if (!port_val || *port_val == 0) {
-                            pass_port_check = 0;
+                        // ICMP (1) 和 ICMPv6 (58) 绕过端口过滤
+                        if (pkt_info->ip_protocol != IPPROTO_ICMP &&
+                            pkt_info->ip_protocol != 58 /* IPPROTO_ICMPV6 */) {
+                            __u32 port_key = bpf_ntohs(pkt_info->dst_port);
+                            __u32 *port_val = bpf_map_lookup_elem(&anomaly_ports, &port_key);
+                            // ARRAY map: 未设置的端口值为 0
+                            if (!port_val || *port_val == 0) {
+                                pass_port_check = 0;
+                            }
                         }
                     }
-                    
+
                     if (pass_port_check) {
                         // 上报到 anomaly_events ring buffer
                         bpf_ringbuf_output(&anomaly_events, pkt_info, sizeof(*pkt_info), 0);
