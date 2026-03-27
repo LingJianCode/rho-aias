@@ -42,11 +42,12 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 	}
 	logger.Infof("[Manual] Add rule: %s", req.Value)
 
-	// 校验规则格式（IPv4、IPv6、CIDR、MAC）
+	// 校验规则格式（IPv4、IPv6、CIDR，不支持 MAC）
 	value := strings.TrimSpace(req.Value)
-	if utils.ParseStringToIPType(value) == utils.IPTypeUnknown {
+	ipType := utils.ParseStringToIPType(value)
+	if ipType == utils.IPTypeUnknown || ipType == utils.IPTypeMAC {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid rule format: must be a valid IPv4, IPv6, CIDR or MAC address",
+			"error": "invalid rule format: must be a valid IPv4, IPv6, or CIDR address (MAC not supported)",
 		})
 		return
 	}

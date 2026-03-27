@@ -11,7 +11,7 @@ const SourceManual = "manual"
 
 // ManualRuleEntry 单个手动规则条目
 type ManualRuleEntry struct {
-	Value   string    // IP/CIDR/MAC 值
+	Value   string    // IP/CIDR 值
 	AddedAt time.Time // 添加时间
 	Source  string    // 来源 (始终为 "manual")
 }
@@ -20,7 +20,7 @@ type ManualRuleEntry struct {
 type CacheData struct {
 	Version   uint32                       // 版本号
 	Timestamp int64                        // Unix 时间戳
-	Rules     map[string]ManualRuleEntry  // key: value (IP/CIDR/MAC), value: 规则条目
+	Rules     map[string]ManualRuleEntry  // key: value (IP/CIDR), value: 规则条目
 }
 
 // NewCacheData 创建新的缓存数据

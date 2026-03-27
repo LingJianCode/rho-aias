@@ -43,7 +43,7 @@ const (
 
 // Rule 规则结构体 - 包含来源信息
 type Rule struct {
-	Key     string     // IP/CIDR/MAC 地址
+	Key     string     // IP/CIDR 地址
 	Value   BlockValue // 黑名单规则值
 	Sources []string   // 来源列表 (用于显示)
 }

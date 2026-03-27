@@ -515,7 +515,7 @@ func (x *Xdp) BatchDeleteRules(values []string) error {
 }
 
 // UpdateRuleSourceMask 更新规则的来源掩码（按位删除某个来源）
-// value: IP/CIDR/MAC 地址
+// value: IP/CIDR 地址
 // removeMask: 要移除的来源位掩码
 // 返回: 更新后的掩码, 规则是否存在, 是否有变化, 错误
 func (x *Xdp) UpdateRuleSourceMask(value string, removeMask uint32) (newMask uint32, exists bool, changed bool, err error) {
