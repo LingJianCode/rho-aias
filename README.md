@@ -1,6 +1,6 @@
 # rho-aias
 
-**rho-aias** 是一个基于 eBPF 和 XDP（eXpress Data Path）技术的高性能网络防火墙系统，在网络驱动层（L2/L3）拦截和过滤数据包，相比传统的 netfilter/iptables 具有更优的性能。
+**rho-aias** 是一个基于 eBPF 和 XDP（eXpress Data Path）技术的高性能网络防火墙系统，在网络驱动层（L3）拦截和过滤数据包，相比传统的 netfilter/iptables 具有更优的性能。
 
 ## 功能特性
 
