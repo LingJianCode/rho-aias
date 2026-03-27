@@ -22,7 +22,7 @@ services:
 
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy/config:/root/.config/caddy/autosave.json
+      - ./caddy/config:/root/.config
       - ./caddy/data:/root/.local/share/caddy
       - ./logs/caddy:/logs
 
