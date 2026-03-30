@@ -18,17 +18,24 @@ type rule struct {
 
 // ManualHandle 手动规则管理 API 处理器
 type ManualHandle struct {
-	xdp   *ebpfs.Xdp
-	cache *manual.Cache
-	mu    sync.Mutex // 保护缓存 read-modify-write 的原子性
+	xdp     *ebpfs.Xdp
+	cache   *manual.Cache
+	mu      sync.Mutex // 保护缓存 read-modify-write 的原子性
+	checker *manual.WhitelistChecker // 用户态白名单检查器（可选）
 }
 
 // NewManualHandle 创建新的手动规则处理器
-func NewManualHandle(xdp *ebpfs.Xdp, cache *manual.Cache) *ManualHandle {
+func NewManualHandle(xdp *ebpfs.Xdp, cache *manual.Cache, checker *manual.WhitelistChecker) *ManualHandle {
 	return &ManualHandle{
-		xdp:   xdp,
-		cache: cache,
+		xdp:     xdp,
+		cache:   cache,
+		checker: checker,
 	}
+}
+
+// SetWhitelistChecker 设置白名单检查器（支持延迟注入）
+func (m *ManualHandle) SetWhitelistChecker(checker *manual.WhitelistChecker) {
+	m.checker = checker
 }
 
 // AddRule 添加过滤规则
@@ -48,6 +55,15 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 	if ipType == utils.IPTypeUnknown || ipType == utils.IPTypeMAC {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "invalid rule format: must be a valid IPv4, IPv6, or CIDR address (MAC not supported)",
+		})
+		return
+	}
+
+	// 白名单检查：阻止封禁白名单中的 IP/CIDR
+	if m.checker != nil && m.checker.IsWhitelisted(value) {
+		logger.Warnf("[Manual] IP/CIDR %s is in whitelist, refusing to add blacklist rule", value)
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "IP/CIDR is in whitelist, remove it from whitelist first",
 		})
 		return
 	}
@@ -170,13 +186,17 @@ type WhitelistHandle struct {
 	xdp   *ebpfs.Xdp
 	cache *manual.Cache
 	mu    sync.Mutex // 保护缓存 read-modify-write 的原子性
+
+	// 用户态白名单检查器（可选），用于实时同步内存索引
+	checker *manual.WhitelistChecker
 }
 
 // NewWhitelistHandle 创建新的白名单处理器
-func NewWhitelistHandle(xdp *ebpfs.Xdp, cache *manual.Cache) *WhitelistHandle {
+func NewWhitelistHandle(xdp *ebpfs.Xdp, cache *manual.Cache, checker *manual.WhitelistChecker) *WhitelistHandle {
 	return &WhitelistHandle{
-		xdp:   xdp,
-		cache: cache,
+		xdp:     xdp,
+		cache:   cache,
+		checker: checker,
 	}
 }
 
@@ -217,6 +237,11 @@ func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {
 		}
 	}
 
+	// 3. 同步到用户态白名单检查器
+	if w.checker != nil {
+		w.checker.Add(value)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "ok",
 	})
@@ -247,6 +272,11 @@ func (w *WhitelistHandle) DelWhitelistRule(c *gin.Context) {
 		if err := w.removeWhitelistRuleFromCache(req.Value); err != nil {
 			logger.Warnf("[Whitelist] Failed to remove rule from cache: %v", err)
 		}
+	}
+
+	// 3. 从用户态白名单检查器中移除
+	if w.checker != nil {
+		w.checker.Remove(req.Value)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
