@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"syscall"
 	"time"
 
 	"rho-aias/internal/config"
 	"rho-aias/internal/logger"
+	"rho-aias/internal/watcher"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -48,6 +50,7 @@ type Monitor struct {
 	cancel  context.CancelFunc
 	watcher *fsnotify.Watcher
 	filePos map[string]int64
+	offsetStore *watcher.OffsetStore // 偏移量持久化存储
 
 	// 编译后的正则
 	failRegex   []*regexp.Regexp
@@ -123,6 +126,11 @@ func NewMonitor(cfg *config.FailGuardConfig, xdp XDPRuleManager, ctx context.Con
 	return m
 }
 
+// SetOffsetStore 设置偏移量持久化存储（可选）
+func (m *Monitor) SetOffsetStore(store *watcher.OffsetStore) {
+	m.offsetStore = store
+}
+
 // SetBanRecordStore 设置封禁记录持久化存储
 func (m *Monitor) SetBanRecordStore(store BanRecordStore) {
 	m.banStore = store
@@ -138,6 +146,11 @@ func (m *Monitor) SetWhitelistCheck(fn func(ip string) bool) {
 func (m *Monitor) Start() error {
 	if m.cfg.LogPath == "" {
 		return fmt.Errorf("log_path is required")
+	}
+
+	// 加载持久化的偏移量
+	if m.offsetStore != nil {
+		m.offsetStore.Load()
 	}
 
 	// 初始化文件监听器
@@ -173,6 +186,10 @@ func (m *Monitor) Stop() {
 	m.cancel()
 	if m.watcher != nil {
 		m.watcher.Close()
+	}
+	// 保存偏移量
+	if m.offsetStore != nil {
+		m.offsetStore.Save()
 	}
 	logger.Info("[FailGuard] Monitor stopped")
 }
@@ -247,9 +264,29 @@ func (m *Monitor) readLogFile(filePath string) error {
 		return err
 	}
 
-	// 如果文件变小了，说明被轮转了，从头开始读取
+	// 获取文件 inode（用于日志轮转检测）
+	var currentInode uint64
+	if stat, ok := fileInfo.Sys().(*syscall.Stat_t); ok {
+		currentInode = stat.Ino
+	}
+
+	// 检查是否发生日志轮转：inode 变化或文件变小
 	fileSize := fileInfo.Size()
 	pos := m.filePos[filePath]
+
+	// 如果有持久化的偏移量，优先使用
+	if m.offsetStore != nil {
+		if savedOffset, savedInode, ok := m.offsetStore.GetOffset(filePath); ok {
+			// inode 变化 → 日志轮转，从头读取
+			if savedInode != 0 && savedInode != currentInode {
+				logger.Infof("[FailGuard] Detected log rotation for %s (inode %d → %d), resetting offset", filePath, savedInode, currentInode)
+				pos = 0
+			} else if savedInode == currentInode && pos < savedOffset {
+				// inode 一致则恢复偏移量
+				pos = savedOffset
+			}
+		}
+	}
 	if fileSize < pos {
 		pos = 0
 	}
@@ -271,6 +308,9 @@ func (m *Monitor) readLogFile(filePath string) error {
 	}
 
 	m.filePos[filePath] = fileSize
+	if m.offsetStore != nil {
+		m.offsetStore.SetOffset(filePath, fileSize, currentInode)
+	}
 
 	if lineCount > 0 {
 		logger.Debugf("[FailGuard] Processed %d new lines from %s", lineCount, filePath)
