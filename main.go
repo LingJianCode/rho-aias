@@ -102,7 +102,7 @@ func main() {
 			}
 		}
 	}
-	manualHandle := handles.NewManualHandle(xdp, manualCache)
+	manualHandle := handles.NewManualHandle(xdp, manualCache, nil)
 
 	// Initialize Whitelist Cache and Load Whitelist Rules
 	var whitelistCache *manual.Cache
@@ -137,6 +137,9 @@ func main() {
 		}
 	}
 	whitelistHandle = handles.NewWhitelistHandle(xdp, whitelistCache, whitelistChecker)
+
+	// 将白名单检查器注入手动封禁模块，防止手动封禁白名单 IP
+	manualHandle.SetWhitelistChecker(whitelistChecker)
 
 	// Initialize Block Log
 	var blockLog *blocklog.BlockLog
