@@ -60,7 +60,7 @@ auth:
   jwt_secret: ""                   # JWT 密钥，建议从环境变量 JWT_SECRET 读取，留空则使用环境变量
   jwt_issuer: "rho-aias"           # JWT 签发者
   token_duration: 1440             # Token 有效期（分钟），默认 1440 分钟（24小时）
-  database_path: "./data/auth.db"  # 数据库路径
+  database_path: ./data/auth.db  # 数据库路径
   captcha_enabled: true            # 是否启用验证码
   captcha_duration: 5              # 验证码有效期（分钟）
 
@@ -85,7 +85,7 @@ auth:
 # 阻断日志配置
 blocklog:
   enabled: true                    # 是否启用文件持久化
-  log_dir: "./logs/blocklog"       # 日志目录（按小时分割，格式：YYYY-MM-DD_HH.jsonl）
+  log_dir: ./logs/blocklog       # 日志目录（按小时分割，格式：YYYY-MM-DD_HH.jsonl）
   memory_cache_size: 10000         # 内存缓存大小（用于实时查询）
   buffer_size: 1000                # 异步写入缓冲区大小
   flush_interval: 5                # 刷盘间隔（秒）
@@ -96,12 +96,14 @@ waf:
   waf_log_path: /caddy-logs/waf_audit.log      # WAF 审计日志路径（Caddy + Coraza）
   rate_limit_log_path: /caddy-logs/rate_limit.log  # Rate Limit 日志路径
   ban_duration: 3600                # 封禁时长（秒，默认1小时）
+  offset_state_file: ./data/waf_offset.json    # 偏移量持久化文件路径
 
 # SSH 防爆破配置（参考 fail2ban 核心功能）
 # 日志匹配 + 滑动窗口计数 + 达阈值即封禁
 failguard:
   enabled: false                    # 是否启用 SSH 防爆破
   log_path: /var/log/auth.log       # 监控的日志文件路径
+  offset_state_file: ./data/failguard_offset.json  # 偏移量持久化文件路径
   # fail_regex 和 ignore_regex 留空则使用内置默认值（参考 fail2ban filter.d/sshd.conf）
   # fail_regex:
   #   - "Failed \\w+ for (?:invalid user )?(\\S+) from <HOST> port \\d+ ssh2"

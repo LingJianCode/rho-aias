@@ -12,13 +12,18 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"rho-aias/internal/config"
 	"rho-aias/internal/logger"
+	"rho-aias/internal/watcher"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+// syscallStatT 用于获取文件 inode
+type syscallStatT = syscall.Stat_t
 
 // sourceMaskWAF WAF 来源掩码，与 ebpfs.SourceMaskWAF (0x08) 保持一致
 const sourceMaskWAF uint32 = 0x08
@@ -55,6 +60,8 @@ type Monitor struct {
 	cancel  context.CancelFunc
 	watcher *fsnotify.Watcher
 	filePos map[string]int64 // 按文件路径分别记录读取位置
+	offsetStore *watcher.OffsetStore // 偏移量持久化存储
+	wg       sync.WaitGroup // 等待 goroutine 退出
 
 	// 已封禁 IP 缓存
 	bannedIPs map[string]IPBanRecord
@@ -69,6 +76,9 @@ type Monitor struct {
 	// 2. Coraza WAF: "client_ip: 1.2.3.4, rule_id: 12345"
 	// 3. Rate limit: "rate_limit_exceeded for 1.2.3.4"
 	ipRegex *regexp.Regexp
+
+	// 定时保存偏移量的 cancel 函数
+	cancelPeriodicSave context.CancelFunc
 }
 
 // NewMonitor 创建 WAF 日志监控器
@@ -92,6 +102,11 @@ func (m *Monitor) SetBanRecordStore(store BanRecordStore) {
 	m.banStore = store
 }
 
+// SetOffsetStore 设置偏移量持久化存储（可选）
+func (m *Monitor) SetOffsetStore(store *watcher.OffsetStore) {
+	m.offsetStore = store
+}
+
 // SetWhitelistCheck 设置白名单检查函数
 // 在封禁 IP 前调用此函数判断 IP 是否在白名单中，避免白名单 IP 被写入黑名单
 func (m *Monitor) SetWhitelistCheck(fn func(ip string) bool) {
@@ -100,6 +115,11 @@ func (m *Monitor) SetWhitelistCheck(fn func(ip string) bool) {
 
 // Start 启动 WAF 日志监控
 func (m *Monitor) Start() error {
+	// 加载持久化的偏移量
+	if m.offsetStore != nil {
+		m.offsetStore.Load()
+	}
+
 	// 初始化文件监听器
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -122,12 +142,18 @@ func (m *Monitor) Start() error {
 	}
 
 	// 启动监控 goroutine
+	m.wg.Add(2)
 	go m.monitorLoop()
-
-	logger.Infof("[WAF] Monitor started, ban_duration=%d seconds", m.cfg.BanDuration)
 
 	// 启动过期清理 goroutine
 	go m.cleanupExpiredBans()
+
+	// 启动定时保存偏移量（每 5 秒）
+	if m.offsetStore != nil {
+		m.cancelPeriodicSave = m.offsetStore.StartPeriodicSave(5 * time.Second)
+	}
+
+	logger.Infof("[WAF] Monitor started, ban_duration=%d seconds", m.cfg.BanDuration)
 
 	return nil
 }
@@ -136,8 +162,22 @@ func (m *Monitor) Start() error {
 func (m *Monitor) Stop() {
 	logger.Info("[WAF] Stopping monitor...")
 	m.cancel()
+
+	// 停止定时保存偏移量
+	if m.cancelPeriodicSave != nil {
+		m.cancelPeriodicSave()
+	}
+
 	if m.watcher != nil {
 		m.watcher.Close()
+	}
+
+	// 等待所有 goroutine 退出，确保不会有并发的 SetOffset 调用
+	m.wg.Wait()
+
+	// goroutine 已退出，安全地最终保存偏移量
+	if m.offsetStore != nil {
+		m.offsetStore.Save()
 	}
 	logger.Info("[WAF] Monitor stopped")
 }
@@ -161,6 +201,7 @@ func (m *Monitor) watchLogFile(filePath string) error {
 
 // monitorLoop 监控循环
 func (m *Monitor) monitorLoop() {
+	defer m.wg.Done()
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -212,15 +253,35 @@ func (m *Monitor) readLogFile(filePath string) error {
 	}
 	defer file.Close()
 
-	// 获取文件大小
+	// 获取文件大小和 inode
 	fileInfo, err := file.Stat()
 	if err != nil {
 		return err
 	}
 
-	// 如果文件变小了，说明被轮转了，从头开始读取
+	// 获取文件 inode（用于日志轮转检测）
+	var currentInode uint64
+	if stat, ok := fileInfo.Sys().(*syscallStatT); ok {
+		currentInode = stat.Ino
+	}
+
+	// 检查是否发生日志轮转：inode 变化或文件变小
 	fileSize := fileInfo.Size()
-	pos := m.filePos[filePath] // 获取该文件的读取位置
+	pos := m.filePos[filePath]
+
+	// 如果有持久化的偏移量，优先使用
+	if m.offsetStore != nil {
+		if savedOffset, savedInode, ok := m.offsetStore.GetOffset(filePath); ok {
+			// inode 变化 → 日志轮转，从头读取
+			if savedInode != 0 && savedInode != currentInode {
+				logger.Infof("[WAF] Detected log rotation for %s (inode %d → %d), resetting offset", filePath, savedInode, currentInode)
+				pos = 0
+			} else if savedInode == currentInode && pos < savedOffset {
+				// inode 一致则恢复偏移量
+				pos = savedOffset
+			}
+		}
+	}
 	if fileSize < pos {
 		pos = 0
 	}
@@ -258,6 +319,9 @@ func (m *Monitor) readLogFile(filePath string) error {
 
 	// 更新读取位置
 	m.filePos[filePath] = fileSize
+	if m.offsetStore != nil {
+		m.offsetStore.SetOffset(filePath, fileSize, currentInode)
+	}
 
 	if lineCount > 0 {
 		logger.Debugf("[WAF] Processed %d new lines from %s", lineCount, filePath)
@@ -401,6 +465,7 @@ func (m *Monitor) banIP(ip, logFile string, sourceMask uint32) {
 
 // cleanupExpiredBans 定期清理过期的封禁记录
 func (m *Monitor) cleanupExpiredBans() {
+	defer m.wg.Done()
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 

@@ -42,10 +42,12 @@ services:
     network_mode: host
     volumes:
       - ./config.yml:/app/config/config.yml:ro
+      # 必须要挂载目录，否则inotify无法监听文件变化
       - ./logs/rho-aias:/app/logs
       - ./data:/app/data
       - ./logs/caddy:/caddy-logs:ro
-      - /var/log/auth.log:/var/log/auth.log:ro
+      # 必须要挂载目录，否则inotify无法监听文件变化
+      - /var/log:/var/log:ro
     command: ["--config", "/app/config/config.yml"]
     restart: unless-stopped
 
