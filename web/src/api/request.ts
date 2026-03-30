@@ -1,5 +1,5 @@
 import axios, { type AxiosInstance, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { getToken, getRefreshToken, setToken, clearAuth } from '@/utils/auth'
 import type { ApiResponse } from '@/types/api'
 import router from '@/router'
@@ -15,6 +15,17 @@ const instance: AxiosInstance = axios.create({
 let isRefreshing = false
 let refreshSubscribers: ((token: string) => void)[] = []
 
+// 处理会话过期
+function handleSessionExpired() {
+  ElNotification({
+    title: '提示',
+    message: '您的会话已过期，请重新登录',
+    type: 'info',
+  })
+  clearAuth()
+  router.push('/login')
+}
+
 function subscribeTokenRefresh(cb: (token: string) => void) {
   refreshSubscribers.push(cb)
 }
@@ -27,7 +38,10 @@ function onRefreshed(token: string) {
 instance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = getToken()
-    if (token && config.headers) {
+    // 如果 Authorization 设置为 no-auth，则不携带 Token
+    if (config.headers?.['Authorization'] === 'no-auth') {
+      delete config.headers.Authorization
+    } else if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
     }
     return config
@@ -62,23 +76,20 @@ instance.interceptors.response.use(
 
       const refreshToken = getRefreshToken()
       if (!refreshToken) {
-        clearAuth()
-        router.push('/login')
+        handleSessionExpired()
         return Promise.reject(error)
       }
 
       try {
-        const response = await axios.post('/api/auth/refresh', {
-          refresh_token: refreshToken,
-        })
-        const { token } = response.data.data
-        setToken(token)
-        onRefreshed(token)
-        originalRequest.headers.Authorization = `Bearer ${token}`
+        // 延迟导入避免循环依赖
+        const { useAuthStore } = await import('@/stores/auth')
+        const authStore = useAuthStore()
+        const newToken = await authStore.refreshToken()
+        onRefreshed(newToken)
+        originalRequest.headers.Authorization = `Bearer ${newToken}`
         return instance(originalRequest)
       } catch {
-        clearAuth()
-        router.push('/login')
+        handleSessionExpired()
         return Promise.reject(error)
       } finally {
         isRefreshing = false

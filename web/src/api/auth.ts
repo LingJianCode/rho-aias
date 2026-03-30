@@ -2,7 +2,7 @@ import request from './request'
 import type { ApiResponse, LoginRequest, LoginResponse, CaptchaResponse } from '@/types/api'
 
 export function getCaptcha(): Promise<ApiResponse<CaptchaResponse>> {
-  return request.get('/api/auth/captcha').then((res) => res.data)
+  return request.get('/api/auth/captcha', { headers: { Authorization: 'no-auth' } }).then((res) => res.data)
 }
 
 export function login(data: LoginRequest): Promise<ApiResponse<LoginResponse>> {

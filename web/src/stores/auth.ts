@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getToken, setToken, removeToken, getStoredUser, setStoredUser, removeStoredUser, clearAuth } from '@/utils/auth'
+import { getToken, setToken, removeToken, getStoredUser, setStoredUser, removeStoredUser, clearAuth, getRefreshToken, setRefreshToken } from '@/utils/auth'
 import type { User } from '@/types/api'
-import { login as loginApi, logout as logoutApi, getCaptcha } from '@/api/auth'
+import { login as loginApi, logout as logoutApi, getCaptcha, refreshToken as refreshTokenApi } from '@/api/auth'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(getToken())
@@ -29,8 +29,20 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = res.data.token
     user.value = res.data.user
     setToken(res.data.token)
+    setRefreshToken(res.data.refresh_token)
     setStoredUser(res.data.user)
     return res.data
+  }
+
+  async function refreshToken() {
+    const storedRefreshToken = getRefreshToken()
+    if (!storedRefreshToken) {
+      throw new Error('No refresh token available')
+    }
+    const res = await refreshTokenApi(storedRefreshToken)
+    token.value = res.data.token
+    setToken(res.data.token)
+    return res.data.token
   }
 
   async function logout() {
@@ -59,6 +71,7 @@ export const useAuthStore = defineStore('auth', () => {
     fetchCaptcha,
     login,
     logout,
+    refreshToken,
     hasPermission,
   }
 })
