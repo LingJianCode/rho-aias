@@ -47,6 +47,7 @@ services:
       - ./logs/rho-aias:/app/logs
       - ./data:/app/data
       - ./logs/caddy:/caddy-logs:ro
+      - /var/log/auth.log:/var/log/auth.log:ro
     command: ["--config", "/app/config/config.yml"]
     restart: unless-stopped
 
