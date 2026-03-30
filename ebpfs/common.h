@@ -15,9 +15,10 @@
 #define IPPROTO_FRAGMENT  44         /* IPv6 Fragment extension header */
 #define IPPROTO_ICMPV6   58         /* ICMPv6 protocol */
 
-/* 黑名单规则值结构 - 支持来源追踪
- * 用于 eBPF maps 中存储规则及其来源信息
- * 总大小: 16 bytes (packed)
+/* IP 规则值结构 - 支持来源追踪
+ * 用于 eBPF maps 中存储 IP 规则及其来源信息
+ * 黑名单：source_mask 标记具体来源（ipsum/waf/manual 等）
+ * 白名单：仅用 source_mask != 0 判断存在性，无来源语义
  */
 struct block_value {
     __u32 source_mask;  /* 来源位掩码 - 标记哪些来源拥有此规则 */

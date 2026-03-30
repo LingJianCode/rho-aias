@@ -86,8 +86,8 @@ func TestMaskToSourceIDs(t *testing.T) {
 		},
 		{
 			name: "all sources",
-			mask: SourceMaskIpsum | SourceMaskSpamhaus | SourceMaskManual | SourceMaskWAF | SourceMaskDDoS | SourceMaskRateLimit,
-			want: []string{"ipsum", "spamhaus", "manual", "waf", "ddos", "rate_limit"},
+			mask: SourceMaskIpsum | SourceMaskSpamhaus | SourceMaskManual | SourceMaskWAF | SourceMaskDDoS | SourceMaskRateLimit | SourceMaskAnomaly | SourceMaskFailGuard,
+			want: []string{"ipsum", "spamhaus", "manual", "waf", "ddos", "rate_limit", "anomaly", "failguard"},
 		},
 		{
 			name: "no sources",

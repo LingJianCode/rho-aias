@@ -40,11 +40,11 @@ func (h *RuleQueryHandle) GetRules(c *gin.Context) {
 	// 校验 source 参数合法性
 	validSources := map[string]bool{
 		"manual": true, "ipsum": true, "spamhaus": true,
-		"waf": true, "ddos": true, "rate_limit": true, "anomaly": true, "all": true,
+		"waf": true, "ddos": true, "rate_limit": true, "anomaly": true, "failguard": true, "all": true,
 	}
 	if !validSources[source] {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid source parameter, allowed values: manual, ipsum, spamhaus, waf, ddos, rate_limit, anomaly, all",
+			"error": "invalid source parameter, allowed values: manual, ipsum, spamhaus, waf, ddos, rate_limit, anomaly, failguard, all",
 		})
 		return
 	}
@@ -62,14 +62,18 @@ func (h *RuleQueryHandle) GetRules(c *gin.Context) {
 		return
 	}
 
-	// 按来源筛选
+	// 按来源筛选（通过位掩码直接匹配，避免字符串遍历）
+	sourceMask, ok := ebpfs.SourceStringToMask(source)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid source parameter",
+		})
+		return
+	}
 	var filtered []ebpfs.Rule
 	for _, r := range res {
-		for _, s := range r.Sources {
-			if s == source {
-				filtered = append(filtered, r)
-				break
-			}
+		if r.Value.SourceMask&sourceMask != 0 {
+			filtered = append(filtered, r)
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{

@@ -94,6 +94,30 @@ func MaskToSourceIDs(mask uint32) []string {
 	return sources
 }
 
+// SourceStringToMask 将来源标识符字符串转换为位掩码
+func SourceStringToMask(source string) (uint32, bool) {
+	switch source {
+	case "ipsum":
+		return SourceMaskIpsum, true
+	case "spamhaus":
+		return SourceMaskSpamhaus, true
+	case "manual":
+		return SourceMaskManual, true
+	case "waf":
+		return SourceMaskWAF, true
+	case "ddos":
+		return SourceMaskDDoS, true
+	case "rate_limit":
+		return SourceMaskRateLimit, true
+	case "anomaly":
+		return SourceMaskAnomaly, true
+	case "failguard":
+		return SourceMaskFailGuard, true
+	default:
+		return 0, false
+	}
+}
+
 // ============================================
 // Geo-Blocking 相关类型
 // ============================================
