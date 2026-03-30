@@ -26,6 +26,7 @@ const (
 	BanSourceRateLimit  = "rate_limit"
 	BanSourceAnomaly    = "anomaly"
 	BanSourceManual     = "manual"
+	BanSourceFailGuard  = "failguard"
 )
 
 // 封禁状态常量

@@ -15,6 +15,7 @@ import (
 	"rho-aias/internal/config"
 	"rho-aias/internal/database"
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/failguard"
 	"rho-aias/internal/geoblocking"
 	"rho-aias/internal/handles"
 	"rho-aias/internal/kernel"
@@ -261,6 +262,23 @@ func main() {
 		} else {
 			logger.Info("[Main] WAF monitor module initialized")
 			defer wafMonitor.Stop()
+		}
+	}
+
+	// Initialize FailGuard (SSH anti-brute-force) Monitor (if enabled)
+	var failguardMonitor *failguard.Monitor
+	if cfg.FailGuard.Enabled {
+		failguardMonitor = failguard.NewMonitor(&cfg.FailGuard, xdp, ctx)
+		failguardMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
+		if db != nil {
+			banRecordService := services.NewBanRecordService(db.DB)
+			failguardMonitor.SetBanRecordStore(banRecordService)
+		}
+		if err := failguardMonitor.Start(); err != nil {
+			logger.Warnf("[Main] FailGuard monitor start failed: %v", err)
+		} else {
+			logger.Info("[Main] FailGuard module initialized")
+			defer failguardMonitor.Stop()
 		}
 	}
 
