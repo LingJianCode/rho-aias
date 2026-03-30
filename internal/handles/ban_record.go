@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"rho-aias/internal/models"
+	"rho-aias/internal/response"
 	"rho-aias/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -25,31 +26,21 @@ func NewBanRecordHandle(service *services.BanRecordService) *BanRecordHandle {
 func (h *BanRecordHandle) GetBanRecords(c *gin.Context) {
 	var filter services.BanRecordFilter
 	if err := c.ShouldBindQuery(&filter); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "Invalid query parameters: " + err.Error(),
-		})
+		response.BadRequest(c, "Invalid query parameters: "+err.Error())
 		return
 	}
 
 	records, total, err := h.service.QueryRecords(filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "Failed to query ban records: " + err.Error(),
-		})
+		response.InternalError(c, "Failed to query ban records: "+err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data": gin.H{
-			"total":   total,
-			"limit":   filter.Limit,
-			"offset":  filter.Offset,
-			"records": records,
-		},
+	response.OK(c, gin.H{
+		"total":   total,
+		"limit":   filter.Limit,
+		"offset":  filter.Offset,
+		"records": records,
 	})
 }
 
@@ -58,18 +49,11 @@ func (h *BanRecordHandle) GetBanRecords(c *gin.Context) {
 func (h *BanRecordHandle) GetBanStats(c *gin.Context) {
 	stats, err := h.service.GetBanStats()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "Failed to get ban stats: " + err.Error(),
-		})
+		response.InternalError(c, "Failed to get ban stats: "+err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data":    stats,
-	})
+	response.OK(c, stats)
 }
 
 // GetBanRecord 查询单条封禁记录
@@ -78,25 +62,15 @@ func (h *BanRecordHandle) GetBanRecord(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "Invalid record ID",
-		})
+		response.BadRequest(c, "Invalid record ID")
 		return
 	}
 
 	record := &models.BanRecord{}
 	if err := h.service.DB().First(record, uint(id)).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "Ban record not found",
-		})
+		response.Fail(c, http.StatusNotFound, response.CodeRecordNotFound, "Ban record not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data":    record,
-	})
+	response.OK(c, record)
 }

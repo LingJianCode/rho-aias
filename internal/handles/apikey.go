@@ -8,6 +8,7 @@ import (
 
 	"rho-aias/internal/middleware"
 	"rho-aias/internal/models"
+	"rho-aias/internal/response"
 	"rho-aias/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -31,7 +32,7 @@ func NewAPIKeyHandle(apiKeyService *services.APIKeyService, auditService *servic
 func (h *APIKeyHandle) CreateAPIKey(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.Unauthorized(c, "unauthorized")
 		return
 	}
 
@@ -39,13 +40,13 @@ func (h *APIKeyHandle) CreateAPIKey(c *gin.Context) {
 
 	var req services.CreateAPIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	resp, err := h.apiKeyService.CreateAPIKey(userID, req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -65,31 +66,31 @@ func (h *APIKeyHandle) CreateAPIKey(c *gin.Context) {
 		UserAgent:  c.GetHeader("User-Agent"),
 	})
 
-	c.JSON(http.StatusCreated, resp)
+	response.Created(c, resp)
 }
 
 // ListAPIKeys 列出 API Keys
 func (h *APIKeyHandle) ListAPIKeys(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.Unauthorized(c, "unauthorized")
 		return
 	}
 
 	keys, err := h.apiKeyService.ListAPIKeys(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"keys": keys})
+	response.OK(c, gin.H{"keys": keys})
 }
 
 // RevokeAPIKey 吊销 API Key
 func (h *APIKeyHandle) RevokeAPIKey(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.Unauthorized(c, "unauthorized")
 		return
 	}
 
@@ -98,15 +99,15 @@ func (h *APIKeyHandle) RevokeAPIKey(c *gin.Context) {
 	keyIDStr := c.Param("id")
 	keyID, err := strconv.ParseUint(keyIDStr, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid key id"})
+		response.BadRequest(c, "invalid key id")
 		return
 	}
 
 	if err := h.apiKeyService.RevokeAPIKey(userID, uint(keyID)); err != nil {
 		if errors.Is(err, services.ErrAPIKeyNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			response.Fail(c, http.StatusNotFound, response.CodeRecordNotFound, err.Error())
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			response.InternalError(c, err.Error())
 		}
 		return
 	}
@@ -122,5 +123,5 @@ func (h *APIKeyHandle) RevokeAPIKey(c *gin.Context) {
 		UserAgent:  c.GetHeader("User-Agent"),
 	})
 
-	c.JSON(http.StatusOK, gin.H{"message": "api key revoked successfully"})
+	response.OKMsg(c, "api key revoked successfully")
 }

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"rho-aias/internal/response"
 	"rho-aias/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -41,17 +42,17 @@ func NewAuditHandle(auditService *services.AuditService) *AuditHandle {
 func (h *AuditHandle) ListAuditLogs(c *gin.Context) {
 	var req services.ListLogsRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	resp, err := h.auditService.ListLogs(req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	response.OK(c, resp)
 }
 
 // GetAuditLog 获取单条审计日志
@@ -68,17 +69,17 @@ func (h *AuditHandle) GetAuditLog(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid log id"})
+		response.BadRequest(c, "invalid log id")
 		return
 	}
 
 	log, err := h.auditService.GetLogByID(uint(id))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "log not found"})
+		response.Fail(c, http.StatusNotFound, response.CodeLogNotFound, "log not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, log)
+	response.OK(c, log)
 }
 
 // CleanAuditLogs 清理旧日志
@@ -97,14 +98,14 @@ func (h *AuditHandle) CleanAuditLogs(c *gin.Context) {
 		RetentionDays int `json:"retention_days" binding:"required,min=1"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	if err := h.auditService.CleanOldLogs(req.RetentionDays); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "old logs cleaned successfully"})
+	response.OKMsg(c, "old logs cleaned successfully")
 }

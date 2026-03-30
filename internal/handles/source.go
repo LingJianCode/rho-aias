@@ -7,6 +7,7 @@ import (
 	"rho-aias/internal/geoblocking"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/models"
+	"rho-aias/internal/response"
 	"rho-aias/internal/threatintel"
 
 	"github.com/gin-gonic/gin"
@@ -69,29 +70,22 @@ func (h *SourceHandle) GetStatus(c *gin.Context) {
 	}
 
 	// 按类型组织数据
-	response := make(map[string]map[string]Result)
+	resp := make(map[string]map[string]Result)
 	for _, r := range results {
-		if _, ok := response[r.SourceType]; !ok {
-			response[r.SourceType] = make(map[string]Result)
+		if _, ok := resp[r.SourceType]; !ok {
+			resp[r.SourceType] = make(map[string]Result)
 		}
-		response[r.SourceType][r.SourceID] = r
+		resp[r.SourceType][r.SourceID] = r
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data":    response,
-	})
+	response.OK(c, resp)
 }
 
 // GetStatusByType 获取指定类型的数据源状态
 func (h *SourceHandle) GetStatusByType(c *gin.Context) {
 	sourceType := c.Param("type")
 	if sourceType == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "source_type is required",
-		})
+		response.BadRequest(c, "source_type is required")
 		return
 	}
 
@@ -122,16 +116,12 @@ func (h *SourceHandle) GetStatusByType(c *gin.Context) {
 	}
 
 	// 按数据源 ID 组织数据
-	response := make(map[string]models.SourceStatusRecord)
+	resp := make(map[string]models.SourceStatusRecord)
 	for _, r := range records {
-		response[r.SourceID] = r
+		resp[r.SourceID] = r
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data":    response,
-	})
+	response.OK(c, resp)
 }
 
 // GetStatusByID 获取指定数据源的状态
@@ -140,10 +130,7 @@ func (h *SourceHandle) GetStatusByID(c *gin.Context) {
 	sourceID := c.Param("id")
 
 	if sourceType == "" || sourceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "source_type and source_id are required",
-		})
+		response.BadRequest(c, "source_type and source_id are required")
 		return
 	}
 
@@ -155,24 +142,14 @@ func (h *SourceHandle) GetStatusByID(c *gin.Context) {
 
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "source status not found",
-			})
+			response.Fail(c, http.StatusNotFound, response.CodeSourceNotFound, "source status not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "database error: " + err.Error(),
-			})
+			response.InternalError(c, "database error: "+err.Error())
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data":    record,
-	})
+	response.OK(c, record)
 }
 
 // Refresh 手动触发数据源更新
@@ -181,10 +158,7 @@ func (h *SourceHandle) Refresh(c *gin.Context) {
 	sourceID := c.Param("id")
 
 	if sourceType == "" || sourceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "source_type and source_id are required",
-		})
+		response.BadRequest(c, "source_type and source_id are required")
 		return
 	}
 
@@ -195,40 +169,25 @@ func (h *SourceHandle) Refresh(c *gin.Context) {
 	switch sourceType {
 	case "intel":
 		if h.intelMgr == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"code":    503,
-				"message": "Intel manager is not initialized",
-			})
+			response.Fail(c, http.StatusServiceUnavailable, response.CodeInternal, "Intel manager is not initialized")
 			return
 		}
 		err = h.intelMgr.TriggerUpdate()
 	case "geo_blocking":
 		if h.geoMgr == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"code":    503,
-				"message": "Geo-blocking manager is not initialized",
-			})
+			response.Fail(c, http.StatusServiceUnavailable, response.CodeInternal, "Geo-blocking manager is not initialized")
 			return
 		}
 		err = h.geoMgr.TriggerUpdate()
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "Invalid source_type: " + sourceType,
-		})
+		response.BadRequest(c, "Invalid source_type: "+sourceType)
 		return
 	}
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "Refresh failed: " + err.Error(),
-		})
+		response.InternalError(c, "Refresh failed: "+err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "Refresh triggered successfully",
-	})
+	response.OKMsg(c, "Refresh triggered successfully")
 }

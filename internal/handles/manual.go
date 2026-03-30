@@ -1,10 +1,10 @@
 package handles
 
 import (
-	"net/http"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
+	"rho-aias/internal/response"
 	"rho-aias/utils"
 	"strings"
 	"sync"
@@ -42,9 +42,7 @@ func (m *ManualHandle) SetWhitelistChecker(checker *manual.WhitelistChecker) {
 func (m *ManualHandle) AddRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "参数错误: " + err.Error(),
-		})
+		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
 	logger.Infof("[Manual] Add rule: %s", req.Value)
@@ -53,27 +51,21 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 	value := strings.TrimSpace(req.Value)
 	ipType := utils.ParseStringToIPType(value)
 	if ipType == utils.IPTypeUnknown || ipType == utils.IPTypeMAC {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid rule format: must be a valid IPv4, IPv6, or CIDR address (MAC not supported)",
-		})
+		response.BadRequest(c, "invalid rule format: must be a valid IPv4, IPv6, or CIDR address (MAC not supported)")
 		return
 	}
 
 	// 白名单检查：阻止封禁白名单中的 IP/CIDR
 	if m.checker != nil && m.checker.IsWhitelisted(value) {
 		logger.Warnf("[Manual] IP/CIDR %s is in whitelist, refusing to add blacklist rule", value)
-		c.JSON(http.StatusConflict, gin.H{
-			"error": "IP/CIDR is in whitelist, remove it from whitelist first",
-		})
+		response.Conflict(c, response.CodeWhitelistConflict, "IP/CIDR is in whitelist, remove it from whitelist first")
 		return
 	}
 
 	//1. 添加到 eBPF map
 	err := m.xdp.AddRule(value)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -85,18 +77,14 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "ok",
-	})
+	response.OKMsg(c, "ok")
 }
 
 // DelRule 删除过滤规则
 func (m *ManualHandle) DelRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "参数错误: " + err.Error(),
-		})
+		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
 	logger.Infof("[Manual] Delete rule: %s", req.Value)
@@ -104,9 +92,7 @@ func (m *ManualHandle) DelRule(c *gin.Context) {
 	//1. 从 eBPF map 删除
 	err := m.xdp.DeleteRule(req.Value)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -118,9 +104,7 @@ func (m *ManualHandle) DelRule(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "ok",
-	})
+	response.OKMsg(c, "ok")
 }
 
 // saveRuleToCache 保存规则到缓存
@@ -204,9 +188,7 @@ func NewWhitelistHandle(xdp *ebpfs.Xdp, cache *manual.Cache, checker *manual.Whi
 func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "参数错误: " + err.Error(),
-		})
+		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
 	logger.Infof("[Whitelist] Add rule: %s", req.Value)
@@ -215,18 +197,14 @@ func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {
 	value := strings.TrimSpace(req.Value)
 	ipType := utils.ParseStringToIPType(value)
 	if ipType == utils.IPTypeUnknown || ipType == utils.IPTypeMAC {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid whitelist rule format: must be a valid IPv4, IPv6 or CIDR address (MAC not supported)",
-		})
+		response.BadRequest(c, "invalid whitelist rule format: must be a valid IPv4, IPv6 or CIDR address (MAC not supported)")
 		return
 	}
 
 	// 1. 添加到白名单 eBPF map
 	err := w.xdp.AddWhitelistRule(value)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -242,18 +220,14 @@ func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {
 		w.checker.Add(value)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "ok",
-	})
+	response.OKMsg(c, "ok")
 }
 
 // DelWhitelistRule 删除白名单规则
 func (w *WhitelistHandle) DelWhitelistRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "参数错误: " + err.Error(),
-		})
+		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
 	logger.Infof("[Whitelist] Delete rule: %s", req.Value)
@@ -261,9 +235,7 @@ func (w *WhitelistHandle) DelWhitelistRule(c *gin.Context) {
 	// 1. 从白名单 eBPF map 删除
 	err := w.xdp.DeleteWhitelistRule(req.Value)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -279,18 +251,14 @@ func (w *WhitelistHandle) DelWhitelistRule(c *gin.Context) {
 		w.checker.Remove(req.Value)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "ok",
-	})
+	response.OKMsg(c, "ok")
 }
 
 // ListWhitelistRules 查询白名单规则列表
 func (w *WhitelistHandle) ListWhitelistRules(c *gin.Context) {
 	rules, err := w.xdp.GetWhitelistRules()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -318,9 +286,9 @@ func (w *WhitelistHandle) ListWhitelistRules(c *gin.Context) {
 		result = append(result, item)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"rules":  result,
-		"total":  len(result),
+	response.OK(c, gin.H{
+		"rules": result,
+		"total": len(result),
 	})
 }
 

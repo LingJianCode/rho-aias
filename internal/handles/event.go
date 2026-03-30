@@ -1,9 +1,9 @@
 package handles
 
 import (
-	"net/http"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
+	"rho-aias/internal/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,10 +37,7 @@ type EventStatusResponse struct {
 func (h *EventHandle) SetEventConfig(c *gin.Context) {
 	var req EventConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "参数错误: " + err.Error(),
-		})
+		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
 
@@ -65,22 +62,15 @@ func (h *EventHandle) SetEventConfig(c *gin.Context) {
 	// 设置新配置
 	if err := h.xdp.SetEventConfig(enabled, sampleRate); err != nil {
 		logger.Errorf("[Event] Failed to set event config: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "设置配置失败: " + err.Error(),
-		})
+		response.InternalError(c, "设置配置失败: "+err.Error())
 		return
 	}
 
 	logger.Infof("[Event] Event config updated: enabled=%v, sample_rate=%d", enabled, sampleRate)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data": EventStatusResponse{
-			Enabled:    enabled,
-			SampleRate: sampleRate,
-		},
+	response.OK(c, EventStatusResponse{
+		Enabled:    enabled,
+		SampleRate: sampleRate,
 	})
 }
 
@@ -93,12 +83,8 @@ func (h *EventHandle) GetEventStatus(c *gin.Context) {
 		config = ebpfs.DefaultEventConfig()
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data": EventStatusResponse{
-			Enabled:    config.Enabled == 1,
-			SampleRate: config.SampleRate,
-		},
+	response.OK(c, EventStatusResponse{
+		Enabled:    config.Enabled == 1,
+		SampleRate: config.SampleRate,
 	})
 }

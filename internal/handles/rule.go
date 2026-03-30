@@ -1,9 +1,8 @@
 package handles
 
 import (
-	"net/http"
-
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,9 +24,7 @@ func NewRuleQueryHandle(xdp *ebpfs.Xdp) *RuleQueryHandle {
 func (h *RuleQueryHandle) GetRules(c *gin.Context) {
 	res, err := h.xdp.GetRule()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -43,21 +40,16 @@ func (h *RuleQueryHandle) GetRules(c *gin.Context) {
 		"waf": true, "ddos": true, "rate_limit": true, "anomaly": true, "failguard": true, "all": true,
 	}
 	if !validSources[source] {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid source parameter, allowed values: manual, ipsum, spamhaus, waf, ddos, rate_limit, anomaly, failguard, all",
-		})
+		response.BadRequest(c, "invalid source parameter, allowed values: manual, ipsum, spamhaus, waf, ddos, rate_limit, anomaly, failguard, all")
 		return
 	}
 
 	// 如果 source 为 "all"，返回所有规则
 	if source == "all" {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "GetRules",
-			"data": gin.H{
-				"source": "all",
-				"total":  len(res),
-				"rules":  res,
-			},
+		response.OK(c, gin.H{
+			"source": "all",
+			"total":  len(res),
+			"rules":  res,
 		})
 		return
 	}
@@ -65,9 +57,7 @@ func (h *RuleQueryHandle) GetRules(c *gin.Context) {
 	// 按来源筛选（通过位掩码直接匹配，避免字符串遍历）
 	sourceMask, ok := ebpfs.SourceStringToMask(source)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid source parameter",
-		})
+		response.BadRequest(c, "invalid source parameter")
 		return
 	}
 	var filtered []ebpfs.Rule
@@ -76,12 +66,9 @@ func (h *RuleQueryHandle) GetRules(c *gin.Context) {
 			filtered = append(filtered, r)
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"message": "GetRules",
-		"data": gin.H{
-			"source": source,
-			"total":  len(filtered),
-			"rules":  filtered,
-		},
+	response.OK(c, gin.H{
+		"source": source,
+		"total":  len(filtered),
+		"rules":  filtered,
 	})
 }
