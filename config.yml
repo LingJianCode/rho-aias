@@ -98,16 +98,20 @@ waf:
   ban_duration: 3600                # 封禁时长（秒，默认1小时）
 
 # 异常流量检测系统配置
+# 检测流程：每个 check_interval 对每个 IP 依次执行：
+#   1. 攻击类型检测（协议比例分析）→ 未命中则进入
+#   2. 3σ 基线检测（PPS 异常检测，兜底捕获 HTTP Flood 等）
+# 每个攻击类型有两道门：全局 min_packets + 类型专属 min_packets，全过才进入比例判断
 anomaly_detection:
-  enabled: true                    # 总开关（默认关闭）
+  enabled: true                    # 总开关
 
   # 采样配置
-  sample_rate: 1                    # 采样率 1/N（1 表示 100% 采样，eBPF 开销极小）
+  sample_rate: 1                    # 采样率 1/N（1 = 100% 采样，eBPF 开销极小）
 
   # 检测配置
-  check_interval: 1                 # 检测间隔（秒）
-  min_packets: 50                   # 最小包数（少于此值不检测）
-  cleanup_interval: 300             # 清理过期数据间隔（秒）
+  check_interval: 1                 # 检测间隔（秒），代码基于秒窗口设计，不建议修改
+  min_packets: 200                  # 全局最小包数门槛：单 IP 每秒 <200 包直接跳过攻击检测
+  cleanup_interval: 300             # 清理不活跃 IP 统计的间隔（秒）
 
   # 封禁配置
   block_duration: 60                # 临时封禁时长（秒）
@@ -119,35 +123,45 @@ anomaly_detection:
     - 8080
     - 53
 
-  # 3σ 基线配置
+  # 3σ 基线配置（兜底检测：协议比例正常但流量异常大的场景，如 HTTP Flood）
+  # 使用 Welford 在线算法更新均值/方差，阈值 = μ + k × σ
   baseline:
-    min_sample_count: 10            # 最小样本数（少于此值不检测）
-    sigma_multiplier: 3.0           # σ 倍数（默认 3σ）
-    min_threshold: 100              # 最小 PPS 阈值（保护低流量 IP）
-    max_age: 1800                   # 基线最大年龄（秒，默认30分钟）
+    min_sample_count: 60            # 最小学习样本数（60 秒），不足时仅学习不检测
+    sigma_multiplier: 4.0           # σ 倍数，4σ 覆盖 99.993%，平衡灵敏度与误报
+    min_threshold: 1000             # 最小 PPS 阈值，PPS <1000 的 IP 豁免基线检测
+    max_age: 3600                   # 基线最大有效期（秒），过期自动重置以适应流量变化
 
   # 攻击类型封禁配置
+  # 封禁条件 = 全局 min_packets 通过 + 类型 min_packets 通过 + ratio_threshold 通过
   attacks:
+    # SYN Flood：大量 SYN 不完成握手，正常 TCP 握手后 SYN 占比 <5%
+    # 误触风险：低
     syn_flood:
       enabled: true
-      ratio_threshold: 0.5          # SYN 包占比阈值（50%）
-      min_packets: 100              # 触发检测的最小 TCP 包数
-      block_duration: 60            # 封禁时长（秒）
+      ratio_threshold: 0.5          # SYN/TCP > 50% 才触发（正常流量远低于此值）
+      min_packets: 200              # TCP 包 ≥200 才检测
+      block_duration: 60
 
+    # UDP Flood：大量 UDP 包洪泛，Web 服务以 TCP 为主，正常 UDP 占比 <10%
+    # 误触风险：低
     udp_flood:
       enabled: true
-      ratio_threshold: 0.8          # UDP 包占比阈值（80%）
-      min_packets: 100              # 触发检测的最小 UDP 包数
+      ratio_threshold: 0.8          # UDP/总包 > 80% 才触发
+      min_packets: 200              # UDP 包 ≥200 才检测
       block_duration: 60
 
+    # ICMP Flood：大量 ICMP 包，正常流量 ICMP 极少（仅偶尔 ping）
+    # 误触风险：低
     icmp_flood:
       enabled: true
-      ratio_threshold: 0.5          # ICMP 包占比阈值（50%）
-      min_packets: 100              # 触发检测的最小 ICMP 包数
+      ratio_threshold: 0.5          # ICMP/总包 > 50% 才触发（ICMP Flood 特征明显）
+      min_packets: 50               # ICMP 包 ≥50 才检测（特征明显，可适当放宽）
       block_duration: 60
 
+    # ACK Flood：大量纯 ACK 包，⚠️ 误触风险最高
+    # 正常 HTTP 下载 ACK 占比可达 70-85%，需提高门槛避免误封
     ack_flood:
       enabled: true
-      ratio_threshold: 0.8          # ACK 包占比阈值（80%）
-      min_packets: 100              # 触发检测的最小 TCP 包数
+      ratio_threshold: 0.9          # ACK/TCP > 90% 才触发（正常下载通常 <85%）
+      min_packets: 500              # TCP 包 ≥500 才检测（主要误触来源，必须抬高）
       block_duration: 60

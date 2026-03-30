@@ -120,6 +120,12 @@ class RhoAiasProcess:
         config['anomaly_detection']['attacks']['ack_flood']['min_packets'] = 50
         config['anomaly_detection']['attacks']['ack_flood']['block_duration'] = 60
 
+        # 固定基线配置（与 config.yml 保持一致）
+        config['anomaly_detection']['baseline']['min_sample_count'] = 10
+        config['anomaly_detection']['baseline']['sigma_multiplier'] = 3.0
+        config['anomaly_detection']['baseline']['min_threshold'] = 100
+        config['anomaly_detection']['baseline']['max_age'] = 1800
+
         # 禁用认证
         config['auth']['enabled'] = False
 
