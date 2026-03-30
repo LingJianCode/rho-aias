@@ -231,7 +231,12 @@ class APIClient:
         return self._request("GET", "/api/geoblocking/status")
 
     def _request(self, method: str, path: str, data: dict = None) -> Tuple[bool, dict]:
-        """发送 HTTP 请求"""
+        """发送 HTTP 请求
+
+        统一响应格式：
+        - 成功: {"code": 0, "message": "ok", "data": {...}}
+        - 失败: {"code": 4xxxx, "message": "错误描述"}
+        """
         import urllib.request
         import urllib.error
 
@@ -251,15 +256,19 @@ class APIClient:
 
             with urllib.request.urlopen(req, timeout=10) as response:
                 result = json.loads(response.read().decode())
+                # 检查业务响应码，code=0 表示成功
+                if isinstance(result, dict) and "code" in result:
+                    return result.get("code") == 0, result
                 return True, result
         except urllib.error.HTTPError as e:
             try:
                 result = json.loads(e.read().decode())
+                # HTTP 错误时返回 False 和响应体
                 return False, result
             except:
-                return False, {"error": str(e)}
+                return False, {"code": -1, "message": str(e)}
         except Exception as e:
-            return False, {"error": str(e)}
+            return False, {"code": -1, "message": str(e)}
 
 
 class TestXDPIpBlocking(unittest.TestCase):
