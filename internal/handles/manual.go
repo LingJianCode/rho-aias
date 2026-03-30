@@ -170,13 +170,17 @@ type WhitelistHandle struct {
 	xdp   *ebpfs.Xdp
 	cache *manual.Cache
 	mu    sync.Mutex // 保护缓存 read-modify-write 的原子性
+
+	// 用户态白名单检查器（可选），用于实时同步内存索引
+	checker *manual.WhitelistChecker
 }
 
 // NewWhitelistHandle 创建新的白名单处理器
-func NewWhitelistHandle(xdp *ebpfs.Xdp, cache *manual.Cache) *WhitelistHandle {
+func NewWhitelistHandle(xdp *ebpfs.Xdp, cache *manual.Cache, checker *manual.WhitelistChecker) *WhitelistHandle {
 	return &WhitelistHandle{
-		xdp:   xdp,
-		cache: cache,
+		xdp:     xdp,
+		cache:   cache,
+		checker: checker,
 	}
 }
 
@@ -217,6 +221,11 @@ func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {
 		}
 	}
 
+	// 3. 同步到用户态白名单检查器
+	if w.checker != nil {
+		w.checker.Add(value)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "ok",
 	})
@@ -247,6 +256,11 @@ func (w *WhitelistHandle) DelWhitelistRule(c *gin.Context) {
 		if err := w.removeWhitelistRuleFromCache(req.Value); err != nil {
 			logger.Warnf("[Whitelist] Failed to remove rule from cache: %v", err)
 		}
+	}
+
+	// 3. 从用户态白名单检查器中移除
+	if w.checker != nil {
+		w.checker.Remove(req.Value)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
