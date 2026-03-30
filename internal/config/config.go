@@ -116,10 +116,12 @@ type BlockLogConfig struct {
 
 // FailGuardConfig SSH 防爆破配置
 // 参考 fail2ban 的核心功能：日志匹配 + 滑动窗口计数 + 达阈值封禁
+// 模式说明：normal=认证失败, ddos=认证失败+preauth异常, aggressive=ddos+协议协商失败
 type FailGuardConfig struct {
 	Enabled          bool     `yaml:"enabled"`            // 是否启用 FailGuard
 	LogPath          string   `yaml:"log_path"`           // 监控的日志文件路径
 	OffsetStateFile  string   `yaml:"offset_state_file"`  // 偏移量持久化文件路径（默认 ./data/failguard_offset.json）
+	Mode             string   `yaml:"mode"`               // 检测模式: normal/ddos/aggressive（默认 normal）
 	FailRegex        []string `yaml:"fail_regex"`         // 失败匹配正则（留空使用内置默认）
 	IgnoreRegex      []string `yaml:"ignore_regex"`       // 忽略匹配正则（留空使用内置默认）
 	IgnoreIPs        []string `yaml:"ignore_ips"`         // 忽略的 IP/CIDR 列表（白名单）
@@ -246,6 +248,9 @@ func NewConfig(fileName string) *Config {
 	}
 
 	// FailGuard 默认值
+	if config.FailGuard.Mode == "" {
+		config.FailGuard.Mode = "normal"
+	}
 	if config.FailGuard.LogPath == "" {
 		config.FailGuard.LogPath = "/var/log/auth.log"
 	}
