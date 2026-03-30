@@ -37,7 +37,7 @@ RUN if [ -f /sys/kernel/btf/vmlinux ]; then \
 RUN go generate ./internal/ebpfs/...
 
 # 构建二进制文件
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o rho-aias ./main.go
+RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o rho-aias ./cmd/server
 
 # ---------- 运行阶段 ----------
 FROM alpine:3.20
