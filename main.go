@@ -26,6 +26,7 @@ import (
 	"rho-aias/internal/services"
 	"rho-aias/internal/threatintel"
 	"rho-aias/internal/waf"
+	"rho-aias/internal/watcher"
 	"syscall"
 	"time"
 
@@ -252,6 +253,7 @@ func main() {
 	var wafMonitor *waf.Monitor
 	if cfg.WAF.Enabled {
 		wafMonitor = waf.NewMonitor(&cfg.WAF, xdp, ctx)
+		wafMonitor.SetOffsetStore(watcher.NewOffsetStore("./data/waf_offset.json"))
 		wafMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
 		if db != nil {
 			banRecordService := services.NewBanRecordService(db.DB)
@@ -269,6 +271,7 @@ func main() {
 	var failguardMonitor *failguard.Monitor
 	if cfg.FailGuard.Enabled {
 		failguardMonitor = failguard.NewMonitor(&cfg.FailGuard, xdp, ctx)
+		failguardMonitor.SetOffsetStore(watcher.NewOffsetStore("./data/failguard_offset.json"))
 		failguardMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
 		if db != nil {
 			banRecordService := services.NewBanRecordService(db.DB)
