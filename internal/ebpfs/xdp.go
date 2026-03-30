@@ -935,7 +935,7 @@ type WhitelistRule struct {
 // value: 键值（字节数组）
 // add: true=添加/更新, false=删除
 func (x *Xdp) updateWhitelistMap(iptype utils.IPType, value []byte, add bool) error {
-	blockValue := NewBlockValue(SourceMaskWhitelist)
+	blockValue := NewBlockValue(0xFFFFFFFF) // 白名单仅用 source_mask != 0 判断存在性，无来源语义
 
 	switch iptype {
 	case utils.IPTypeIPv4:

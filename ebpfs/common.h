@@ -36,4 +36,4 @@ struct block_value {
 #define SOURCE_MASK_DDoS      0x10  /* Bit 4: DDoS 异常检测 */
 #define SOURCE_MASK_RATE_LIMIT 0x20  /* Bit 5: 频率限制封禁 */
 #define SOURCE_MASK_ANOMALY     0x40  /* Bit 6: 异常流量检测 */
-#define SOURCE_MASK_WHITELIST   0x80  /* Bit 7: IP 白名单 */ 
+#define SOURCE_MASK_FAILGUARD   0x80  /* Bit 7: SSH 防爆破 */ 
