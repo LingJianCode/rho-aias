@@ -75,6 +75,8 @@
                 SecRuleEngine On
                 #SecDebugLog /logs/waf_debug.log
                 #SecDebugLogLevel 9
+                SecRule REQUEST_HEADERS:User-Agent "@rx (?i)(sqlmap|nmap|masscan|nessus|openvas|hydra|medusa|burp|python-requests|scrapy)" "id:1001,phase:1,deny,status:403,msg:'Blocked known scanner/bot User-Agent'"
+                SecRule REQUEST_URI "@rx (?i)(\.git|\.env|\.svn|\.htaccess|phpinfo|phpmyadmin|wp-config)" "id:1002,phase:1,deny,status:403,msg:'Sensitive path access blocked'"
                 SecRule REQUEST_URI "@streq /admin" "id:101,phase:1,t:lowercase,deny,status:403"
                 SecRule REQUEST_BODY "@rx maliciouspayload" "id:102,phase:2,t:lowercase,deny,status:403"
                 SecRule RESPONSE_STATUS "@rx 406" "id:103,phase:3,t:lowercase,deny,status:403"
