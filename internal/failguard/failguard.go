@@ -19,8 +19,8 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// sourceMaskFailGuard FailGuard 来源掩码，与 ebpfs.SourceMaskFailGuard (0x100) 保持一致
-const sourceMaskFailGuard uint32 = 0x100
+// sourceMaskFailGuard FailGuard 来源掩码，与 ebpfs.SourceMaskFailGuard (0x80) 保持一致
+const sourceMaskFailGuard uint32 = 0x80
 
 // XDPRuleManager 定义 FailGuard 所需的 XDP 规则操作接口
 type XDPRuleManager interface {
