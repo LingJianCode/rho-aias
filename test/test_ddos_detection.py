@@ -213,7 +213,12 @@ class APIClient:
         return self._request("GET", url)
 
     def _request(self, method: str, path: str, data: dict = None) -> Tuple[bool, dict]:
-        """发送 HTTP 请求"""
+        """发送 HTTP 请求
+
+        统一响应格式：
+        - 成功: {"code": 0, "message": "ok", "data": {...}}
+        - 失败: {"code": 4xxxx, "message": "错误描述"}
+        """
         import urllib.request
         import urllib.error
 
@@ -229,15 +234,19 @@ class APIClient:
 
             with urllib.request.urlopen(req, timeout=10) as response:
                 result = json.loads(response.read().decode())
+                # 检查业务响应码，code=0 表示成功
+                if isinstance(result, dict) and "code" in result:
+                    return result.get("code") == 0, result
                 return True, result
         except urllib.error.HTTPError as e:
             try:
                 result = json.loads(e.read().decode())
+                # HTTP 错误时返回 False 和响应体
                 return False, result
             except:
-                return False, {"error": str(e)}
+                return False, {"code": -1, "message": str(e)}
         except Exception as e:
-            return False, {"error": str(e)}
+            return False, {"code": -1, "message": str(e)}
 
 
 class TrafficGenerator:
@@ -392,15 +401,24 @@ class TestDDoSDetection(unittest.TestCase):
         return self.rho_process.start()
 
     def _verify_ip_blocked(self, attack_type: str) -> bool:
-        """验证攻击源 IP 是否被 anomaly 规则封禁"""
+        """验证攻击源 IP 是否被 anomaly 规则封禁
+
+        统一响应格式: {"code": 0, "message": "ok", "data": {"rules": [...], "total": N}}
+        """
         if not self.api_client:
             return False
         try:
             success, result = self.api_client.get_rules(source="anomaly")
             if success and result:
-                rules = result.get('data', result) if isinstance(result, dict) else []
-                if isinstance(rules, dict):
-                    rules = rules.get('rules', [])
+                # 新格式: data 字段包含 rules 列表
+                data = result.get('data', result) if isinstance(result, dict) else {}
+                if isinstance(data, dict):
+                    rules = data.get('rules', [])
+                elif isinstance(data, list):
+                    rules = data
+                else:
+                    rules = []
+
                 if isinstance(rules, list):
                     for rule in rules:
                         ip = rule.get('Key', rule.get('key', rule.get('ip', rule.get('cidr', ''))))
@@ -411,7 +429,8 @@ class TestDDoSDetection(unittest.TestCase):
                 logger.warning(f"No anomaly rule found for IP 10.0.1.2 after {attack_type}")
                 return False
             else:
-                logger.warning(f"Failed to query anomaly rules: {result}")
+                error_msg = result.get('message', result) if isinstance(result, dict) else result
+                logger.warning(f"Failed to query anomaly rules: {error_msg}")
                 return False
         except Exception as e:
             logger.warning(f"Error verifying IP block: {e}")
