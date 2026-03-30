@@ -18,6 +18,7 @@ type Config struct {
 	Auth             AuthConfig             `yaml:"auth"`
 	BlockLog         BlockLogConfig         `yaml:"blocklog"`
 	WAF              WAFConfig              `yaml:"waf"`
+	FailGuard        FailGuardConfig        `yaml:"failguard"`
 	AnomalyDetection AnomalyDetectionConfig `yaml:"anomaly_detection"`
 }
 
@@ -111,6 +112,19 @@ type BlockLogConfig struct {
 	MemoryCacheSize int    `yaml:"memory_cache_size"` // 内存缓存大小（用于实时查询）
 	BufferSize      int    `yaml:"buffer_size"`       // 异步写入缓冲区大小
 	FlushInterval   int    `yaml:"flush_interval"`    // 刷盘间隔（秒）
+}
+
+// FailGuardConfig SSH 防爆破配置
+// 参考 fail2ban 的核心功能：日志匹配 + 滑动窗口计数 + 达阈值封禁
+type FailGuardConfig struct {
+	Enabled     bool     `yaml:"enabled"`      // 是否启用 FailGuard
+	LogPath     string   `yaml:"log_path"`     // 监控的日志文件路径
+	FailRegex   []string `yaml:"fail_regex"`   // 失败匹配正则（留空使用内置默认）
+	IgnoreRegex []string `yaml:"ignore_regex"` // 忽略匹配正则（留空使用内置默认）
+	IgnoreIPs   []string `yaml:"ignore_ips"`   // 忽略的 IP/CIDR 列表（白名单）
+	MaxRetry    int      `yaml:"max_retry"`    // 触发封禁的失败次数阈值
+	FindTime    int      `yaml:"find_time"`    // 滑动窗口时长（秒）
+	BanDuration int      `yaml:"ban_duration"` // 封禁时长（秒）
 }
 
 // WAFConfig WAF 日志监控配置
@@ -227,6 +241,20 @@ func NewConfig(fileName string) *Config {
 	for name, source := range config.GeoBlocking.Sources {
 		source.Periodic = true
 		config.GeoBlocking.Sources[name] = source
+	}
+
+	// FailGuard 默认值
+	if config.FailGuard.LogPath == "" {
+		config.FailGuard.LogPath = "/var/log/auth.log"
+	}
+	if config.FailGuard.MaxRetry == 0 {
+		config.FailGuard.MaxRetry = 5
+	}
+	if config.FailGuard.FindTime == 0 {
+		config.FailGuard.FindTime = 600 // 默认 10 分钟
+	}
+	if config.FailGuard.BanDuration == 0 {
+		config.FailGuard.BanDuration = 3600 // 默认 1 小时
 	}
 
 	// WAF 默认值

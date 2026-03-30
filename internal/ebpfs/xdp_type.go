@@ -39,6 +39,7 @@ const (
 	SourceMaskRateLimit  = 0x20 // Bit 5: 频率限制封禁
 	SourceMaskAnomaly    = 0x40 // Bit 6: 异常流量检测
 	SourceMaskWhitelist  = 0x80 // Bit 7: IP 白名单
+	SourceMaskFailGuard  = 0x100 // Bit 8: SSH 防爆破
 )
 
 // Rule 规则结构体 - 包含来源信息
@@ -90,6 +91,9 @@ func MaskToSourceIDs(mask uint32) []string {
 	}
 	if mask&SourceMaskWhitelist != 0 {
 		sources = append(sources, "whitelist")
+	}
+	if mask&SourceMaskFailGuard != 0 {
+		sources = append(sources, "failguard")
 	}
 	return sources
 }
