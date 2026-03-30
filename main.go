@@ -102,11 +102,13 @@ func main() {
 			}
 		}
 	}
-	manualHandle := handles.NewManualHandle(xdp, manualCache)
+	manualHandle := handles.NewManualHandle(xdp, manualCache, nil)
 
 	// Initialize Whitelist Cache and Load Whitelist Rules
 	var whitelistCache *manual.Cache
 	var whitelistHandle *handles.WhitelistHandle
+	var whitelistChecker *manual.WhitelistChecker
+	whitelistChecker = manual.NewWhitelistChecker()
 	if cfg.Manual.Enabled {
 		whitelistCache = manual.NewCache(cfg.Manual.PersistenceDir)
 
@@ -126,10 +128,18 @@ func main() {
 					}
 				}
 				logger.Infof("[Whitelist] Loaded %d/%d rules from cache", loaded, whitelistData.WhitelistRuleCount())
+
+				// 同步白名单到用户态检查器
+				whitelistChecker.LoadFromCache(whitelistData)
+				logger.Infof("[Whitelist] User-space whitelist checker loaded with %d exact IPs, %d CIDRs",
+					len(whitelistData.Rules), 0)
 			}
 		}
 	}
-	whitelistHandle = handles.NewWhitelistHandle(xdp, whitelistCache)
+	whitelistHandle = handles.NewWhitelistHandle(xdp, whitelistCache, whitelistChecker)
+
+	// 将白名单检查器注入手动封禁模块，防止手动封禁白名单 IP
+	manualHandle.SetWhitelistChecker(whitelistChecker)
 
 	// Initialize Block Log
 	var blockLog *blocklog.BlockLog
@@ -241,6 +251,7 @@ func main() {
 	var wafMonitor *waf.Monitor
 	if cfg.WAF.Enabled {
 		wafMonitor = waf.NewMonitor(&cfg.WAF, xdp, ctx)
+		wafMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
 		if db != nil {
 			banRecordService := services.NewBanRecordService(db.DB)
 			wafMonitor.SetBanRecordStore(banRecordService)
@@ -300,6 +311,12 @@ func main() {
 
 		// 创建封禁回调函数
 		blockCallback := func(ip string, duration int, reason string) error {
+			// 白名单检查：跳过白名单 IP
+			if whitelistChecker.IsWhitelisted(ip) {
+				logger.Infof("[AnomalyDetection] IP %s is whitelisted, skipping block", ip)
+				return nil
+			}
+
 			// 使用 Anomaly Detection 来源掩码
 			err := xdp.AddRuleWithSourceAndExpiry(ip, ebpfs.SourceMaskAnomaly, duration)
 			if err != nil {

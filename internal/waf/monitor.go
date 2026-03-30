@@ -60,6 +60,9 @@ type Monitor struct {
 	bannedIPs map[string]IPBanRecord
 	mu       sync.RWMutex
 
+	// 白名单检查函数（可选，由外部注入）
+	whitelistCheck func(ip string) bool
+
 	// 日志解析正则表达式
 	// 常见的 WAF 日志格式：
 	// 1. Caddy access log: "1.2.3.4 - - [date] \"GET /path\" status rule_id"
@@ -87,6 +90,12 @@ func NewMonitor(cfg *config.WAFConfig, xdp XDPRuleManager, ctx context.Context) 
 // SetBanRecordStore 设置封禁记录持久化存储
 func (m *Monitor) SetBanRecordStore(store BanRecordStore) {
 	m.banStore = store
+}
+
+// SetWhitelistCheck 设置白名单检查函数
+// 在封禁 IP 前调用此函数判断 IP 是否在白名单中，避免白名单 IP 被写入黑名单
+func (m *Monitor) SetWhitelistCheck(fn func(ip string) bool) {
+	m.whitelistCheck = fn
 }
 
 // Start 启动 WAF 日志监控
@@ -337,10 +346,16 @@ func (m *Monitor) getLogSource(filePath string) string {
 	return "unknown"
 }
 
-// banIP 封禁 IP 地址（带去重）
+// banIP 封禁 IP 地址（带去重和白名单检查）
 func (m *Monitor) banIP(ip, logFile string, sourceMask uint32) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// 白名单检查：跳过白名单 IP，避免持续写入黑名单
+	if m.whitelistCheck != nil && m.whitelistCheck(ip) {
+		logger.Debugf("[WAF] IP %s is whitelisted, skipping ban", ip)
+		return
+	}
 
 	now := time.Now()
 
