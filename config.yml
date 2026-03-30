@@ -104,10 +104,15 @@ failguard:
   enabled: false                    # 是否启用 SSH 防爆破
   log_path: /var/log/auth.log       # 监控的日志文件路径
   offset_state_file: ./data/failguard_offset.json  # 偏移量持久化文件路径
+  # 检测模式：normal=认证失败, ddos=认证失败+preauth异常, aggressive=ddos+协议协商失败
+  # normal: 密码错误/无效用户/PAM失败等（参考 fail2ban normal 模式）
+  # ddos: normal + 未发送识别字符串/认证超时/preauth断连等（参考 fail2ban ddos 模式）
+  # aggressive: ddos + 协议版本错误/密钥协商失败/banner异常等（参考 fail2ban aggressive 模式）
+  mode: normal                      # 检测模式（默认 normal）
   # fail_regex 和 ignore_regex 留空则使用内置默认值（参考 fail2ban filter.d/sshd.conf）
-  # fail_regex:
+  # fail_regex:                       # 自定义失败匹配正则（留空则按 mode 使用内置规则）
   #   - "Failed \\w+ for (?:invalid user )?(\\S+) from <HOST> port \\d+ ssh2"
-  # ignore_regex:
+  # ignore_regex:                     # 自定义忽略匹配正则（留空使用内置默认）
   #   - "Accepted \\w+ for .* from <HOST>"
   ignore_ips:                       # 白名单 IP/CIDR（永不封禁）
     # - "10.0.0.0/8"

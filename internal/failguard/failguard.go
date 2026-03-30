@@ -86,7 +86,7 @@ func NewMonitor(cfg *config.FailGuardConfig, xdp XDPRuleManager, ctx context.Con
 	// 确定使用的正则：用户配置覆盖或使用内置默认值
 	failPatterns := cfg.FailRegex
 	if len(failPatterns) == 0 {
-		failPatterns = DefaultSSHDFailRegex
+		failPatterns = GetFailRegexByMode(cfg.Mode)
 	}
 	ignorePatterns := cfg.IgnoreRegex
 	if len(ignorePatterns) == 0 {
@@ -168,8 +168,8 @@ func (m *Monitor) Start() error {
 	// 启动监控 goroutine
 	go m.monitorLoop()
 
-	logger.Infof("[FailGuard] Monitor started, log=%s, max_retry=%d, find_time=%ds, ban_duration=%ds",
-		m.cfg.LogPath, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
+	logger.Infof("[FailGuard] Monitor started, mode=%s, log=%s, max_retry=%d, find_time=%ds, ban_duration=%ds",
+		m.cfg.Mode, m.cfg.LogPath, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
 
 	// 启动过期清理 goroutine
 	go m.cleanupExpiredBans()
