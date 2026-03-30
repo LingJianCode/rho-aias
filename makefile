@@ -14,7 +14,7 @@ gen: vmlinux.h
 
 build: gen
 	@echo "==> Building"
-	$(GO) build -o $(APP)
+	$(GO) build -o $(APP) ./cmd/server
 
 run: all
 	@echo "==> Running"
