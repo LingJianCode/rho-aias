@@ -253,7 +253,11 @@ func main() {
 	var wafMonitor *waf.Monitor
 	if cfg.WAF.Enabled {
 		wafMonitor = waf.NewMonitor(&cfg.WAF, xdp, ctx)
-		wafMonitor.SetOffsetStore(watcher.NewOffsetStore("./data/waf_offset.json"))
+		wafOffsetFile := cfg.WAF.OffsetStateFile
+		if wafOffsetFile == "" {
+			wafOffsetFile = "./data/waf_offset.json"
+		}
+		wafMonitor.SetOffsetStore(watcher.NewOffsetStore(wafOffsetFile))
 		wafMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
 		if db != nil {
 			banRecordService := services.NewBanRecordService(db.DB)
@@ -271,7 +275,11 @@ func main() {
 	var failguardMonitor *failguard.Monitor
 	if cfg.FailGuard.Enabled {
 		failguardMonitor = failguard.NewMonitor(&cfg.FailGuard, xdp, ctx)
-		failguardMonitor.SetOffsetStore(watcher.NewOffsetStore("./data/failguard_offset.json"))
+		failguardOffsetFile := cfg.FailGuard.OffsetStateFile
+		if failguardOffsetFile == "" {
+			failguardOffsetFile = "./data/failguard_offset.json"
+		}
+		failguardMonitor.SetOffsetStore(watcher.NewOffsetStore(failguardOffsetFile))
 		failguardMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
 		if db != nil {
 			banRecordService := services.NewBanRecordService(db.DB)
