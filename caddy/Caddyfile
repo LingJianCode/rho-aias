@@ -91,7 +91,7 @@
 
         handle_errors 403 {
                 header X-Blocked "true"
-                respond "403 Forbidden\n" 403
+                respond "403 Forbidden" 403
         }
 }
 
