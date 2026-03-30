@@ -7,6 +7,7 @@ import (
 
 	"rho-aias/internal/auth/jwt"
 	"rho-aias/internal/casbin"
+	"rho-aias/internal/response"
 	"rho-aias/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -48,9 +49,7 @@ func AuthMiddleware(authService *services.AuthService, apiKeyService *services.A
 		// 2. 尝试 JWT 认证
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "missing authorization",
-			})
+			response.Unauthorized(c, "missing authorization")
 			c.Abort()
 			return
 		}
@@ -58,9 +57,7 @@ func AuthMiddleware(authService *services.AuthService, apiKeyService *services.A
 		// 解析 Bearer token
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid authorization header format",
-			})
+			response.Unauthorized(c, "invalid authorization header format")
 			c.Abort()
 			return
 		}
@@ -71,14 +68,9 @@ func AuthMiddleware(authService *services.AuthService, apiKeyService *services.A
 		claims, err := authService.ValidateToken(tokenString)
 		if err != nil {
 			if err == jwt.ErrExpiredToken {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"error": "token has expired",
-					"code":  "TOKEN_EXPIRED",
-				})
+				response.Fail(c, http.StatusUnauthorized, response.CodeTokenExpired, "token has expired")
 			} else {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"error": "invalid token",
-				})
+				response.Unauthorized(c, "invalid token")
 			}
 			c.Abort()
 			return
@@ -101,9 +93,7 @@ func CasbinMiddleware(enforcer *casbin.Enforcer, obj string, act string) gin.Han
 		// 从上下文获取 subject
 		sub, exists := c.Get(ContextKeySubject)
 		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "unauthorized",
-			})
+			response.Unauthorized(c, "unauthorized")
 			c.Abort()
 			return
 		}
@@ -111,17 +101,13 @@ func CasbinMiddleware(enforcer *casbin.Enforcer, obj string, act string) gin.Han
 		// 执行权限校验
 		allowed, err := enforcer.Enforce(sub, obj, act)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "failed to check permission",
-			})
+			response.InternalError(c, "failed to check permission")
 			c.Abort()
 			return
 		}
 
 		if !allowed {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "permission denied",
-			})
+			response.Forbidden(c, "permission denied")
 			c.Abort()
 			return
 		}
@@ -135,9 +121,7 @@ func AdminMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, exists := c.Get(ContextKeyUserRole)
 		if !exists || role != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "admin access required",
-			})
+			response.Fail(c, http.StatusForbidden, response.CodeAdminRequired, "admin access required")
 			c.Abort()
 			return
 		}

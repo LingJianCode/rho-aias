@@ -7,6 +7,7 @@ import (
 
 	"rho-aias/internal/middleware"
 	"rho-aias/internal/models"
+	"rho-aias/internal/response"
 	"rho-aias/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -63,24 +64,24 @@ func (h *UserHandle) CreateUser(c *gin.Context) {
 
 	var req CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	user, err := h.userService.CreateUser(req.Username, req.Password, req.Nickname, req.Email, req.Role)
 	if err != nil {
 		if err == services.ErrUserAlreadyExists {
-			c.JSON(http.StatusConflict, gin.H{"error": "username already exists"})
+			response.Conflict(c, response.CodeUsernameExists, "username already exists")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
 	// 分配角色
 	if err := h.enforcer.AssignRoleToUser(user.ID, req.Role); err != nil {
 		// 记录错误但不影响用户创建
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to assign role"})
+		response.InternalError(c, "failed to assign role")
 		return
 	}
 
@@ -100,7 +101,7 @@ func (h *UserHandle) CreateUser(c *gin.Context) {
 		UserAgent:  c.GetHeader("User-Agent"),
 	})
 
-	c.JSON(http.StatusCreated, user)
+	response.Created(c, user)
 }
 
 // ListUsers 列出用户
@@ -115,11 +116,11 @@ func (h *UserHandle) CreateUser(c *gin.Context) {
 func (h *UserHandle) ListUsers(c *gin.Context) {
 	users, err := h.userService.ListUsers()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"users": users})
+	response.OK(c, gin.H{"users": users})
 }
 
 // UpdateUserRequest 更新用户请求
@@ -150,13 +151,13 @@ func (h *UserHandle) UpdateUser(c *gin.Context) {
 	userIDStr := c.Param("id")
 	userID, err := strconv.ParseUint(userIDStr, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		response.BadRequest(c, "invalid user id")
 		return
 	}
 
 	var req UpdateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -171,7 +172,7 @@ func (h *UserHandle) UpdateUser(c *gin.Context) {
 		updates["role"] = req.Role
 		// 更新 Casbin 角色
 		if err := h.enforcer.AssignRoleToUser(uint(userID), req.Role); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update role"})
+			response.InternalError(c, "failed to update role")
 			return
 		}
 	}
@@ -180,7 +181,7 @@ func (h *UserHandle) UpdateUser(c *gin.Context) {
 	}
 
 	if err := h.userService.UpdateUser(uint(userID), updates); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -197,7 +198,7 @@ func (h *UserHandle) UpdateUser(c *gin.Context) {
 		UserAgent:  c.GetHeader("User-Agent"),
 	})
 
-	c.JSON(http.StatusOK, gin.H{"message": "user updated successfully"})
+	response.OKMsg(c, "user updated successfully")
 }
 
 // DeleteUser 删除用户
@@ -218,18 +219,18 @@ func (h *UserHandle) DeleteUser(c *gin.Context) {
 	userIDStr := c.Param("id")
 	userID, err := strconv.ParseUint(userIDStr, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		response.BadRequest(c, "invalid user id")
 		return
 	}
 
 	// 不能删除自己
 	if uint(userID) == currentUserID {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete yourself"})
+		response.BadRequest(c, "cannot delete yourself")
 		return
 	}
 
 	if err := h.userService.DeleteUser(uint(userID)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -244,7 +245,7 @@ func (h *UserHandle) DeleteUser(c *gin.Context) {
 		UserAgent:  c.GetHeader("User-Agent"),
 	})
 
-	c.JSON(http.StatusOK, gin.H{"message": "user deleted successfully"})
+	response.OKMsg(c, "user deleted successfully")
 }
 
 // GetUser 获取单个用户信息
@@ -261,19 +262,19 @@ func (h *UserHandle) GetUser(c *gin.Context) {
 	userIDStr := c.Param("id")
 	userID, err := strconv.ParseUint(userIDStr, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		response.BadRequest(c, "invalid user id")
 		return
 	}
 
 	user, err := h.userService.GetUserByID(uint(userID))
 	if err != nil {
 		if err == services.ErrUserNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			response.Fail(c, http.StatusNotFound, response.CodeUserNotFound, "user not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, user)
+	response.OK(c, user)
 }

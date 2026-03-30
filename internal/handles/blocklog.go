@@ -1,10 +1,10 @@
 package handles
 
 import (
-	"net/http"
 	"strconv"
 
 	"rho-aias/internal/blocklog"
+	"rho-aias/internal/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,10 +26,7 @@ func NewBlockLogHandle(blockLog *blocklog.BlockLog) *BlockLogHandle {
 func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 	var filter blocklog.RecordFilter
 	if err := c.ShouldBindQuery(&filter); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "Invalid query parameters: " + err.Error(),
-		})
+		response.BadRequest(c, "Invalid query parameters: "+err.Error())
 		return
 	}
 
@@ -45,13 +42,9 @@ func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 		records = h.blockLog.GetRecords(filter.Limit)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data": gin.H{
-			"total":   len(records),
-			"records": records,
-		},
+	response.OK(c, gin.H{
+		"total":   len(records),
+		"records": records,
 	})
 }
 
@@ -60,11 +53,7 @@ func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 func (h *BlockLogHandle) GetStats(c *gin.Context) {
 	stats := h.blockLog.GetStats()
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data":    stats,
-	})
+	response.OK(c, stats)
 }
 
 // ClearRecords 清空阻断记录
@@ -72,10 +61,7 @@ func (h *BlockLogHandle) GetStats(c *gin.Context) {
 func (h *BlockLogHandle) ClearRecords(c *gin.Context) {
 	h.blockLog.Clear()
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "Block log cleared",
-	})
+	response.OKMsg(c, "Block log cleared")
 }
 
 // GetBlockedIPs 获取被阻断的 IP 列表（聚合）
@@ -96,13 +82,9 @@ func (h *BlockLogHandle) GetBlockedIPs(c *gin.Context) {
 		topIPs = topIPs[:limit]
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data": gin.H{
-			"total_blocked_ips": len(stats.TopBlockedIPs),
-			"top_blocked_ips":   topIPs,
-		},
+	response.OK(c, gin.H{
+		"total_blocked_ips": len(stats.TopBlockedIPs),
+		"top_blocked_ips":   topIPs,
 	})
 }
 
@@ -124,13 +106,9 @@ func (h *BlockLogHandle) GetBlockedCountries(c *gin.Context) {
 		topCountries = topCountries[:limit]
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "ok",
-		"data": gin.H{
-			"total_blocked_countries": len(stats.TopBlockedCountries),
-			"top_blocked_countries":   topCountries,
-		},
+	response.OK(c, gin.H{
+		"total_blocked_countries": len(stats.TopBlockedCountries),
+		"top_blocked_countries":   topCountries,
 	})
 }
 
