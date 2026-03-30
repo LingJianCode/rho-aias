@@ -56,7 +56,7 @@ manual:
 
 # 认证配置
 auth:
-  enabled: false                    # 是否启用认证
+  enabled: true                    # 是否启用认证
   jwt_secret: ""                   # JWT 密钥，建议从环境变量 JWT_SECRET 读取，留空则使用环境变量
   jwt_issuer: "rho-aias"           # JWT 签发者
   token_duration: 1440             # Token 有效期（分钟），默认 1440 分钟（24小时）
