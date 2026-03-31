@@ -48,6 +48,13 @@ func (x *Xdp) SetCallback(callback BlockLogCallback) {
 }
 
 func (x *Xdp) Start() error {
+	x.closeMu.Lock()
+	defer x.closeMu.Unlock()
+	return x.startInternal()
+}
+
+// startInternal eBPF 启动的核心逻辑（不含 closeMu 加锁，供 Start 和 restart 复用）
+func (x *Xdp) startInternal() error {
 	iface, err := net.InterfaceByName(x.InterfaceName)
 	if err != nil {
 		return fmt.Errorf("failed to get interface %s: %s", x.InterfaceName, err)
@@ -62,7 +69,7 @@ func (x *Xdp) Start() error {
 	x.objects = &ebpfObj
 	x.reader, err = ringbuf.NewReader(x.objects.Events)
 	if err != nil {
-		x.Close()
+		x.closeResources()
 		return fmt.Errorf("failed to create ringbuf reader: %s", err.Error())
 	}
 	x.done = make(chan struct{})
@@ -87,28 +94,48 @@ func (x *Xdp) Start() error {
 		logger.Debugf("[XDP] Failed to attach with %s mode: %s", flagName, err.Error())
 	}
 	if count == 3 {
-		x.Close()
+		x.closeResources()
 		return errors.New("failed to attach XDP program")
 	}
 	return nil
 }
 
 func (x *Xdp) Close() {
+	x.closeMu.Lock()
+	defer x.closeMu.Unlock()
 	logger.Info("[XDP] Close")
-	x.doneOnce.Do(func() {
-		if x.done != nil {
-			close(x.done)
-		}
-		if x.reader != nil {
-			x.reader.Close()
-		}
-		if x.link != nil {
-			(*x.link).Close()
-		}
-		if x.objects != nil {
-			x.objects.Close()
-		}
-	})
+	x.doneOnce.Do(x.closeResources)
+}
+
+// closeResources 释放所有 eBPF 资源（不含锁保护，由 Close/restart 调用）
+// 每个字段都做了 nil check + 置 nil，天然幂等，可安全重复调用
+func (x *Xdp) closeResources() {
+	if x.done != nil {
+		close(x.done)
+		x.done = nil
+	}
+	if x.reader != nil {
+		x.reader.Close()
+		x.reader = nil
+	}
+	if x.link != nil {
+		(*x.link).Close()
+		x.link = nil
+	}
+	if x.objects != nil {
+		x.objects.Close()
+		x.objects = nil
+	}
+}
+
+// restart 安全地重启 eBPF：先清理现有资源，再重新加载
+// 替换 doneOnce 使后续 Close() 仍可生效
+func (x *Xdp) restart() error {
+	x.closeMu.Lock()
+	defer x.closeMu.Unlock()
+	x.closeResources()
+	x.doneOnce = sync.Once{}
+	return x.startInternal()
 }
 
 // ============================================
@@ -176,9 +203,9 @@ func (x *Xdp) MonitorEvents() {
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				logger.Warn("[XDP] Ringbuf reader closed, trying to restart eBPF")
-				x.Close()
-				if err := x.Start(); err != nil {
-					logger.Fatalf("[XDP] Failed to restart eBPF: %s", err.Error())
+				if err := x.restart(); err != nil {
+					logger.Errorf("[XDP] Failed to restart eBPF: %s", err.Error())
+					return
 				}
 				logger.Info("[XDP] eBPF restarted successfully, continuing to monitor")
 				continue // 继续循环监听新事件
