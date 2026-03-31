@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/models"
 	"rho-aias/internal/response"
 	"rho-aias/internal/services"
@@ -14,11 +15,12 @@ import (
 // BanRecordHandle 封禁记录 API 处理器
 type BanRecordHandle struct {
 	service *services.BanRecordService
+	xdp     *ebpfs.Xdp
 }
 
 // NewBanRecordHandle 创建封禁记录处理器
-func NewBanRecordHandle(service *services.BanRecordService) *BanRecordHandle {
-	return &BanRecordHandle{service: service}
+func NewBanRecordHandle(service *services.BanRecordService, xdp *ebpfs.Xdp) *BanRecordHandle {
+	return &BanRecordHandle{service: service, xdp: xdp}
 }
 
 // GetBanRecords 查询封禁记录
@@ -73,4 +75,51 @@ func (h *BanRecordHandle) GetBanRecord(c *gin.Context) {
 	}
 
 	response.OK(c, record)
+}
+
+// UnbanBanRecord 手动解封封禁记录
+// DELETE /api/ban-records/:id/unblock
+func (h *BanRecordHandle) UnbanBanRecord(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		response.BadRequest(c, "Invalid record ID")
+		return
+	}
+
+	// 获取封禁记录
+	record, err := h.service.GetRecordByID(uint(id))
+	if err != nil {
+		response.Fail(c, http.StatusNotFound, response.CodeRecordNotFound, "Ban record not found")
+		return
+	}
+
+	// 检查状态是否为 active
+	if record.Status != models.BanStatusActive {
+		response.BadRequest(c, "Ban record is not in active status")
+		return
+	}
+
+	// 从 eBPF map 移除对应来源的规则
+	sourceMask, ok := ebpfs.SourceStringToMask(record.Source)
+	if ok && h.xdp != nil {
+		_, _, _, err := h.xdp.UpdateRuleSourceMask(record.IP, sourceMask)
+		if err != nil {
+			response.InternalError(c, "Failed to remove IP from eBPF map: "+err.Error())
+			return
+		}
+		// 注意：即使 eBPF map 中不存在该规则，也继续更新数据库状态
+	}
+
+	// 更新数据库状态为手动解封
+	if err := h.service.UpdateStatusByID(uint(id), models.BanStatusManualUnblock); err != nil {
+		response.InternalError(c, "Failed to update ban record status: "+err.Error())
+		return
+	}
+
+	response.OK(c, gin.H{
+		"message": "IP unblocked successfully",
+		"ip":      record.IP,
+		"source":  record.Source,
+	})
 }

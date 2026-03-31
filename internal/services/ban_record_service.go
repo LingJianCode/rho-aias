@@ -253,6 +253,45 @@ func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration i
 	return s.db.Create(record).Error
 }
 
+// GetRecordByID 根据 ID 获取封禁记录
+func (s *BanRecordService) GetRecordByID(id uint) (*models.BanRecord, error) {
+	var record models.BanRecord
+	err := s.db.First(&record, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &record, nil
+}
+
+// UpdateStatusByID 根据 ID 更新封禁状态
+func (s *BanRecordService) UpdateStatusByID(id uint, status string) error {
+	now := time.Now()
+	updates := map[string]interface{}{
+		"status": status,
+	}
+	// 如果是解封状态，记录解封时间
+	if status == models.BanStatusManualUnblock || status == models.BanStatusAutoUnblock {
+		updates["unblocked_at"] = &now
+	}
+	return s.db.Model(&models.BanRecord{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// MarkAllActiveAsAutoUnblock 将所有 active 状态的记录标记为 auto_unblock
+// 用于系统启动时，因为 eBPF map 状态丢失
+func (s *BanRecordService) MarkAllActiveAsAutoUnblock() (int64, error) {
+	now := time.Now()
+	result := s.db.Model(&models.BanRecord{}).
+		Where("status = ?", models.BanStatusActive).
+		Updates(map[string]interface{}{
+			"status":       models.BanStatusAutoUnblock,
+			"unblocked_at": &now,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
 // init 确保 BanRecord 表存在（用于 UPSERT 时需要唯一索引）
 func init() {
 	// GORM AutoMigrate 会处理表创建

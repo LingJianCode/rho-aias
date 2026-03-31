@@ -208,6 +208,15 @@ func main() {
 		if err := bizDB.AutoMigrateBusiness(); err != nil {
 			logger.Warnf("[Main] Failed to migrate business database: %v", err)
 		}
+
+		// 启动时将所有 active 状态的封禁记录标记为 auto_unblock
+		// 因为 eBPF map 状态在重启后丢失
+		banRecordService := services.NewBanRecordService(bizDB.DB)
+		if count, err := banRecordService.MarkAllActiveAsAutoUnblock(); err != nil {
+			logger.Warnf("[Main] Failed to mark active bans as auto_unblock: %v", err)
+		} else if count > 0 {
+			logger.Infof("[Main] Marked %d active ban records as auto_unblock (eBPF state lost on restart)", count)
+		}
 	}
 
 	// Initialize Intel Manager (if enabled)
@@ -570,7 +579,7 @@ func main() {
 		// Register Ban Record routes (需要数据库)
 		if bizDB != nil {
 			banRecordService := services.NewBanRecordService(bizDB.DB)
-			banRecordHandle := handles.NewBanRecordHandle(banRecordService)
+			banRecordHandle := handles.NewBanRecordHandle(banRecordService, xdp)
 			routers.RegisterBanRecordRoutes(api, banRecordHandle, casbinEnforcer, authService, apiKeyService)
 		}
 	} else {
@@ -610,7 +619,7 @@ func main() {
 		// Register Ban Record routes (需要数据库)
 		if bizDB != nil {
 			banRecordService := services.NewBanRecordService(bizDB.DB)
-			banRecordHandle := handles.NewBanRecordHandle(banRecordService)
+			banRecordHandle := handles.NewBanRecordHandle(banRecordService, xdp)
 			routers.RegisterBanRecordRoutes(api, banRecordHandle, nil, nil, nil)
 		}
 	}

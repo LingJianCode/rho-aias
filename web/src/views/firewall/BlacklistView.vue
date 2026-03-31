@@ -55,6 +55,11 @@
           <el-table-column prop="duration" label="封禁时长" width="120">
             <template #default="{ row }">{{ formatDuration(row.duration) }}</template>
           </el-table-column>
+          <el-table-column label="操作" width="100">
+            <template #default="{ row }">
+              <el-button type="danger" link @click="handleUnblock(row)">解封</el-button>
+            </template>
+          </el-table-column>
         </el-table>
         <div class="pagination-wrapper">
           <el-pagination
@@ -92,7 +97,7 @@ import { Plus } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/format'
 import { useConfirm } from '@/composables/useConfirm'
 import { addBlacklistRule, deleteBlacklistRule, getBlacklist } from '@/api/manual'
-import { getBanRecords } from '@/api/ban-records'
+import { getBanRecords, unblockBanRecord } from '@/api/ban-records'
 import type { ManualRuleItem, BanRecord } from '@/types/api'
 
 const { confirmDelete } = useConfirm()
@@ -202,6 +207,18 @@ async function handleDelete(row: ManualRuleItem) {
     await deleteBlacklistRule(row.value)
     ElMessage.success('删除成功')
     fetchManualRules()
+  } catch {
+    // Error handled by request interceptor
+  }
+}
+
+// 解封封禁记录
+async function handleUnblock(row: BanRecord) {
+  if (!(await confirmDelete(`IP ${row.ip}`))) return
+  try {
+    await unblockBanRecord(row.id)
+    ElMessage.success('解封成功')
+    fetchBanRecords()
   } catch {
     // Error handled by request interceptor
   }

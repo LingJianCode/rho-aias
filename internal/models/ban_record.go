@@ -31,7 +31,8 @@ const (
 
 // 封禁状态常量
 const (
-	BanStatusActive       = "active"
-	BanStatusExpired      = "expired"
+	BanStatusActive        = "active"
+	BanStatusExpired       = "expired"
 	BanStatusManualUnblock = "manual_unblock"
+	BanStatusAutoUnblock   = "auto_unblock" // 启动时自动解封（eBPF map 状态丢失）
 )

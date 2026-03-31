@@ -36,3 +36,7 @@ export function getBanRecord(id: number): Promise<ApiResponse<BanRecord>> {
 export function getBanRecordStats(): Promise<ApiResponse<BanRecordStats>> {
   return request.get('/api/ban-records/stats').then((res) => res.data)
 }
+
+export function unblockBanRecord(id: number): Promise<ApiResponse<void>> {
+  return request.delete(`/api/ban-records/${id}/unblock`).then((res) => res.data)
+}
