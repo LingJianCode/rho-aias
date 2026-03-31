@@ -43,21 +43,21 @@ type GeoConfig struct {
 
 // Status 地域封禁模块状态
 type Status struct {
-	Enabled          bool                      // 实际是否在过滤（数据已加载并激活）
-	Mode             string                    // 模式 (whitelist/blacklist)
-	AllowedCountries []string                  // 允许的国家列表
-	LastUpdate       time.Time                 // 最后更新时间
-	TotalRules       int                       // 总规则数量
-	Sources          map[SourceID]SourceStatus // 各数据源状态
+	Enabled          bool                      `json:"enabled"`            // 实际是否在过滤（数据已加载并激活）
+	Mode             string                    `json:"mode"`               // 模式 (whitelist/blacklist)
+	AllowedCountries []string                  `json:"allowed_countries"`  // 允许的国家列表
+	LastUpdate       time.Time                 `json:"last_update"`        // 最后更新时间
+	TotalRules       int                       `json:"total_rules"`        // 总规则数量
+	Sources          map[SourceID]SourceStatus `json:"sources"`            // 各数据源状态
 }
 
 // SourceStatus 单个 GeoIP 数据源的状态
 type SourceStatus struct {
-	Enabled    bool      // 是否启用
-	LastUpdate time.Time // 最后更新时间
-	Success    bool      // 最后一次更新是否成功
-	RuleCount  int       // 该数据源的规则数量
-	Error      string    // 错误信息
+	Enabled    bool      `json:"enabled"`     // 是否启用
+	LastUpdate time.Time `json:"last_update"` // 最后更新时间
+	Success    bool      `json:"success"`     // 最后一次更新是否成功
+	RuleCount  int       `json:"rule_count"`  // 该数据源的规则数量
+	Error      string    `json:"error"`       // 错误信息
 }
 
 var ErrGeoIPCacheNotFound = errors.New("geoip cache not found")
