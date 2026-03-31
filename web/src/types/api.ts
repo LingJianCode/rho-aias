@@ -52,21 +52,6 @@ export interface CaptchaResponse {
 
 export type RuleSource = 'manual' | 'ipsum' | 'spamhaus' | 'waf' | 'ddos' | 'anomaly' | 'failguard' | 'rate_limit'
 
-export interface Rule {
-  id: string
-  ip: string
-  cidr?: number
-  source: RuleSource
-  reason: string
-  created_at: string
-  expires_at?: string
-}
-
-export interface RulesListResponse {
-  items: Rule[]
-  total: number
-}
-
 // ============================================
 // 手动规则（黑名单/白名单）
 // ============================================

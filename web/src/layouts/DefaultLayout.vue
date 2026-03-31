@@ -21,7 +21,6 @@
             <el-icon><Aim /></el-icon>
             <span>防火墙</span>
           </template>
-          <el-menu-item index="/firewall/rules">规则列表</el-menu-item>
           <el-menu-item index="/firewall/blacklist">黑名单</el-menu-item>
           <el-menu-item index="/firewall/whitelist">白名单</el-menu-item>
         </el-sub-menu>

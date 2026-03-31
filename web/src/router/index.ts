@@ -15,7 +15,6 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/dashboard' },
       { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/dashboard/DashboardView.vue') },
-      { path: 'firewall/rules', name: 'Rules', component: () => import('@/views/firewall/RulesView.vue') },
       { path: 'firewall/blacklist', name: 'Blacklist', component: () => import('@/views/firewall/BlacklistView.vue') },
       { path: 'firewall/whitelist', name: 'Whitelist', component: () => import('@/views/firewall/WhitelistView.vue') },
       { path: 'blocklog', name: 'BlockLog', component: () => import('@/views/blocklog/BlockLogView.vue') },

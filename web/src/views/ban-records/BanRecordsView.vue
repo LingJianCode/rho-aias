@@ -15,7 +15,7 @@
         <StatsCard label="已过期" :value="stats.expired" :icon="CircleClose" icon-color="#909399" />
       </el-col>
       <el-col :span="6">
-        <StatsCard label="今日新增" :value="stats.today_new" :icon="TrendCharts" icon-color="#e6a23c" />
+        <StatsCard label="今日新增" :value="stats.today_count" :icon="TrendCharts" icon-color="#e6a23c" />
       </el-col>
     </el-row>
 
@@ -82,7 +82,7 @@ const stats = reactive<BanRecordStats>({
   total: 0,
   active: 0,
   expired: 0,
-  today_new: 0,
+  today_count: 0,
 })
 
 async function fetchStats() {
