@@ -1,14 +1,12 @@
 import request from './request'
-import type { ApiResponse, PaginatedData, PaginationParams, Rule, RuleSource } from '@/types/api'
+import type { ApiResponse, RulesListResponse, RuleSource } from '@/types/api'
 
-export interface GetRulesParams extends PaginationParams {
+export interface GetRulesParams {
+  page?: number
+  page_size?: number
   source?: RuleSource | 'all'
 }
 
-export function getRules(params: GetRulesParams): Promise<ApiResponse<PaginatedData<Rule>>> {
+export function getRules(params: GetRulesParams): Promise<ApiResponse<RulesListResponse>> {
   return request.get('/api/rules', { params }).then((res) => res.data)
-}
-
-export function getRuleCount(): Promise<ApiResponse<{ total: number; by_source: Record<string, number> }>> {
-  return request.get('/api/rules/count').then((res) => res.data)
 }

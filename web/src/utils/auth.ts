@@ -1,5 +1,5 @@
 const TOKEN_KEY = 'rho_aias_token'
-const REFRESH_TOKEN_KEY = 'rho_aias_refresh_token'
+const TOKEN_EXPIRES_KEY = 'rho_aias_token_expires'
 const USER_KEY = 'rho_aias_user'
 
 export function getToken(): string | null {
@@ -14,16 +14,16 @@ export function removeToken(): void {
   localStorage.removeItem(TOKEN_KEY)
 }
 
-export function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_TOKEN_KEY)
+export function getTokenExpires(): string | null {
+  return localStorage.getItem(TOKEN_EXPIRES_KEY)
 }
 
-export function setRefreshToken(token: string): void {
-  localStorage.setItem(REFRESH_TOKEN_KEY, token)
+export function setTokenExpires(expiresAt: string): void {
+  localStorage.setItem(TOKEN_EXPIRES_KEY, expiresAt)
 }
 
-export function removeRefreshToken(): void {
-  localStorage.removeItem(REFRESH_TOKEN_KEY)
+export function removeTokenExpires(): void {
+  localStorage.removeItem(TOKEN_EXPIRES_KEY)
 }
 
 export function getStoredUser(): unknown {
@@ -41,6 +41,15 @@ export function removeStoredUser(): void {
 
 export function clearAuth(): void {
   removeToken()
-  removeRefreshToken()
+  removeTokenExpires()
   removeStoredUser()
+}
+
+export function isTokenExpired(): boolean {
+  const expiresAt = getTokenExpires()
+  if (!expiresAt) return true
+  // 提前 5 分钟认为过期，避免边界情况
+  const expiresTime = new Date(expiresAt).getTime()
+  const now = Date.now()
+  return now >= expiresTime - 5 * 60 * 1000
 }

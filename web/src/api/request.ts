@@ -1,6 +1,6 @@
 import axios, { type AxiosInstance, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import { ElMessage, ElNotification } from 'element-plus'
-import { getToken, getRefreshToken, setToken, clearAuth } from '@/utils/auth'
+import { getToken, setToken, clearAuth } from '@/utils/auth'
 import type { ApiResponse } from '@/types/api'
 import router from '@/router'
 
@@ -74,8 +74,9 @@ instance.interceptors.response.use(
       originalRequest._retry = true
       isRefreshing = true
 
-      const refreshToken = getRefreshToken()
-      if (!refreshToken) {
+      // 使用当前 token 尝试刷新（后端设计：用 access token 刷新）
+      const currentToken = getToken()
+      if (!currentToken) {
         handleSessionExpired()
         return Promise.reject(error)
       }
@@ -86,6 +87,7 @@ instance.interceptors.response.use(
         const authStore = useAuthStore()
         const newToken = await authStore.refreshToken()
         onRefreshed(newToken)
+        setToken(newToken)
         originalRequest.headers.Authorization = `Bearer ${newToken}`
         return instance(originalRequest)
       } catch {

@@ -20,10 +20,10 @@
             <code>{{ row.key_prefix }}****</code>
           </template>
         </el-table-column>
-        <el-table-column prop="is_active" label="状态" width="80">
+        <el-table-column prop="active" label="状态" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">
-              {{ row.is_active ? '有效' : '已吊销' }}
+            <el-tag :type="row.active ? 'success' : 'danger'" size="small">
+              {{ row.active ? '有效' : '已吊销' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -38,7 +38,7 @@
         </el-table-column>
         <el-table-column label="操作" width="100">
           <template #default="{ row }">
-            <el-button type="danger" link @click="handleRevoke(row)" :disabled="!row.is_active">吊销</el-button>
+            <el-button type="danger" link @click="handleRevoke(row)" :disabled="!row.active">吊销</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -57,8 +57,9 @@
             <el-checkbox value="blocklog:clear">清除日志</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
-        <el-form-item label="过期时间">
-          <el-date-picker v-model="form.expires_at" type="datetime" placeholder="留空表示永久" />
+        <el-form-item label="有效期">
+          <el-input-number v-model="form.expires_days" :min="1" :max="365" />
+          <span style="margin-left: 8px; color: var(--el-text-color-secondary)">天（留空或 0 表示永久）</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -101,7 +102,7 @@ const formRef = ref<FormInstance>()
 const form = reactive({
   name: '',
   permissions: [] as string[],
-  expires_at: null as Date | null,
+  expires_days: 0,
 })
 
 const rules: FormRules = {
@@ -112,8 +113,8 @@ const rules: FormRules = {
 async function fetchApiKeys() {
   loading.value = true
   try {
-    const res = await getApiKeys({ page: 1, page_size: 100 })
-    apiKeys.value = res.data.items
+    const res = await getApiKeys()
+    apiKeys.value = res.data.keys
   } catch {
     apiKeys.value = []
   } finally {
@@ -129,7 +130,7 @@ async function handleCreate() {
     const res = await createApiKey({
       name: form.name,
       permissions: form.permissions,
-      expires_at: form.expires_at?.toISOString(),
+      expires_days: form.expires_days || undefined,
     })
     newKey.value = res.data.key
     showAddDialog.value = false

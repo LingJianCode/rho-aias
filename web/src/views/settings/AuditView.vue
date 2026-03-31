@@ -9,7 +9,7 @@
         <div class="card-header">
           <div class="filter-row">
             <el-input
-              v-model="userFilter"
+              v-model="usernameFilter"
               placeholder="用户名"
               clearable
               style="width: 150px"
@@ -20,9 +20,11 @@
               <el-option label="全部" value="" />
               <el-option label="登录" value="login" />
               <el-option label="登出" value="logout" />
-              <el-option label="创建" value="create" />
-              <el-option label="更新" value="update" />
-              <el-option label="删除" value="delete" />
+              <el-option label="创建用户" value="create_user" />
+              <el-option label="更新用户" value="update_user" />
+              <el-option label="删除用户" value="delete_user" />
+              <el-option label="创建API Key" value="create_api_key" />
+              <el-option label="吊销API Key" value="revoke_api_key" />
             </el-select>
             <el-date-picker
               v-model="dateRange"
@@ -39,18 +41,25 @@
       </template>
 
       <el-table :data="logs" v-loading="loading" stripe>
-        <el-table-column prop="timestamp" label="时间" width="180">
-          <template #default="{ row }">{{ formatDateTime(row.timestamp) }}</template>
+        <el-table-column prop="created_at" label="时间" width="180">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column prop="user" label="用户" width="120" />
-        <el-table-column prop="action" label="操作" width="100">
+        <el-table-column prop="username" label="用户" width="120" />
+        <el-table-column prop="action" label="操作" width="120">
           <template #default="{ row }">
-            <el-tag :type="getActionType(row.action)" size="small">{{ row.action }}</el-tag>
+            <el-tag :type="getActionType(row.action)" size="small">{{ formatAction(row.action) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="resource" label="资源" min-width="150" />
-        <el-table-column prop="details" label="详情" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="resource" label="资源" min-width="120" />
+        <el-table-column prop="detail" label="详情" min-width="200" show-overflow-tooltip />
         <el-table-column prop="ip" label="IP" width="140" />
+        <el-table-column prop="status" label="状态" width="80">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">
+              {{ row.status === 'success' ? '成功' : '失败' }}
+            </el-tag>
+          </template>
+        </el-table-column>
       </el-table>
 
       <div class="pagination-wrapper">
@@ -71,7 +80,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { formatDateTime } from '@/utils/format'
-import { getAuditLogs, clearAuditLogs } from '@/api/audit'
+import { getAuditLogs, cleanAuditLogs } from '@/api/audit'
 import type { AuditLog } from '@/types/api'
 
 const loading = ref(false)
@@ -80,7 +89,7 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 
-const userFilter = ref('')
+const usernameFilter = ref('')
 const actionFilter = ref('')
 const dateRange = ref<[string, string] | null>(null)
 
@@ -88,11 +97,27 @@ function getActionType(action: string) {
   const types: Record<string, string> = {
     login: 'success',
     logout: 'info',
-    create: 'primary',
-    update: 'warning',
-    delete: 'danger',
+    create_user: 'primary',
+    update_user: 'warning',
+    delete_user: 'danger',
+    create_api_key: 'primary',
+    revoke_api_key: 'warning',
   }
   return types[action] || 'info'
+}
+
+function formatAction(action: string) {
+  const labels: Record<string, string> = {
+    login: '登录',
+    logout: '登出',
+    create_user: '创建用户',
+    update_user: '更新用户',
+    delete_user: '删除用户',
+    create_api_key: '创建API Key',
+    revoke_api_key: '吊销API Key',
+    change_password: '修改密码',
+  }
+  return labels[action] || action
 }
 
 async function fetchLogs() {
@@ -101,19 +126,18 @@ async function fetchLogs() {
     const res = await getAuditLogs({
       page: page.value,
       page_size: pageSize.value,
-      user: userFilter.value || undefined,
+      username: usernameFilter.value || undefined,
       action: actionFilter.value || undefined,
       start_time: dateRange.value?.[0],
       end_time: dateRange.value?.[1],
     })
-    logs.value = res.data.items
+    logs.value = res.data.logs
     total.value = res.data.total
   } catch {
     logs.value = [
-      { id: '1', timestamp: new Date().toISOString(), user: 'admin', action: 'login', resource: 'auth', details: '登录成功', ip: '192.168.1.1' },
-      { id: '2', timestamp: new Date().toISOString(), user: 'admin', action: 'create', resource: 'rules', details: '添加黑名单规则 10.0.0.1', ip: '192.168.1.1' },
+      { id: 1, user_id: 1, username: 'admin', action: 'login', resource: 'auth', resource_id: '', detail: '登录成功', ip: '192.168.1.1', user_agent: '', status: 'success', error: '', created_at: new Date().toISOString() },
     ]
-    total.value = 2
+    total.value = 1
   } finally {
     loading.value = false
   }
@@ -125,7 +149,7 @@ function handleFilter() {
 }
 
 async function handleClear() {
-  const { value } = await ElMessageBox.prompt('请输入要清理的天数（清理该天数之前的日志）', '清理旧日志', {
+  const { value } = await ElMessageBox.prompt('请输入要保留的天数（将清理该天数之前的日志）', '清理旧日志', {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
     inputPattern: /^\d+$/,
@@ -133,10 +157,9 @@ async function handleClear() {
   })
   
   const days = parseInt(value)
-  const before = new Date(Date.now() - days * 86400000).toISOString()
   
   try {
-    await clearAuditLogs(before)
+    await cleanAuditLogs(days)
     ElMessage.success('清理成功')
     fetchLogs()
   } catch {

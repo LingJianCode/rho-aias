@@ -1,13 +1,10 @@
 import request from './request'
-import type { ApiResponse } from '@/types/api'
+import type { ApiResponse, EventStatus, EventConfigRequest } from '@/types/api'
 
-export interface XdpEvent {
-  id: string
-  timestamp: string
-  type: string
-  data: Record<string, unknown>
+export function getEventStatus(): Promise<ApiResponse<EventStatus>> {
+  return request.get('/api/xdp/events/status').then((res) => res.data)
 }
 
-export function getEvents(params?: { limit?: number }): Promise<ApiResponse<XdpEvent[]>> {
-  return request.get('/api/events', { params }).then((res) => res.data)
+export function setEventConfig(data: EventConfigRequest): Promise<ApiResponse<EventStatus>> {
+  return request.post('/api/xdp/events/config', data).then((res) => res.data)
 }

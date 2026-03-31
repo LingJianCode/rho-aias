@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getToken, setToken, removeToken, getStoredUser, setStoredUser, removeStoredUser, clearAuth, getRefreshToken, setRefreshToken } from '@/utils/auth'
+import { getToken, setToken, removeToken, getStoredUser, setStoredUser, removeStoredUser, clearAuth, getTokenExpires, setTokenExpires, isTokenExpired } from '@/utils/auth'
 import type { User } from '@/types/api'
 import { login as loginApi, logout as logoutApi, getCaptcha, refreshToken as refreshTokenApi } from '@/api/auth'
 
@@ -27,19 +27,19 @@ export const useAuthStore = defineStore('auth', () => {
       captcha_code: captchaCode,
     })
     token.value = res.data.token
-    user.value = res.data.user
+    user.value = res.data.user as User
     setToken(res.data.token)
-    setRefreshToken(res.data.refresh_token)
+    setTokenExpires(res.data.expires_at)
     setStoredUser(res.data.user)
     return res.data
   }
 
-  async function refreshToken() {
-    const storedRefreshToken = getRefreshToken()
-    if (!storedRefreshToken) {
-      throw new Error('No refresh token available')
+  async function refreshToken(): Promise<string> {
+    const currentToken = getToken()
+    if (!currentToken) {
+      throw new Error('No token available')
     }
-    const res = await refreshTokenApi(storedRefreshToken)
+    const res = await refreshTokenApi(currentToken)
     token.value = res.data.token
     setToken(res.data.token)
     return res.data.token
@@ -58,7 +58,23 @@ export const useAuthStore = defineStore('auth', () => {
   function hasPermission(permission: string): boolean {
     if (!user.value) return false
     if (user.value.role === 'admin') return true
-    return user.value.permissions?.includes(permission) ?? false
+    // 后端权限在 Casbin 中管理，前端暂时只做角色判断
+    return false
+  }
+
+  // 检查 token 是否需要刷新
+  async function checkAndRefreshToken(): Promise<boolean> {
+    if (!token.value) return false
+    if (isTokenExpired()) {
+      try {
+        await refreshToken()
+        return true
+      } catch {
+        await logout()
+        return false
+      }
+    }
+    return true
   }
 
   return {
@@ -73,5 +89,6 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     refreshToken,
     hasPermission,
+    checkAndRefreshToken,
   }
 })

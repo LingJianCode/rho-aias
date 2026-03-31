@@ -8,9 +8,13 @@
       <template #header>
         <div class="card-header">
           <span>配置</span>
-          <el-switch v-model="config.enabled" active-text="启用" inactive-text="禁用" @change="handleSave" />
+          <el-switch v-model="status.enabled" active-text="启用" inactive-text="禁用" disabled />
         </div>
       </template>
+
+      <el-alert type="info" :closable="false" style="margin-bottom: 16px">
+        地域封禁功能需要加载 GeoIP 数据库后才能启用
+      </el-alert>
 
       <el-form :model="config" label-width="100px" style="max-width: 600px">
         <el-form-item label="模式">
@@ -21,7 +25,7 @@
         </el-form-item>
         <el-form-item label="国家列表">
           <el-select
-            v-model="config.countries"
+            v-model="config.allowed_countries"
             multiple
             filterable
             placeholder="选择国家"
@@ -42,10 +46,10 @@
 
       <el-divider />
 
-      <h4>当前已选择 {{ config.countries.length }} 个国家</h4>
+      <h4>当前已选择 {{ config.allowed_countries.length }} 个国家</h4>
       <div class="selected-countries">
         <el-tag
-          v-for="code in config.countries"
+          v-for="code in config.allowed_countries"
           :key="code"
           closable
           @close="removeCountry(code)"
@@ -54,6 +58,14 @@
           {{ getCountryFlag(code) }} {{ getCountryName(code) }}
         </el-tag>
       </div>
+
+      <el-divider />
+
+      <h4>状态信息</h4>
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="最后更新">{{ status.last_update ? formatDateTime(status.last_update) : '-' }}</el-descriptions-item>
+        <el-descriptions-item label="总规则数">{{ formatNumber(status.total_rules) }}</el-descriptions-item>
+      </el-descriptions>
     </el-card>
   </div>
 </template>
@@ -61,14 +73,23 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { formatDateTime, formatNumber } from '@/utils/format'
 import { getGeoBlockingStatus, updateGeoBlockingConfig } from '@/api/geoblocking'
-import type { GeoBlockingConfig } from '@/types/api'
+import type { GeoBlockingStatus, GeoBlockingConfigRequest } from '@/types/api'
 
 const loading = ref(false)
-const config = reactive<GeoBlockingConfig>({
+const status = ref<GeoBlockingStatus>({
   enabled: false,
   mode: 'whitelist',
-  countries: [],
+  allowed_countries: [],
+  last_update: '',
+  total_rules: 0,
+  sources: {},
+})
+
+const config = reactive<GeoBlockingConfigRequest>({
+  mode: 'whitelist',
+  allowed_countries: [],
 })
 
 const countryOptions = [
@@ -102,7 +123,9 @@ async function fetchConfig() {
   loading.value = true
   try {
     const res = await getGeoBlockingStatus()
-    Object.assign(config, res.data)
+    status.value = res.data
+    config.mode = res.data.mode
+    config.allowed_countries = res.data.allowed_countries
   } catch {
     // Use defaults
   } finally {
@@ -120,7 +143,7 @@ async function handleSave() {
 }
 
 function removeCountry(code: string) {
-  config.countries = config.countries.filter((c) => c !== code)
+  config.allowed_countries = config.allowed_countries.filter((c) => c !== code)
   handleSave()
 }
 

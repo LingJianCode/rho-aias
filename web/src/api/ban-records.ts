@@ -1,8 +1,20 @@
 import request from './request'
-import type { ApiResponse, PaginatedData, PaginationParams, BanRecord, BanRecordStats } from '@/types/api'
+import type { ApiResponse, BanRecordListResponse, BanRecordStats, BanRecord } from '@/types/api'
 
-export function getBanRecords(params: PaginationParams): Promise<ApiResponse<PaginatedData<BanRecord>>> {
+export interface BanRecordFilter {
+  page?: number
+  page_size?: number
+  ip?: string
+  source?: string
+  status?: string
+}
+
+export function getBanRecords(params: BanRecordFilter): Promise<ApiResponse<BanRecordListResponse>> {
   return request.get('/api/ban-records', { params }).then((res) => res.data)
+}
+
+export function getBanRecord(id: number): Promise<ApiResponse<BanRecord>> {
+  return request.get(`/api/ban-records/${id}`).then((res) => res.data)
 }
 
 export function getBanRecordStats(): Promise<ApiResponse<BanRecordStats>> {
