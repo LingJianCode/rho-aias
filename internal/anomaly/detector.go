@@ -1,10 +1,13 @@
 package anomaly
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
 	"rho-aias/internal/logger"
+
+	"github.com/robfig/cron/v3"
 )
 
 // BlockCallback 封禁回调函数类型
@@ -27,12 +30,17 @@ type Detector struct {
 	blockCallback    BlockCallback
 	unblockCallback  UnblockCallback
 
-	mu              sync.RWMutex
-	running         bool
-	done            chan struct{}
-	checkTicker     *time.Ticker
-	unblockTimers   map[string]*time.Timer // 保持 timer 引用防止 GC 回收
-	unblockTimersMu sync.Mutex
+	mu        sync.RWMutex
+	running   bool
+	done      chan struct{}
+	checkTick *time.Ticker
+
+	// Cron 定时任务
+	cron *cron.Cron
+
+	// 封禁记录管理（替代 time.AfterFunc）
+	bannedIPs     map[string]time.Time // IP → 过期时间
+	bannedIPsMu   sync.Mutex
 }
 
 // NewDetector 创建新的异常检测器
@@ -69,8 +77,8 @@ func NewDetector(config AnomalyDetectionConfig, blockCallback BlockCallback, unb
 		attackDetector:   NewAttackDetector(config.Attacks),
 		blockCallback:    blockCallback,
 		unblockCallback:  unblockCallback,
-		done:             make(chan struct{}),
-		unblockTimers:    make(map[string]*time.Timer),
+		done:            make(chan struct{}),
+		bannedIPs:       make(map[string]time.Time),
 	}
 }
 
@@ -94,14 +102,30 @@ func (d *Detector) Start() error {
 	d.collector.SetCleanupInterval(time.Duration(d.config.CleanupInterval) * time.Second)
 	d.collector.Start()
 
-	// 启动定时器
-	d.checkTicker = time.NewTicker(time.Duration(d.config.CheckInterval) * time.Second)
+	// 初始化 Cron 定时任务
+	d.cron = cron.New(cron.WithSeconds())
 
-	// 启动协程
-	// 注意：UpdatePPS 和 runDetection 合并在同一个循环中执行，
-	// 先检测再重置 ProtocolStats，避免独立的 ppsTicker 和 checkTicker
-	// 之间的时序竞争导致检测时 ProtocolStats 已被重置。
-	go d.detectionLoop()
+	// 添加定时检测任务（根据配置的 CheckInterval）
+	checkInterval := time.Duration(d.config.CheckInterval) * time.Second
+	checkExpr := "@every " + checkInterval.String()
+	_, err := d.cron.AddFunc(checkExpr, func() {
+		d.runDetection()
+		d.collector.UpdatePPS()
+	})
+	if err != nil {
+		return fmt.Errorf("failed to add detection cron job: %w", err)
+	}
+
+	// 添加定时解封任务（每 5 分钟扫描一次）
+	_, err = d.cron.AddFunc("@every 5m", func() {
+		d.cleanupExpiredBans()
+	})
+	if err != nil {
+		return fmt.Errorf("failed to add cleanup cron job: %w", err)
+	}
+
+	// 启动定时任务
+	d.cron.Start()
 
 	d.running = true
 	logger.Info("[AnomalyDetection] Started successfully")
@@ -123,17 +147,10 @@ func (d *Detector) Stop() {
 	close(d.done)
 	d.collector.Stop()
 
-	if d.checkTicker != nil {
-		d.checkTicker.Stop()
+	// 停止 Cron 定时任务
+	if d.cron != nil {
+		d.cron.Stop()
 	}
-
-	// 停止所有未触发的 unblock timers
-	d.unblockTimersMu.Lock()
-	for ip, timer := range d.unblockTimers {
-		timer.Stop()
-		delete(d.unblockTimers, ip)
-	}
-	d.unblockTimersMu.Unlock()
 
 	d.running = false
 	logger.Info("[AnomalyDetection] Stopped")
@@ -145,23 +162,6 @@ func (d *Detector) RecordPacket(ip string, protocol uint8, tcpFlags uint8, pktSi
 		return
 	}
 	d.collector.RecordPacket(ip, protocol, tcpFlags, pktSize)
-}
-
-// detectionLoop 检测循环
-// UpdatePPS 和 runDetection 合并在同一个循环中，先检测再重置 ProtocolStats，
-// 避免独立的 ppsTicker 和 checkTicker 之间的时序竞争导致检测时数据已被重置。
-func (d *Detector) detectionLoop() {
-	for {
-		select {
-		case <-d.done:
-			return
-		case <-d.checkTicker.C:
-			// 先执行检测（使用当前窗口累积的 ProtocolStats）
-			d.runDetection()
-			// 检测完成后再更新 PPS（重置 ProtocolStats，为下一个窗口做准备）
-			d.collector.UpdatePPS()
-		}
-	}
 }
 
 // runDetection 执行检测
@@ -218,9 +218,11 @@ func (d *Detector) handleDetection(result DetectionResult) {
 		} else {
 			logger.Infof("[AnomalyDetection] Successfully blocked IP %s for %ds", result.IP, result.BlockDuration)
 
-			// 调度定时解封：封禁到期后自动解封
-			if result.BlockDuration > 0 && d.unblockCallback != nil {
-				d.scheduleUnblock(result.IP, result.BlockDuration)
+			// 记录封禁时间和过期时间到 bannedIPs map
+			if result.BlockDuration > 0 {
+				d.bannedIPsMu.Lock()
+				d.bannedIPs[result.IP] = time.Now().Add(time.Duration(result.BlockDuration) * time.Second)
+				d.bannedIPsMu.Unlock()
 			}
 		}
 	}
@@ -229,28 +231,26 @@ func (d *Detector) handleDetection(result DetectionResult) {
 	d.collector.RemoveIP(result.IP)
 }
 
-// scheduleUnblock 调度定时解封
-func (d *Detector) scheduleUnblock(ip string, duration int) {
-	// 如果已有该 IP 的 timer，先取消
-	d.unblockTimersMu.Lock()
-	if old, exists := d.unblockTimers[ip]; exists {
-		old.Stop()
-		delete(d.unblockTimers, ip)
-	}
+// cleanupExpiredBans 清理过期的封禁记录（定时任务）
+func (d *Detector) cleanupExpiredBans() {
+	d.bannedIPsMu.Lock()
+	defer d.bannedIPsMu.Unlock()
 
-	timer := time.AfterFunc(time.Duration(duration)*time.Second, func() {
-		if d.unblockCallback != nil {
-			if err := d.unblockCallback(ip); err != nil {
-				logger.Warnf("[AnomalyDetection] Failed to unblock IP %s: %v", ip, err)
+	now := time.Now()
+	for ip, expiry := range d.bannedIPs {
+		if now.After(expiry) {
+			// 调用解封回调
+			if d.unblockCallback != nil {
+				if err := d.unblockCallback(ip); err != nil {
+					logger.Warnf("[AnomalyDetection] Failed to unblock IP %s: %v", ip, err)
+				} else {
+					logger.Infof("[AnomalyDetection] Successfully unblocked IP %s", ip)
+				}
 			}
+			// 从 map 中移除
+			delete(d.bannedIPs, ip)
 		}
-		// timer 触发后从 map 中移除
-		d.unblockTimersMu.Lock()
-		delete(d.unblockTimers, ip)
-		d.unblockTimersMu.Unlock()
-	})
-	d.unblockTimers[ip] = timer
-	d.unblockTimersMu.Unlock()
+	}
 }
 
 // GetStats 获取检测器统计信息
@@ -269,4 +269,12 @@ func (d *Detector) IsRunning() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.running
+}
+
+// IsBanned 检查 IP 是否在封禁列表中（用于测试）
+func (d *Detector) IsBanned(ip string) bool {
+	d.bannedIPsMu.Lock()
+	defer d.bannedIPsMu.Unlock()
+	_, exists := d.bannedIPs[ip]
+	return exists
 }

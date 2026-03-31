@@ -20,6 +20,7 @@ import (
 	"rho-aias/internal/watcher"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/robfig/cron/v3"
 )
 
 // syscallStatT 用于获取文件 inode
@@ -76,6 +77,9 @@ type Monitor struct {
 	// 2. Coraza WAF: "client_ip: 1.2.3.4, rule_id: 12345"
 	// 3. Rate limit: "rate_limit_exceeded for 1.2.3.4"
 	ipRegex *regexp.Regexp
+
+	// Cron 定时任务
+	cron *cron.Cron
 
 	// 定时保存偏移量的 cancel 函数
 	cancelPeriodicSave context.CancelFunc
@@ -141,12 +145,23 @@ func (m *Monitor) Start() error {
 		}
 	}
 
-	// 启动监控 goroutine
-	m.wg.Add(2)
-	go m.monitorLoop()
+	// 初始化 Cron 定时任务
+	m.cron = cron.New(cron.WithSeconds())
 
-	// 启动过期清理 goroutine
-	go m.cleanupExpiredBans()
+	// 添加定时清理任务（每 5 分钟）
+	_, err = m.cron.AddFunc("@every 5m", func() {
+		m.cleanup()
+	})
+	if err != nil {
+		return fmt.Errorf("failed to add cleanup cron job: %w", err)
+	}
+
+	// 启动定时任务
+	m.cron.Start()
+
+	// 启动监控 goroutine
+	m.wg.Add(1)
+	go m.monitorLoop()
 
 	// 启动定时保存偏移量（每 5 秒）
 	if m.offsetStore != nil {
@@ -166,6 +181,11 @@ func (m *Monitor) Stop() {
 	// 停止定时保存偏移量
 	if m.cancelPeriodicSave != nil {
 		m.cancelPeriodicSave()
+	}
+
+	// 停止 Cron 定时任务
+	if m.cron != nil {
+		m.cron.Stop()
 	}
 
 	if m.watcher != nil {
@@ -461,24 +481,6 @@ func (m *Monitor) banIP(ip, logFile string, sourceMask uint32) {
 	}
 
 	logger.Infof("[WAF] Banned IP %s (from %s, expires at %v)", ip, logFile, expiry)
-}
-
-// cleanupExpiredBans 定期清理过期的封禁记录
-func (m *Monitor) cleanupExpiredBans() {
-	defer m.wg.Done()
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-m.ctx.Done():
-			logger.Info("[WAF] Cleanup goroutine exit")
-			return
-
-		case <-ticker.C:
-			m.cleanup()
-		}
-	}
 }
 
 // cleanup 清理过期的封禁记录，并同步移除对应的 XDP 规则
