@@ -90,10 +90,11 @@ async function fetchStats() {
     const res = await getBanRecordStats()
     Object.assign(stats, res.data)
   } catch {
-    stats.total = 1234
-    stats.active = 1000
-    stats.expired = 234
-    stats.today_new = 56
+    // 模拟数据（已注释保留作为格式提示）：
+    // stats.total = 1234
+    // stats.active = 1000
+    // stats.expired = 234
+    // stats.today_new = 56
   }
 }
 

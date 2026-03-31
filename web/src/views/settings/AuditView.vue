@@ -134,10 +134,13 @@ async function fetchLogs() {
     logs.value = res.data.logs
     total.value = res.data.total
   } catch {
-    logs.value = [
-      { id: 1, user_id: 1, username: 'admin', action: 'login', resource: 'auth', resource_id: '', detail: '登录成功', ip: '192.168.1.1', user_agent: '', status: 'success', error: '', created_at: new Date().toISOString() },
-    ]
-    total.value = 1
+    // 模拟数据（已注释保留作为格式提示）：
+    // logs.value = [
+    //   { id: 1, user_id: 1, username: 'admin', action: 'login', resource: 'auth', resource_id: '', detail: '登录成功', ip: '192.168.1.1', user_agent: '', status: 'success', error: '', created_at: new Date().toISOString() },
+    // ]
+    // total.value = 1
+    logs.value = []
+    total.value = 0
   } finally {
     loading.value = false
   }

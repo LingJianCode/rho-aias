@@ -97,10 +97,36 @@ import StatsCard from '@/components/StatsCard.vue'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
 import { formatDateTime } from '@/utils/format'
-import request from '@/api/request'
+import { getBlockLogStats, getBlockLogs } from '@/api/blocklog'
+import { getBanRecordStats } from '@/api/ban-records'
+import { getSourcesStatus } from '@/api/sources'
+import { getRules } from '@/api/rules'
 
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
+
+// 注：后端不存在 /api/dashboard/stats 接口，使用以下接口组合获取数据
+// 数据格式参考（模拟数据已注释保留作为格式提示）：
+// {
+//   total_blocks: 125846,        // 总阻断数 - 来自 getBlockLogStats().total_blocks
+//   active_rules: 45678,         // 规则数 - 来自 getRules({ source: 'manual' }).total
+//   healthy_sources: 8,          // 健康数据源数 - 来自 getSourcesStatus() 计算健康数量
+//   today_bans: 234,             // 今日封禁数 - 来自 getBanRecordStats().today_count
+//   block_trend: [               // 阻断趋势 - 来自 getBlockLogStats().hourly_trend
+//     { date: '2024/1/1', count: 1234 },
+//     ...
+//   ],
+//   recent_blocks: [             // 最近阻断记录 - 来自 getBlockLogs({ page_size: 5 })
+//     { timestamp: '...', src_ip: '192.168.1.1', dst_ip: '10.0.0.1', source: 'waf', country_code: 'CN' },
+//     ...
+//   ],
+//   source_status: [             // 数据源状态 - 来自 getSourcesStatus()
+//     { name: 'IPsum', status: 'healthy' },
+//     { name: 'Spamhaus', status: 'healthy' },
+//     { name: 'WAF', status: 'healthy' },
+//     { name: 'DDoS', status: 'unhealthy' },
+//   ],
+// }
 
 const stats = ref({
   total_blocks: 0,
@@ -113,33 +139,79 @@ const stats = ref({
 })
 
 async function fetchStats() {
+  // 并行获取所有数据，各接口独立 try-catch
+  await Promise.all([
+    fetchBlockStats(),
+    fetchBanStats(),
+    fetchSourceStatus(),
+    fetchRecentBlocks(),
+    fetchRulesCount(),
+  ])
+  updateChart()
+}
+
+async function fetchBlockStats() {
   try {
-    const res = await request.get('/api/dashboard/stats')
-    stats.value = res.data.data
-    updateChart()
-  } catch {
-    // 使用模拟数据
-    stats.value = {
-      total_blocks: 125846,
-      active_rules: 45678,
-      healthy_sources: 8,
-      today_bans: 234,
-      block_trend: Array.from({ length: 7 }, (_, i) => ({
-        date: new Date(Date.now() - (6 - i) * 86400000).toLocaleDateString(),
-        count: Math.floor(Math.random() * 5000) + 1000,
-      })),
-      recent_blocks: [
-        { timestamp: new Date().toISOString(), src_ip: '192.168.1.1', dst_ip: '10.0.0.1', source: 'waf', country_code: 'CN' },
-        { timestamp: new Date().toISOString(), src_ip: '10.0.0.2', dst_ip: '10.0.0.1', source: 'ddos', country_code: 'US' },
-      ],
-      source_status: [
-        { name: 'IPsum', status: 'healthy' },
-        { name: 'Spamhaus', status: 'healthy' },
-        { name: 'WAF', status: 'healthy' },
-        { name: 'DDoS', status: 'unhealthy' },
-      ],
+    const res = await getBlockLogStats()
+    if (res.data) {
+      stats.value.total_blocks = res.data.total_blocks || 0
+      // 将 hourly_trend 转换为 block_trend 格式
+      stats.value.block_trend = (res.data.hourly_trend || []).map((item) => ({
+        date: item.hour,
+        count: item.count,
+      }))
     }
-    updateChart()
+  } catch {
+    // 接口失败时保持默认值
+  }
+}
+
+async function fetchBanStats() {
+  try {
+    const res = await getBanRecordStats()
+    if (res.data) {
+      stats.value.today_bans = res.data.today_count || 0
+    }
+  } catch {
+    // 接口失败时保持默认值
+  }
+}
+
+async function fetchSourceStatus() {
+  try {
+    const res = await getSourcesStatus()
+    if (res.data?.sources) {
+      const sources = res.data.sources
+      stats.value.healthy_sources = sources.filter((s: { status: string }) => s.status === 'healthy').length
+      stats.value.source_status = sources.map((s: { source_name: string; status: string }) => ({
+        name: s.source_name,
+        status: s.status,
+      }))
+    }
+  } catch {
+    // 接口失败时保持默认值
+  }
+}
+
+async function fetchRecentBlocks() {
+  try {
+    const res = await getBlockLogs({ page_size: 5 })
+    if (res.data?.records) {
+      stats.value.recent_blocks = res.data.records
+    }
+  } catch {
+    // 接口失败时保持默认值
+  }
+}
+
+async function fetchRulesCount() {
+  try {
+    const res = await getRules({ source: 'manual' })
+    if (res.data) {
+      stats.value.active_rules = res.data.total || 0
+    }
+  } catch {
+    // 接口失败时保持默认值
   }
 }
 

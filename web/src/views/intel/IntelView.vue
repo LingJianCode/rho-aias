@@ -58,13 +58,14 @@ async function fetchStatus() {
     const res = await getIntelStatus()
     Object.assign(status, res.data)
   } catch {
-    status.last_update = new Date().toISOString()
-    status.total_rules = 25000
-    status.sources = [
-      { name: 'IPsum', count: 15000, updated: new Date().toISOString() },
-      { name: 'Spamhaus DROP', count: 5000, updated: new Date().toISOString() },
-      { name: 'FireHOL', count: 5000, updated: new Date().toISOString() },
-    ]
+    // 模拟数据（已注释保留作为格式提示）：
+    // status.last_update = new Date().toISOString()
+    // status.total_rules = 25000
+    // status.sources = [
+    //   { name: 'IPsum', count: 15000, updated: new Date().toISOString() },
+    //   { name: 'Spamhaus DROP', count: 5000, updated: new Date().toISOString() },
+    //   { name: 'FireHOL', count: 5000, updated: new Date().toISOString() },
+    // ]
   } finally {
     loading.value = false
   }

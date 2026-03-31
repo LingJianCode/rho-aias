@@ -82,11 +82,13 @@ async function fetchSources() {
     }
     sources.value = records
   } catch {
-    sources.value = [
-      { id: 1, source_type: 'intel', source_id: 'ipsum', source_name: 'IPsum', status: 'success', rule_count: 15000, error_message: '', duration: 0, updated_at: new Date().toISOString() },
-      { id: 2, source_type: 'intel', source_id: 'spamhaus', source_name: 'Spamhaus DROP', status: 'success', rule_count: 2500, error_message: '', duration: 0, updated_at: new Date().toISOString() },
-      { id: 3, source_type: 'geo_blocking', source_id: 'maxmind', source_name: 'MaxMind GeoIP', status: 'success', rule_count: 500000, error_message: '', duration: 0, updated_at: new Date().toISOString() },
-    ]
+    // 模拟数据（已注释保留作为格式提示）：
+    // sources.value = [
+    //   { id: 1, source_type: 'intel', source_id: 'ipsum', source_name: 'IPsum', status: 'success', rule_count: 15000, error_message: '', duration: 0, updated_at: new Date().toISOString() },
+    //   { id: 2, source_type: 'intel', source_id: 'spamhaus', source_name: 'Spamhaus DROP', status: 'success', rule_count: 2500, error_message: '', duration: 0, updated_at: new Date().toISOString() },
+    //   { id: 3, source_type: 'geo_blocking', source_id: 'maxmind', source_name: 'MaxMind GeoIP', status: 'success', rule_count: 500000, error_message: '', duration: 0, updated_at: new Date().toISOString() },
+    // ]
+    sources.value = []
   } finally {
     loading.value = false
   }

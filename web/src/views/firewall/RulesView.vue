@@ -10,8 +10,7 @@
           <el-radio-group v-model="sourceFilter" @change="handleFilterChange">
             <el-radio-button value="all">全部</el-radio-button>
             <el-radio-button value="manual">手动</el-radio-button>
-            <el-radio-button value="ipsum">IPsum</el-radio-button>
-            <el-radio-button value="spamhaus">Spamhaus</el-radio-button>
+            <!-- 注：大数据源（ipsum、spamhaus）规则量巨大，不在列表页展示 -->
             <el-radio-button value="waf">WAF</el-radio-button>
             <el-radio-button value="ddos">DDoS</el-radio-button>
             <el-radio-button value="anomaly">异常检测</el-radio-button>
@@ -80,17 +79,19 @@ async function fetchRules() {
     rules.value = res.data.items
     total.value = res.data.total
   } catch {
-    // 模拟数据
-    rules.value = Array.from({ length: pageSize.value }, (_, i) => ({
-      id: String(i + 1),
-      ip: `192.168.${Math.floor(i / 256)}.${i % 256}`,
-      cidr: 32,
-      source: ['manual', 'ipsum', 'spamhaus', 'waf', 'ddos', 'anomaly', 'failguard'][Math.floor(Math.random() * 7)] as RuleSource,
-      reason: '恶意IP',
-      created_at: new Date().toISOString(),
-      expires_at: Math.random() > 0.5 ? new Date(Date.now() + 86400000).toISOString() : undefined,
-    }))
-    total.value = 1000
+    // 模拟数据（已注释保留作为格式提示）：
+    // rules.value = Array.from({ length: pageSize.value }, (_, i) => ({
+    //   id: String(i + 1),
+    //   ip: `192.168.${Math.floor(i / 256)}.${i % 256}`,
+    //   cidr: 32,
+    //   source: ['manual', 'waf', 'ddos', 'anomaly', 'failguard'][Math.floor(Math.random() * 5)] as RuleSource,
+    //   reason: '恶意IP',
+    //   created_at: new Date().toISOString(),
+    //   expires_at: Math.random() > 0.5 ? new Date(Date.now() + 86400000).toISOString() : undefined,
+    // }))
+    // total.value = 1000
+    rules.value = []
+    total.value = 0
   } finally {
     loading.value = false
   }

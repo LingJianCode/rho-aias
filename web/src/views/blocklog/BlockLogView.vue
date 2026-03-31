@@ -63,10 +63,11 @@
             <el-select v-model="sourceFilter" placeholder="来源" clearable @change="handleFilter">
               <el-option label="全部" value="" />
               <el-option label="手动" value="manual" />
-              <el-option label="IPsum" value="ipsum" />
-              <el-option label="Spamhaus" value="spamhaus" />
+              <!-- 注：大数据源（ipsum、spamhaus）规则量巨大，不在列表页展示 -->
               <el-option label="WAF" value="waf" />
               <el-option label="DDoS" value="ddos" />
+              <el-option label="异常检测" value="anomaly" />
+              <el-option label="FailGuard" value="failguard" />
             </el-select>
             <el-button type="primary" @click="handleFilter">搜索</el-button>
           </div>
@@ -151,10 +152,11 @@ async function fetchStats() {
     const res = await getBlockLogStats()
     Object.assign(stats, res.data)
   } catch {
-    stats.total_blocks = 125846
-    stats.unique_ips = 8432
-    stats.top_countries = [{ country: 'CN', count: 5000 }, { country: 'US', count: 3000 }]
-    stats.top_sources = [{ source: 'waf', count: 10000 }, { source: 'ddos', count: 8000 }]
+    // 模拟数据（已注释保留作为格式提示）：
+    // stats.total_blocks = 125846
+    // stats.unique_ips = 8432
+    // stats.top_countries = [{ country: 'CN', count: 5000 }, { country: 'US', count: 3000 }]
+    // stats.top_sources = [{ source: 'waf', count: 10000 }, { source: 'ddos', count: 8000 }]
   }
 }
 

@@ -5,10 +5,10 @@ export function getSourcesStatus(): Promise<ApiResponse<SourcesStatusResponse>> 
   return request.get('/api/sources/status').then((res) => res.data)
 }
 
-export function getSourceStatusByType(type: string): Promise<ApiResponse<Record<string, { id: number; source_type: string; source_id: string; source_name: string; status: string; rule_count: number; error_message: string; duration: number; updated_at: string }>>> {
-  return request.get(`/api/sources/status/${type}`).then((res) => res.data)
-}
+// 注：后端路由为 GET /api/sources/:type/status，但前端未使用此接口
+// export function getSourceStatusByType(type: string) { ... }
 
 export function refreshSource(type: string, id: string): Promise<ApiResponse<void>> {
-  return request.post(`/api/sources/status/${type}/${id}/refresh`).then((res) => res.data)
+  // 后端路由: POST /api/sources/:type/:id/refresh
+  return request.post(`/api/sources/${type}/${id}/refresh`).then((res) => res.data)
 }

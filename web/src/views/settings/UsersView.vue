@@ -117,10 +117,12 @@ async function fetchUsers() {
     const res = await getUsers()
     users.value = res.data.users
   } catch {
-    users.value = [
-      { id: 1, username: 'admin', nickname: '管理员', email: 'admin@example.com', role: 'admin', active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-      { id: 2, username: 'user1', nickname: '用户1', email: 'user1@example.com', role: 'user', active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-    ]
+    // 模拟数据（已注释保留作为格式提示）：
+    // users.value = [
+    //   { id: 1, username: 'admin', nickname: '管理员', email: 'admin@example.com', role: 'admin', active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    //   { id: 2, username: 'user1', nickname: '用户1', email: 'user1@example.com', role: 'user', active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    // ]
+    users.value = []
   } finally {
     loading.value = false
   }

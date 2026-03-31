@@ -55,7 +55,8 @@ import { Plus } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/format'
 import { useConfirm } from '@/composables/useConfirm'
 import { addBlacklistRule, deleteBlacklistRule } from '@/api/manual'
-import type { ManualRuleItem } from '@/types/api'
+import { getRules } from '@/api/rules'
+import type { ManualRuleItem, Rule } from '@/types/api'
 
 const { confirmDelete } = useConfirm()
 
@@ -73,12 +74,31 @@ const formRules: FormRules = {
   value: [{ required: true, message: '请输入 IP 地址或 CIDR', trigger: 'blur' }],
 }
 
-// 注意：后端黑名单目前不提供列表接口，这里使用空数组
-// 如需查看黑名单规则，请通过 eBPF map 查询
+// 注：后端没有 GET /api/manual/blacklist/rules 接口
+// 使用 GET /api/rules?source=manual 接口获取黑名单数据
+// 数据格式参考（模拟数据已注释保留作为格式提示）：
+// ManualRuleItem[] = [
+//   { value: '192.168.1.1', added_at: '2024-01-01T00:00:00Z' },
+//   { value: '10.0.0.0/24', added_at: '2024-01-02T00:00:00Z' },
+// ]
+function ruleToManualRuleItem(rule: Rule): ManualRuleItem {
+  return {
+    value: rule.ip + (rule.cidr ? `/${rule.cidr}` : ''),
+    added_at: rule.created_at,
+  }
+}
+
 async function fetchRules() {
   loading.value = true
-  rules.value = []
-  loading.value = false
+  try {
+    const res = await getRules({ source: 'manual' })
+    rules.value = res.data.items.map(ruleToManualRuleItem)
+  } catch {
+    // 接口失败时保持空列表
+    rules.value = []
+  } finally {
+    loading.value = false
+  }
 }
 
 async function handleAdd() {
