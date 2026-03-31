@@ -40,4 +40,11 @@ func RegisterBanRecordRoutes(group *gin.RouterGroup, handle *handles.BanRecordHa
 		middleware.CasbinMiddleware(enforcer, "ban_record:read", "read"),
 		handle.GetBanRecord,
 	)
+
+	// 解封封禁记录 - 需要 ban_record:write 权限
+	banRecords.DELETE("/:id/unblock",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "ban_record:write", "write"),
+		handle.UnbanBanRecord,
+	)
 }

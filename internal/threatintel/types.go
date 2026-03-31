@@ -35,19 +35,19 @@ type CacheData struct {
 
 // Status 威胁情报模块状态
 type Status struct {
-	Enabled    bool                      // 是否启用威胁情报功能
-	LastUpdate time.Time                 // 最后更新时间
-	TotalRules int                       // 总规则数量
-	Sources    map[SourceID]SourceStatus // 各情报源的状态
+	Enabled    bool                      `json:"enabled"`     // 是否启用威胁情报功能
+	LastUpdate time.Time                 `json:"last_update"` // 最后更新时间
+	TotalRules int                       `json:"total_rules"` // 总规则数量
+	Sources    map[SourceID]SourceStatus `json:"sources"`     // 各情报源的状态
 }
 
 // SourceStatus 单个威胁情报源的状态
 type SourceStatus struct {
-	Enabled    bool      // 是否启用该情报源
-	LastUpdate time.Time // 最后更新时间
-	Success    bool      // 最后一次更新是否成功
-	RuleCount  int       // 该情报源的规则数量
-	Error      string    // 错误信息（如果更新失败）
+	Enabled    bool      `json:"enabled"`     // 是否启用该情报源
+	LastUpdate time.Time `json:"last_update"` // 最后更新时间
+	Success    bool      `json:"success"`     // 最后一次更新是否成功
+	RuleCount  int       `json:"rule_count"`  // 该情报源的规则数量
+	Error      string    `json:"error"`       // 错误信息（如果更新失败）
 }
 
 // NewIntelData 创建新的威胁情报数据

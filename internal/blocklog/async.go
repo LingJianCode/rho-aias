@@ -39,6 +39,7 @@ type AsyncWriter struct {
 	fileWriter *FileWriter
 	recordCh   chan BlockRecord
 	stopCh     chan struct{}
+	flushCh    chan chan struct{}
 	wg         sync.WaitGroup
 	stopped    bool
 	stopMu     sync.RWMutex
@@ -65,6 +66,7 @@ func NewAsyncWriter(config Config) (*AsyncWriter, error) {
 		fileWriter: fileWriter,
 		recordCh:   make(chan BlockRecord, config.BufferSize),
 		stopCh:     make(chan struct{}),
+		flushCh:    make(chan chan struct{}, 1),
 	}
 
 	// 初始化 Cron 定时任务
@@ -137,8 +139,25 @@ func (aw *AsyncWriter) Stop() error {
 	return nil
 }
 
-// Flush 手动刷新缓冲区
+// Flush 手动刷新缓冲区，将待写入记录刷入文件
 func (aw *AsyncWriter) Flush() error {
+	aw.stopMu.RLock()
+	stopped := aw.stopped
+	aw.stopMu.RUnlock()
+
+	if stopped || !aw.config.Enabled {
+		return nil
+	}
+
+	// 通知 run 协程将 pendingRecords 写入文件
+	done := make(chan struct{})
+	select {
+	case aw.flushCh <- done:
+		<-done // 等待写入完成
+	default:
+		// 已有一个 flush 请求在处理
+	}
+
 	if aw.fileWriter != nil {
 		return aw.fileWriter.Flush()
 	}
@@ -161,12 +180,20 @@ func (aw *AsyncWriter) run() {
 				pendingRecords = pendingRecords[:0]
 			}
 
+		case done := <-aw.flushCh:
+			// 收到 flush 请求，将待写入记录立即写入文件
+			if len(pendingRecords) > 0 {
+				aw.writeBatch(pendingRecords)
+				pendingRecords = pendingRecords[:0]
+			}
+			close(done)
+
 		case <-aw.stopCh:
 			// 停止信号，写入剩余记录
 			if len(pendingRecords) > 0 {
 				aw.writeBatch(pendingRecords)
 			}
-			aw.Flush()
+			aw.fileWriter.Flush()
 			return
 		}
 	}
