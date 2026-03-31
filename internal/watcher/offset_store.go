@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"rho-aias/internal/logger"
+
+	"github.com/robfig/cron/v3"
 )
 
 // fileOffset 单个文件的偏移量与 inode 记录
@@ -22,8 +24,11 @@ type fileOffset struct {
 // 将每个文件的 (inode, offset) 持久化到 JSON 文件，实现重启后从上次位置继续读取
 type OffsetStore struct {
 	mu       sync.Mutex
-	filePath string             // 持久化 JSON 文件路径
+	filePath string               // 持久化 JSON 文件路径
 	offsets  map[string]fileOffset // 文件路径 → 偏移量记录
+	cron     *cron.Cron
+	stopCtx  context.Context
+	stopCancel context.CancelFunc
 }
 
 // NewOffsetStore 创建偏移量存储
@@ -93,25 +98,33 @@ func (s *OffsetStore) Save() {
 // StartPeriodicSave 启动定时保存，每隔 interval 保存一次偏移量到磁盘
 // 返回一个 cancel 函数，调用后停止定时保存
 func (s *OffsetStore) StartPeriodicSave(interval time.Duration) (cancel context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				s.Save()
-			}
-		}
-	}()
-	return cancel
+	s.stopCtx, s.stopCancel = context.WithCancel(context.Background())
+
+	// 初始化 Cron 定时任务
+	s.cron = cron.New(cron.WithSeconds())
+
+	// 添加定时保存任务
+	cleanExpr := "@every " + interval.String()
+	s.cron.AddFunc(cleanExpr, func() {
+		s.Save()
+	})
+
+	// 启动定时任务
+	s.cron.Start()
+
+	return s.stopCancel
 }
 
 // save 实际写入磁盘（调用者需持有锁）
 // 使用原子写入：先写临时文件，再 rename
 func (s *OffsetStore) save() {
+	// 如果停止信号已触发，不执行保存
+	select {
+	case <-s.stopCtx.Done():
+		return
+	default:
+	}
+
 	if len(s.offsets) == 0 {
 		return
 	}

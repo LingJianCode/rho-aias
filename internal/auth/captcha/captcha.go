@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mojocn/base64Captcha"
+	"github.com/robfig/cron/v3"
 )
 
 // CaptchaStore 验证码存储接口
@@ -20,6 +21,7 @@ type CaptchaStore interface {
 type MemoryStore struct {
 	data map[string]*captchaItem
 	mu   sync.RWMutex
+	cron *cron.Cron
 }
 
 type captchaItem struct {
@@ -32,8 +34,18 @@ func NewMemoryStore() *MemoryStore {
 	store := &MemoryStore{
 		data: make(map[string]*captchaItem),
 	}
-	// 启动清理协程
-	go store.cleanup()
+
+	// 初始化 Cron 定时任务
+	store.cron = cron.New(cron.WithSeconds())
+
+	// 添加定时清理任务（每 1 分钟）
+	store.cron.AddFunc("@every 1m", func() {
+		store.cleanup()
+	})
+
+	// 启动定时任务
+	store.cron.Start()
+
 	return store
 }
 
@@ -68,18 +80,14 @@ func (s *MemoryStore) Delete(id string) {
 
 // cleanup 定期清理过期验证码
 func (s *MemoryStore) cleanup() {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	for range ticker.C {
-		s.mu.Lock()
-		now := time.Now()
-		for id, item := range s.data {
-			if now.After(item.expiresAt) {
-				delete(s.data, id)
-			}
+	now := time.Now()
+	for id, item := range s.data {
+		if now.After(item.expiresAt) {
+			delete(s.data, id)
 		}
-		s.mu.Unlock()
 	}
 }
 
