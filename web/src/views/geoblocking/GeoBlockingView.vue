@@ -46,7 +46,7 @@
 
       <el-divider />
 
-      <h4>当前已选择 {{ config.allowed_countries.length }} 个国家</h4>
+      <h4>当前已选择 {{ config.allowed_countries?.length || 0 }} 个国家</h4>
       <div class="selected-countries">
         <el-tag
           v-for="code in config.allowed_countries"
@@ -125,7 +125,7 @@ async function fetchConfig() {
     const res = await getGeoBlockingStatus()
     status.value = res.data
     config.mode = res.data.mode
-    config.allowed_countries = res.data.allowed_countries
+    config.allowed_countries = res.data.allowed_countries || []
   } catch {
     // Use defaults
   } finally {
