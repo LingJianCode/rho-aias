@@ -23,7 +23,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'geoblocking', name: 'GeoBlocking', component: () => import('@/views/geoblocking/GeoBlockingView.vue') },
       { path: 'settings/users', name: 'Users', component: () => import('@/views/settings/UsersView.vue'), meta: { requiresAdmin: true } },
       { path: 'settings/api-keys', name: 'ApiKeys', component: () => import('@/views/settings/ApiKeysView.vue') },
-      { path: 'settings/audit', name: 'Audit', component: () => import('@/views/settings/AuditView.vue') },
     ],
   },
   { path: '/403', name: 'Forbidden', component: () => import('@/views/error/403.vue') },

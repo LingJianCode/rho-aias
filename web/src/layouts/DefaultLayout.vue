@@ -47,7 +47,6 @@
           </template>
           <el-menu-item index="/settings/users" v-if="authStore.isAdmin">用户管理</el-menu-item>
           <el-menu-item index="/settings/api-keys">API Key</el-menu-item>
-          <el-menu-item index="/settings/audit">审计日志</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>

@@ -7,6 +7,8 @@ export interface BanRecordFilter {
   ip?: string
   source?: string
   status?: string
+  start_time?: string // 开始时间 (ISO 8601 格式)
+  end_time?: string   // 结束时间 (ISO 8601 格式)
 }
 
 export function getBanRecords(params: BanRecordFilter): Promise<ApiResponse<BanRecordListResponse>> {
@@ -18,6 +20,8 @@ export function getBanRecords(params: BanRecordFilter): Promise<ApiResponse<BanR
     ip: params.ip,
     source: params.source,
     status: params.status,
+    start_time: params.start_time,
+    end_time: params.end_time,
     limit,
     offset,
   }
