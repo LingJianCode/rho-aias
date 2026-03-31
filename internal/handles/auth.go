@@ -45,17 +45,17 @@ func (h *AuthHandle) GetCaptcha(c *gin.Context) {
 	}
 
 	response.OK(c, gin.H{
-		"captcha_id": id,
-		"image":      img,
+		"captcha_id":    id,
+		"captcha_image": img,
 	})
 }
 
 // LoginRequest 登录请求
 type LoginRequest struct {
-	Username      string `json:"username" binding:"required"`
-	Password      string `json:"password" binding:"required"`
-	CaptchaID     string `json:"captcha_id" binding:"required"`
-	CaptchaAnswer string `json:"captcha_answer" binding:"required"`
+	Username     string `json:"username" binding:"required"`
+	Password     string `json:"password" binding:"required"`
+	CaptchaID    string `json:"captcha_id" binding:"required"`
+	CaptchaCode  string `json:"captcha_code" binding:"required"`
 }
 
 // Login 登录
@@ -76,7 +76,7 @@ func (h *AuthHandle) Login(c *gin.Context) {
 	}
 
 	// 验证验证码
-	if !h.captchaService.Verify(req.CaptchaID, req.CaptchaAnswer) {
+	if !h.captchaService.Verify(req.CaptchaID, req.CaptchaCode) {
 		response.Fail(c, http.StatusBadRequest, response.CodeInvalidCaptcha, "invalid captcha")
 		return
 	}
