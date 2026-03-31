@@ -26,13 +26,15 @@ func (s *BanRecordService) DB() *gorm.DB {
 
 // BanRecordFilter 封禁记录查询过滤器
 type BanRecordFilter struct {
-	IP      string `form:"ip"`       // 按封禁 IP 过滤
-	Source  string `form:"source"`   // 按来源过滤: waf, rate_limit, anomaly, manual
-	Status  string `form:"status"`   // 按状态过滤: active, expired, manual_unblock
-	Limit   int    `form:"limit"`    // 限制返回条数
-	Offset  int    `form:"offset"`   // 偏移量（分页）
-	OrderBy string `form:"order_by"` // 排序字段: created_at, ip, source (默认 created_at)
-	Order   string `form:"order"`    // 排序方向: asc, desc (默认 desc)
+	IP        string `form:"ip"`         // 按封禁 IP 过滤
+	Source    string `form:"source"`     // 按来源过滤: waf, rate_limit, anomaly, manual, failguard
+	Status    string `form:"status"`     // 按状态过滤: active, expired, manual_unblock
+	StartTime string `form:"start_time"` // 开始时间 (RFC3339 格式)
+	EndTime   string `form:"end_time"`   // 结束时间 (RFC3339 格式)
+	Limit     int    `form:"limit"`      // 限制返回条数
+	Offset    int    `form:"offset"`     // 偏移量（分页）
+	OrderBy   string `form:"order_by"`   // 排序字段: created_at, ip, source (默认 created_at)
+	Order     string `form:"order"`      // 排序方向: asc, desc (默认 desc)
 }
 
 // CreateRecord 创建封禁记录
@@ -92,6 +94,17 @@ func (s *BanRecordService) QueryRecords(filter BanRecordFilter) ([]models.BanRec
 	}
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
+	}
+	// 时间范围过滤
+	if filter.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, filter.StartTime); err == nil {
+			query = query.Where("created_at >= ?", t)
+		}
+	}
+	if filter.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, filter.EndTime); err == nil {
+			query = query.Where("created_at <= ?", t)
+		}
 	}
 
 	// 计算总数
