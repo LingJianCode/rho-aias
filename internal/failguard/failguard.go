@@ -371,6 +371,10 @@ func (m *Monitor) processLine(line string) {
 	// 5. 滑动窗口计数，达阈值则封禁
 	if m.addFailureAndCheck(ip) {
 		m.banIP(ip)
+		// 封禁成功后清零计数器（在 banIP 外部操作 failMu，避免嵌套锁）
+		m.failMu.Lock()
+		delete(m.failures, ip)
+		m.failMu.Unlock()
 	}
 }
 
@@ -483,11 +487,6 @@ func (m *Monitor) banIP(ip string) {
 			logger.Errorf("[FailGuard] Failed to persist ban record for IP %s: %v", ip, err)
 		}
 	}
-
-	// 清零计数器
-	m.failMu.Lock()
-	delete(m.failures, ip)
-	m.failMu.Unlock()
 
 	logger.Infof("[FailGuard] Banned IP %s for %ds (SSH brute force, expires at %v)", ip, m.cfg.BanDuration, expiry)
 }
