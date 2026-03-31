@@ -10,7 +10,19 @@ export interface BanRecordFilter {
 }
 
 export function getBanRecords(params: BanRecordFilter): Promise<ApiResponse<BanRecordListResponse>> {
-  return request.get('/api/ban-records', { params }).then((res) => res.data)
+  // 将 page/page_size 转换为 limit/offset
+  const limit = params.page_size || 20
+  const offset = ((params.page || 1) - 1) * limit
+
+  const backendParams = {
+    ip: params.ip,
+    source: params.source,
+    status: params.status,
+    limit,
+    offset,
+  }
+
+  return request.get('/api/ban-records', { params: backendParams }).then((res) => res.data)
 }
 
 export function getBanRecord(id: number): Promise<ApiResponse<BanRecord>> {

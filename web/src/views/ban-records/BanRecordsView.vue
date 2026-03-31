@@ -32,20 +32,19 @@
           </template>
         </el-table-column>
         <el-table-column prop="reason" label="原因" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="banned_at" label="封禁时间" width="180">
-          <template #default="{ row }">{{ formatDateTime(row.banned_at) }}</template>
+        <el-table-column prop="created_at" label="封禁时间" width="180">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column prop="expires_at" label="过期时间" width="180">
           <template #default="{ row }">{{ row.expires_at ? formatDateTime(row.expires_at) : '永久' }}</template>
         </el-table-column>
-        <el-table-column prop="is_active" label="状态" width="80">
+        <el-table-column prop="status" label="状态" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
-              {{ row.is_active ? '生效中' : '已过期' }}
+            <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
+              {{ row.status === 'active' ? '生效中' : '已过期' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="block_count" label="阻断次数" width="100" />
       </el-table>
 
       <div class="pagination-wrapper">
@@ -102,7 +101,7 @@ async function fetchRecords() {
   loading.value = true
   try {
     const res = await getBanRecords({ page: page.value, page_size: pageSize.value })
-    records.value = res.data.items
+    records.value = res.data.records
     total.value = res.data.total
   } catch {
     records.value = []

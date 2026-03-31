@@ -169,7 +169,7 @@ async function fetchBanRecords() {
       source: sourceType.value,
       status: 'active',
     })
-    banRecords.value = res.data.items
+    banRecords.value = res.data.records
     total.value = res.data.total
   } catch {
     banRecords.value = []

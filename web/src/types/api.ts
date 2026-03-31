@@ -130,17 +130,17 @@ export interface BlockedIPsResponse {
 export interface BanRecord {
   id: number
   ip: string
-  cidr?: number
   source: string
   reason: string
-  is_active: boolean
-  block_count: number
-  banned_at: string
+  duration: number
+  status: string
+  created_at: string
   expires_at?: string
+  unblocked_at?: string
 }
 
 export interface BanRecordListResponse {
-  items: BanRecord[]
+  records: BanRecord[]
   total: number
 }
 
@@ -148,7 +148,7 @@ export interface BanRecordStats {
   total: number
   active: number
   expired: number
-  today_new: number
+  today_count: number
 }
 
 // ============================================
