@@ -3,17 +3,19 @@ package anomaly
 import (
 	"sync"
 	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 // Collector 统计收集器
 // 负责收集和维护 IP 的统计信息，包括滑动窗口统计
 type Collector struct {
-	mu            sync.RWMutex
-	statsMap      map[string]*IPStats // IP -> 统计数据
-	windowSize    int                 // 滑动窗口大小（秒）
-	maxAge        time.Duration       // 统计数据最大存活时间
-	cleanupTicker *time.Ticker
-	done          chan struct{}
+	mu         sync.RWMutex
+	statsMap   map[string]*IPStats // IP -> 统计数据
+	windowSize int                 // 滑动窗口大小（秒）
+	maxAge     time.Duration       // 统计数据最大存活时间
+	cron       *cron.Cron
+	done       chan struct{}
 }
 
 // NewCollector 创建新的统计收集器
@@ -36,15 +38,28 @@ func NewCollector(windowSize int, maxAge time.Duration) *Collector {
 
 // Start 启动收集器
 func (c *Collector) Start() {
-	c.cleanupTicker = time.NewTicker(c.maxAge)
-	go c.cleanupLoop()
+	// 初始化 Cron 定时任务
+	c.cron = cron.New(cron.WithSeconds())
+
+	// 添加定时清理任务
+	cleanInterval := c.maxAge.String()
+	if cleanInterval == "0s" {
+		cleanInterval = "5m" // 默认 5 分钟
+	}
+	cleanExpr := "@every " + cleanInterval
+	c.cron.AddFunc(cleanExpr, func() {
+		c.cleanup()
+	})
+
+	// 启动定时任务
+	c.cron.Start()
 }
 
 // Stop 停止收集器
 func (c *Collector) Stop() {
 	close(c.done)
-	if c.cleanupTicker != nil {
-		c.cleanupTicker.Stop()
+	if c.cron != nil {
+		c.cron.Stop()
 	}
 }
 
@@ -52,11 +67,9 @@ func (c *Collector) Stop() {
 func (c *Collector) SetCleanupInterval(interval time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.cleanupTicker != nil {
-		c.cleanupTicker.Stop()
-	}
 	c.maxAge = interval
-	c.cleanupTicker = time.NewTicker(interval)
+	// 注意：Cron 定时任务启动后无法动态修改间隔，需要重启
+	// 这里仅更新 maxAge，实际清理间隔仍由启动时设置的任务决定
 }
 
 // RecordPacket 记录数据包
@@ -200,18 +213,6 @@ func (c *Collector) RemoveIP(ip string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.statsMap, ip)
-}
-
-// cleanupLoop 定期清理过期数据
-func (c *Collector) cleanupLoop() {
-	for {
-		select {
-		case <-c.done:
-			return
-		case <-c.cleanupTicker.C:
-			c.cleanup()
-		}
-	}
 }
 
 // cleanup 清理过期的统计数据

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"rho-aias/internal/logger"
+
+	"github.com/robfig/cron/v3"
 )
 
 const (
@@ -33,13 +35,14 @@ var DefaultConfig = Config{
 
 // AsyncWriter 异步日志写入器
 type AsyncWriter struct {
-	config    Config
+	config     Config
 	fileWriter *FileWriter
-	recordCh  chan BlockRecord
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
-	stopped   bool
-	stopMu    sync.RWMutex
+	recordCh   chan BlockRecord
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
+	stopped    bool
+	stopMu     sync.RWMutex
+	cron       *cron.Cron
 }
 
 // NewAsyncWriter 创建异步写入器
@@ -63,6 +66,18 @@ func NewAsyncWriter(config Config) (*AsyncWriter, error) {
 		recordCh:   make(chan BlockRecord, config.BufferSize),
 		stopCh:     make(chan struct{}),
 	}
+
+	// 初始化 Cron 定时任务
+	aw.cron = cron.New(cron.WithSeconds())
+
+	// 添加定时刷新任务
+	flushExpr := "@every " + config.FlushInterval.String()
+	aw.cron.AddFunc(flushExpr, func() {
+		aw.Flush()
+	})
+
+	// 启动定时任务
+	aw.cron.Start()
 
 	// 启动后台写入协程
 	aw.wg.Add(1)
@@ -103,6 +118,11 @@ func (aw *AsyncWriter) Stop() error {
 	aw.stopped = true
 	aw.stopMu.Unlock()
 
+	// 停止 Cron 定时任务
+	if aw.cron != nil {
+		aw.cron.Stop()
+	}
+
 	// 发送停止信号
 	close(aw.stopCh)
 
@@ -129,9 +149,6 @@ func (aw *AsyncWriter) Flush() error {
 func (aw *AsyncWriter) run() {
 	defer aw.wg.Done()
 
-	ticker := time.NewTicker(aw.config.FlushInterval)
-	defer ticker.Stop()
-
 	var pendingRecords []BlockRecord
 
 	for {
@@ -143,14 +160,6 @@ func (aw *AsyncWriter) run() {
 				aw.writeBatch(pendingRecords)
 				pendingRecords = pendingRecords[:0]
 			}
-
-		case <-ticker.C:
-			// 定期刷新
-			if len(pendingRecords) > 0 {
-				aw.writeBatch(pendingRecords)
-				pendingRecords = pendingRecords[:0]
-			}
-			aw.Flush()
 
 		case <-aw.stopCh:
 			// 停止信号，写入剩余记录

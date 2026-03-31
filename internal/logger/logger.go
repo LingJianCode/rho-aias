@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -35,6 +36,7 @@ type Logger struct {
 	writer  *lumberjack.Logger
 	mu      sync.RWMutex
 	stopped bool
+	cron    *cron.Cron
 }
 
 var (
@@ -90,8 +92,19 @@ func NewLogger(cfg *Config) (*Logger, error) {
 	l.zap = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
 	l.sugar = l.zap.Sugar()
 
-	// 启动定时清理任务
-	go l.startCleanupTask()
+	// 初始化 Cron 定时任务
+	l.cron = cron.New(cron.WithSeconds())
+
+	// 添加定时清理任务（每 1 小时）
+	l.cron.AddFunc("@every 1h", func() {
+		l.cleanupOldLogs()
+	})
+
+	// 启动定时任务
+	l.cron.Start()
+
+	// 启动时先执行一次清理
+	l.cleanupOldLogs()
 
 	return l, nil
 }
@@ -186,23 +199,6 @@ func (l *Logger) createEncoder(format string) zapcore.Encoder {
 	return zapcore.NewConsoleEncoder(encoderConfig)
 }
 
-// startCleanupTask 启动日志清理任务
-func (l *Logger) startCleanupTask() {
-	// 启动时先执行一次清理
-	l.cleanupOldLogs()
-
-	// 每小时检查一次
-	ticker := time.NewTicker(time.Hour)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			l.cleanupOldLogs()
-		}
-	}
-}
-
 // cleanupOldLogs 清理过期日志
 func (l *Logger) cleanupOldLogs() {
 	if l.config.MaxAgeDays <= 0 {
@@ -251,6 +247,12 @@ func (l *Logger) Close() error {
 	defer l.mu.Unlock()
 
 	l.stopped = true
+
+	// 停止 Cron 定时任务
+	if l.cron != nil {
+		l.cron.Stop()
+	}
+
 	if l.writer != nil {
 		l.writer.Close()
 	}

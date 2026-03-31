@@ -17,6 +17,7 @@ import (
 	"rho-aias/internal/watcher"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/robfig/cron/v3"
 )
 
 // sourceMaskFailGuard FailGuard 来源掩码，与 ebpfs.SourceMaskFailGuard (0x80) 保持一致
@@ -67,6 +68,9 @@ type Monitor struct {
 	// 封禁记录
 	bannedIPs map[string]IPBanRecord
 	banMu     sync.RWMutex
+
+	// Cron 定时任务
+	cron *cron.Cron
 }
 
 // NewMonitor 创建 FailGuard 日志监控器
@@ -165,17 +169,33 @@ func (m *Monitor) Start() error {
 		return fmt.Errorf("failed to watch log file: %w", err)
 	}
 
+	// 初始化 Cron 定时任务
+	m.cron = cron.New(cron.WithSeconds())
+
+	// 添加定时清理封禁任务（每 5 分钟）
+	_, err = m.cron.AddFunc("@every 5m", func() {
+		m.cleanupBans()
+	})
+	if err != nil {
+		return fmt.Errorf("failed to add cleanup bans cron job: %w", err)
+	}
+
+	// 添加定时清理失败计数任务（每 1 分钟）
+	_, err = m.cron.AddFunc("@every 1m", func() {
+		m.cleanupFailures()
+	})
+	if err != nil {
+		return fmt.Errorf("failed to add cleanup failures cron job: %w", err)
+	}
+
+	// 启动定时任务
+	m.cron.Start()
+
 	// 启动监控 goroutine
 	go m.monitorLoop()
 
 	logger.Infof("[FailGuard] Monitor started, mode=%s, log=%s, max_retry=%d, find_time=%ds, ban_duration=%ds",
 		m.cfg.Mode, m.cfg.LogPath, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
-
-	// 启动过期清理 goroutine
-	go m.cleanupExpiredBans()
-
-	// 启动失败计数清理 goroutine
-	go m.cleanupExpiredFailures()
 
 	return nil
 }
@@ -184,6 +204,12 @@ func (m *Monitor) Start() error {
 func (m *Monitor) Stop() {
 	logger.Info("[FailGuard] Stopping monitor...")
 	m.cancel()
+
+	// 停止 Cron 定时任务
+	if m.cron != nil {
+		m.cron.Stop()
+	}
+
 	if m.watcher != nil {
 		m.watcher.Close()
 	}
@@ -478,22 +504,6 @@ func (m *Monitor) isBanned(ip string) bool {
 	return time.Now().Before(record.Expiry)
 }
 
-// cleanupExpiredBans 定期清理过期的封禁记录
-func (m *Monitor) cleanupExpiredBans() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-m.ctx.Done():
-			logger.Info("[FailGuard] Cleanup goroutine exit")
-			return
-		case <-ticker.C:
-			m.cleanupBans()
-		}
-	}
-}
-
 // cleanupBans 清理过期的封禁记录
 func (m *Monitor) cleanupBans() {
 	type expiredIP struct {
@@ -528,21 +538,6 @@ func (m *Monitor) cleanupBans() {
 
 	if len(expired) > 0 {
 		logger.Infof("[FailGuard] Cleaned up %d expired IP bans", len(expired))
-	}
-}
-
-// cleanupExpiredFailures 定期清理超出窗口的失败计数
-func (m *Monitor) cleanupExpiredFailures() {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-ticker.C:
-			m.cleanupFailures()
-		}
 	}
 }
 
