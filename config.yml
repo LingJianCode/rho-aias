@@ -23,14 +23,14 @@ intel:
       schedule: "0 1 * * *"  #  每天凌晨 1 点更新
       # url: https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt
       # url: https://raw.gitcode.com/gh_mirrors/ip/ipsum/raw/master/ipsum.txt
-      url: http://localhost/ipsum.txt
+      url: http://localhost:8008/ipsum.txt
       format: ipsum
     spamhaus:
       enabled: true
       periodic: true               # 是否开启周期性更新（默认 true，设为 false 则仅启动时下载）
       schedule: "0 2 * * *"  # 每天凌晨 2 点更新
       # url: https://www.spamhaus.org/drop/drop.txt
-      url: http://localhost/drop.txt
+      url: http://localhost:8008/drop.txt
       format: spamhaus
 geo_blocking:
   enabled: true 
@@ -47,7 +47,7 @@ geo_blocking:
       periodic: true               # 是否开启周期性更新（默认 true，设为 false 则仅启动时下载）
       schedule: "0 3 * * *"  # 每天凌晨 3 点更新
       # url: https://github.com/P3TERX/GeoLite.mmdb/releases/download/2026.01.10/GeoLite2-Country.mmdb
-      url: http://localhost/GeoLite2-Country.mmdb  # MMDB 文件 URL
+      url: http://localhost:8008/GeoLite2-Country.mmdb  # MMDB 文件 URL
       format: maxmind-db  # 使用 MMDB 二进制格式
 manual:
   enabled: true          # 启用手动规则持久化
