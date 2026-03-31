@@ -159,17 +159,13 @@ func (x *Xdp) updateFeatureFlags() {
 
 	// 检查白名单 maps 是否有条目
 	if x.mapHasEntries(x.objects.WhitelistIpv4List) ||
-		x.mapHasEntries(x.objects.WhitelistIpv4CidrTrie) ||
-		x.mapHasEntries(x.objects.WhitelistIpv6List) ||
-		x.mapHasEntries(x.objects.WhitelistIpv6CidrTrie) {
+		x.mapHasEntries(x.objects.WhitelistIpv4CidrTrie) {
 		flags |= featureWhitelist
 	}
 
 	// 检查黑名单 maps 是否有条目
 	if x.mapHasEntries(x.objects.BlockIpv4List) ||
-		x.mapHasEntries(x.objects.BlockIpv4CidrTrie) ||
-		x.mapHasEntries(x.objects.BlockIpv6List) ||
-		x.mapHasEntries(x.objects.BlockIpv6CidrTrie) {
+		x.mapHasEntries(x.objects.BlockIpv4CidrTrie) {
 		flags |= featureBlacklist
 	}
 
@@ -227,8 +223,8 @@ func (x *Xdp) MonitorEvents() {
 		}
 
 		// 解析 IP 地址
-		srcIP := formatIP(pi.SrcIP, pi.SrcIPv6, uint16(pi.EthProto))
-		dstIP := formatIP(pi.DstIP, pi.DstIPv6, uint16(pi.EthProto))
+		srcIP := formatIP(pi.SrcIP, uint16(pi.EthProto))
+		dstIP := formatIP(pi.DstIP, uint16(pi.EthProto))
 		matchTypeStr := matchTypeToString(pi.MatchType)
 
 		logger.Infof("[XDP] Blocked packet - Src: %s, MatchType: %s", srcIP, matchTypeStr)
@@ -236,20 +232,17 @@ func (x *Xdp) MonitorEvents() {
 		// 触发回调
 		if x.callback != nil {
 			// 从 eBPF map 查询规则来源
-			ruleSource := x.getRuleSourceFromPacket(pi.SrcIP, pi.SrcIPv6, uint16(pi.EthProto), pi.MatchType)
+			ruleSource := x.getRuleSourceFromPacket(pi.SrcIP, uint16(pi.EthProto), pi.MatchType)
 			countryCode := "" // geo_block 时需要额外处理
 			x.callback(srcIP, dstIP, matchTypeStr, ruleSource, countryCode, pi.PktSize)
 		}
 	}
 }
 
-// formatIP 格式化 IP 地址
-func formatIP(ipv4 [4]byte, ipv6 [16]byte, ethProto uint16) string {
+// formatIP 格式化 IP 地址（仅支持 IPv4）
+func formatIP(ipv4 [4]byte, ethProto uint16) string {
 	if ethProto == 0x0800 { // ETH_P_IP
 		addr := netip.AddrFrom4(ipv4)
-		return addr.String()
-	} else if ethProto == 0x86DD { // ETH_P_IPV6
-		addr := netip.AddrFrom16(ipv6)
 		return addr.String()
 	}
 	return ""
@@ -262,12 +255,6 @@ func matchTypeToString(mt MatchType) string {
 		return "ip4_exact"
 	case MatchByIP4CIDR:
 		return "ip4_cidr"
-	case MatchByIP6Exact:
-		return "ip6_exact"
-	case MatchByIP6CIDR:
-		return "ip6_cidr"
-	case MatchByMAC:
-		return "mac"
 	case MatchByGeoBlock:
 		return "geo_block"
 	case MatchByWhitelist:
@@ -279,7 +266,7 @@ func matchTypeToString(mt MatchType) string {
 
 // getRuleSourceFromPacket 根据数据包信息从 eBPF map 中查询规则来源
 // 通过 SrcIP 在 eBPF map 中查找 BlockValue 的 SourceMask，转换为来源名称
-func (x *Xdp) getRuleSourceFromPacket(srcIP [4]byte, srcIPv6 [16]byte, ethProto uint16, mt MatchType) string {
+func (x *Xdp) getRuleSourceFromPacket(srcIP [4]byte, ethProto uint16, mt MatchType) string {
 	x.mapMu.RLock()
 	defer x.mapMu.RUnlock()
 
@@ -302,18 +289,8 @@ func (x *Xdp) getRuleSourceFromPacket(srcIP [4]byte, srcIPv6 [16]byte, ethProto 
 				return sources[0]
 			}
 		}
-	case MatchByIP6Exact:
-		var blockValue BlockValue
-		if err := x.objects.BlockIpv6List.Lookup(&srcIPv6, &blockValue); err == nil {
-			sources := MaskToSourceIDs(blockValue.SourceMask)
-			if len(sources) > 0 {
-				return sources[0]
-			}
-		}
 	case MatchByGeoBlock:
 		return "geo"
-	case MatchByMAC:
-		return "manual"
 	}
 	return "unknown"
 }
@@ -336,18 +313,6 @@ func (x *Xdp) updateMap(iptype utils.IPType, value []byte, blockValue BlockValue
 			err = x.objects.BlockIpv4CidrTrie.Put(value, blockValue)
 		} else {
 			err = x.objects.BlockIpv4CidrTrie.Delete(value)
-		}
-	case utils.IPTypeIPv6:
-		if add {
-			err = x.objects.BlockIpv6List.Put(value, blockValue)
-		} else {
-			err = x.objects.BlockIpv6List.Delete(value)
-		}
-	case utils.IPTypeIPv6CIDR:
-		if add {
-			err = x.objects.BlockIpv6CidrTrie.Put(value, blockValue)
-		} else {
-			err = x.objects.BlockIpv6CidrTrie.Delete(value)
 		}
 	default:
 		return fmt.Errorf("unsupported match type: %v", iptype)
@@ -381,19 +346,6 @@ func (x *Xdp) AddRule(value string) error {
 		copy(key.Addr[:], bytes[4:])
 		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
 		if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	case utils.IPTypeIPv6:
-		var key [16]byte
-		copy(key[:], bytes)
-		if x.objects.BlockIpv6List.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	case utils.IPTypeIPv6CIDR:
-		var key IPv6TrieKey
-		copy(key.Addr[:], bytes[16:])
-		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:16])
-		if x.objects.BlockIpv6CidrTrie.Lookup(&key, &currentValue) == nil {
 			exists = true
 		}
 	}
@@ -459,19 +411,6 @@ func (x *Xdp) AddRuleWithSource(value string, sourceMask uint32) error {
 		if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
 			exists = true
 		}
-	case utils.IPTypeIPv6:
-		var key [16]byte
-		copy(key[:], bytes)
-		if x.objects.BlockIpv6List.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	case utils.IPTypeIPv6CIDR:
-		var key IPv6TrieKey
-		copy(key.Addr[:], bytes[16:])
-		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:16])
-		if x.objects.BlockIpv6CidrTrie.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
 	}
 
 	var blockValue BlockValue
@@ -517,19 +456,6 @@ func (x *Xdp) AddRuleWithSourceAndExpiry(value string, sourceMask uint32, durati
 		copy(key.Addr[:], bytes[4:])
 		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
 		if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	case utils.IPTypeIPv6:
-		var key [16]byte
-		copy(key[:], bytes)
-		if x.objects.BlockIpv6List.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	case utils.IPTypeIPv6CIDR:
-		var key IPv6TrieKey
-		copy(key.Addr[:], bytes[16:])
-		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:16])
-		if x.objects.BlockIpv6CidrTrie.Lookup(&key, &currentValue) == nil {
 			exists = true
 		}
 	}
@@ -660,19 +586,6 @@ func (x *Xdp) BatchAddRules(values []string, sourceMask uint32) error {
 			if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
 				exists = true
 			}
-		case utils.IPTypeIPv6:
-			var key [16]byte
-			copy(key[:], e.key)
-			if x.objects.BlockIpv6List.Lookup(&key, &currentValue) == nil {
-				exists = true
-			}
-		case utils.IPTypeIPv6CIDR:
-			var key IPv6TrieKey
-			copy(key.Addr[:], e.key[16:])
-			key.PrefixLen = binary.LittleEndian.Uint32(e.key[:16])
-			if x.objects.BlockIpv6CidrTrie.Lookup(&key, &currentValue) == nil {
-				exists = true
-			}
 		}
 
 		var blockValue BlockValue
@@ -760,27 +673,6 @@ func (x *Xdp) UpdateRuleSourceMask(value string, removeMask uint32) (newMask uin
 		currentMask = blockValue.SourceMask
 		currentPriority = blockValue.Priority
 		currentExpiry = blockValue.Expiry
-	case utils.IPTypeIPv6:
-		var key [16]byte
-		copy(key[:], bytes)
-		var blockValue BlockValue
-		if err := x.objects.BlockIpv6List.Lookup(&key, &blockValue); err != nil {
-			return 0, false, false, nil // 规则不存在
-		}
-		currentMask = blockValue.SourceMask
-		currentPriority = blockValue.Priority
-		currentExpiry = blockValue.Expiry
-	case utils.IPTypeIPv6CIDR:
-		var key IPv6TrieKey
-		copy(key.Addr[:], bytes[16:])
-		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:16])
-		var blockValue BlockValue
-		if err := x.objects.BlockIpv6CidrTrie.Lookup(&key, &blockValue); err != nil {
-			return 0, false, false, nil // 规则不存在
-		}
-		currentMask = blockValue.SourceMask
-		currentPriority = blockValue.Priority
-		currentExpiry = blockValue.Expiry
 	default:
 		return 0, false, false, fmt.Errorf("unsupported IP type: %v", iptype)
 	}
@@ -852,27 +744,6 @@ func (x *Xdp) BatchUpdateRuleSourceMask(values []string, removeMask uint32) ([]s
 			key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
 			var blockValue BlockValue
 			if x.objects.BlockIpv4CidrTrie.Lookup(&key, &blockValue) == nil {
-				exists = true
-				currentMask = blockValue.SourceMask
-				currentPriority = blockValue.Priority
-				currentExpiry = blockValue.Expiry
-			}
-		case utils.IPTypeIPv6:
-			var key [16]byte
-			copy(key[:], bytes)
-			var blockValue BlockValue
-			if x.objects.BlockIpv6List.Lookup(&key, &blockValue) == nil {
-				exists = true
-				currentMask = blockValue.SourceMask
-				currentPriority = blockValue.Priority
-				currentExpiry = blockValue.Expiry
-			}
-		case utils.IPTypeIPv6CIDR:
-			var key IPv6TrieKey
-			copy(key.Addr[:], bytes[16:])
-			key.PrefixLen = binary.LittleEndian.Uint32(bytes[:16])
-			var blockValue BlockValue
-			if x.objects.BlockIpv6CidrTrie.Lookup(&key, &blockValue) == nil {
 				exists = true
 				currentMask = blockValue.SourceMask
 				currentPriority = blockValue.Priority
@@ -1241,22 +1112,12 @@ func (x *Xdp) updateWhitelistMap(iptype utils.IPType, value []byte, add bool) er
 			return x.objects.WhitelistIpv4CidrTrie.Put(value, blockValue)
 		}
 		return x.objects.WhitelistIpv4CidrTrie.Delete(value)
-	case utils.IPTypeIPv6:
-		if add {
-			return x.objects.WhitelistIpv6List.Put(value, blockValue)
-		}
-		return x.objects.WhitelistIpv6List.Delete(value)
-	case utils.IPTypeIPv6CIDR:
-		if add {
-			return x.objects.WhitelistIpv6CidrTrie.Put(value, blockValue)
-		}
-		return x.objects.WhitelistIpv6CidrTrie.Delete(value)
 	default:
 		return fmt.Errorf("unsupported IP type for whitelist: %v", iptype)
 	}
 }
 
-// AddWhitelistRule 添加白名单规则（支持 IP 和 CIDR，不支持 MAC）
+// AddWhitelistRule 添加白名单规则（支持 IPv4 和 CIDR）
 func (x *Xdp) AddWhitelistRule(value string) error {
 	x.mapMu.Lock()
 	defer x.mapMu.Unlock()
@@ -1265,10 +1126,6 @@ func (x *Xdp) AddWhitelistRule(value string) error {
 	b, iptype, err := utils.ParseValueToBytes(value)
 	if err != nil {
 		return fmt.Errorf("invalid whitelist value %s: %w", value, err)
-	}
-	// 白名单不支持 MAC 地址
-	if iptype == utils.IPTypeMAC {
-		return fmt.Errorf("whitelist does not support MAC addresses: %s", value)
 	}
 	logger.Debugf("[Whitelist] AddRule: value=%s, iptype=%v", value, iptype)
 	err = x.updateWhitelistMap(iptype, b, true)
@@ -1331,34 +1188,6 @@ func (x *Xdp) GetWhitelistRules() ([]string, error) {
 		return nil, fmt.Errorf("iterate whitelist ipv4 cidr trie failed: %w", err)
 	}
 
-	// IPv6 精确匹配
-	iter6 := x.objects.WhitelistIpv6List.Iterate()
-	var key6 []byte
-	var val6 BlockValue
-	for iter6.Next(&key6, &val6) {
-		if val6.SourceMask != 0 {
-			ip := net.IP(key6)
-			rules = append(rules, ip.String())
-		}
-	}
-	if err := iter6.Err(); err != nil {
-		return nil, fmt.Errorf("iterate whitelist ipv6 list failed: %w", err)
-	}
-
-	// IPv6 CIDR 匹配
-	iter6Cidr := x.objects.WhitelistIpv6CidrTrie.Iterate()
-	var key6Cidr IPv6TrieKey
-	var val6Cidr BlockValue
-	for iter6Cidr.Next(&key6Cidr, &val6Cidr) {
-		if val6Cidr.SourceMask != 0 {
-			ip := net.IP(key6Cidr.Addr[:])
-			rules = append(rules, fmt.Sprintf("%s/%d", ip.String(), key6Cidr.PrefixLen))
-		}
-	}
-	if err := iter6Cidr.Err(); err != nil {
-		return nil, fmt.Errorf("iterate whitelist ipv6 cidr trie failed: %w", err)
-	}
-
 	return rules, nil
 }
 
@@ -1415,8 +1244,8 @@ func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback) {
 			continue
 		}
 
-		// 解析源 IP 地址（支持 IPv4 和 IPv6）
-		srcIP := formatIP(pi.SrcIP, pi.SrcIPv6, uint16(pi.EthProto))
+		// 解析源 IP 地址（仅支持 IPv4）
+		srcIP := formatIP(pi.SrcIP, uint16(pi.EthProto))
 
 		// 触发回调
 		if callback != nil {

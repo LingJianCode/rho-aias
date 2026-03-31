@@ -10,9 +10,6 @@ func TestWhitelistChecker_Empty(t *testing.T) {
 	if wc.IsWhitelisted("1.2.3.4") {
 		t.Error("empty checker should not match any IP")
 	}
-	if wc.IsWhitelisted("::1") {
-		t.Error("empty checker should not match any IPv6")
-	}
 }
 
 func TestWhitelistChecker_ExactIPv4(t *testing.T) {
@@ -139,17 +136,5 @@ func TestWhitelistChecker_LoadFromCache_ReplacesExisting(t *testing.T) {
 	}
 	if !wc.IsWhitelisted("5.6.7.8") {
 		t.Error("5.6.7.8 should be whitelisted after LoadFromCache")
-	}
-}
-
-func TestWhitelistChecker_IPv6(t *testing.T) {
-	wc := NewWhitelistChecker()
-	wc.Add("::1")
-
-	if !wc.IsWhitelisted("::1") {
-		t.Error("::1 should be whitelisted")
-	}
-	if wc.IsWhitelisted("::2") {
-		t.Error("::2 should not be whitelisted")
 	}
 }

@@ -156,11 +156,8 @@ func TestCache_RoundTrip(t *testing.T) {
 	data := NewCacheData()
 
 	rules := []string{
-		"192.168.1.1",      // IPv4 exact
-		"10.0.0.0/8",       // IPv4 CIDR
-		"2001:db8::1",      // IPv6 exact
-		"2001:db8::/32",    // IPv6 CIDR
-		"00:11:22:33:44:55", // MAC
+		"192.168.1.1", // IPv4 exact
+		"10.0.0.0/8",  // IPv4 CIDR
 	}
 
 	for _, rule := range rules {

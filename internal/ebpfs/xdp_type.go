@@ -54,12 +54,6 @@ type IPv4TrieKey struct {
 	Addr      [4]byte // IPv4 地址
 }
 
-// IPv6TrieKey IPv6 CIDR LPM Trie 键结构
-type IPv6TrieKey struct {
-	PrefixLen uint32   // __u32 - CIDR 前缀长度
-	Addr      [16]byte // IPv6 地址
-}
-
 // ============================================
 // 位掩码操作辅助函数
 // ============================================

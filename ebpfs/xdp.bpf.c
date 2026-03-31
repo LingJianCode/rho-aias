@@ -4,23 +4,21 @@
  *
  * 功能:
  * - 在网络驱动层拦截和处理数据包，性能优于传统 netfilter/iptables
- * - 根据 IPv4/IPv6 地址或 CIDR 规则过滤数据包
+ * - 根据 IPv4 地址或 CIDR 规则过滤数据包
  * - 将匹配的数据包事件发送到用户空间监控
  *
  * 数据包处理流程:
  * 1. 解析以太网头 -> 获取协议类型
  * 2. 处理 VLAN 标签 (如果存在)
- * 3. 解析 IP 层 (IPv4/IPv6)
+ * 3. 解析 IPv4 头部
  *    - 验证头部完整性
  *    - 处理 IP 分片 (只处理首片)
- *    - 处理 IPv6 扩展头链
  * 4. 根据规则匹配 IP 地址
  * 5. 将事件上报到用户空间
  * 6. 返回 XDP_DROP 或 XDP_PASS
  *
  * 安全特性:
  * - IPv4 分片: 只处理首片 (offset=0)，丢弃后续分片
- * - IPv6 扩展头: 限制扩展头数量 (最多 8 个)
  * - 边界检查: 所有指针访问前都进行边界验证
  */
 
@@ -40,9 +38,6 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MATCH_BY_PASS      0     // No rule matched
 #define MATCH_BY_IP4_EXACT  1    // Match IPv4 address exactly
 #define MATCH_BY_IP4_CIDR   2    // Match IPv4 address by CIDR block
-#define MATCH_BY_IP6_EXACT  3    // Match IPv6 address exactly
-#define MATCH_BY_IP6_CIDR   4    // Match IPv6 address by CIDR block
-#define MATCH_BY_MAC        5    // Match MAC address exactly
 #define MATCH_BY_GEO_BLOCK  6    // Match by geo-blocking rule
 #define MATCH_BY_WHITELIST  7    // Match by IP whitelist (pass directly)
 
@@ -53,26 +48,18 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 // Maximum number of entries in whitelist maps
 #define MAX_WHITELIST_IPV4_LIST_ENTRIES 10000    // IPv4 whitelist exact match
 #define MAX_WHITELIST_IPV4_CIDR_ENTRIES 5000     // IPv4 whitelist CIDR
-#define MAX_WHITELIST_IPV6_LIST_ENTRIES 10000    // IPv6 whitelist exact match
-#define MAX_WHITELIST_IPV6_CIDR_ENTRIES 5000     // IPv6 whitelist CIDR
 
 // Maximum number of entries in each map
 // 威胁情报数据量: IPSum ~230K, Spamhaus ~1.5K
 #define MAX_IPV4_LIST_ENTRIES 250000   // IPv4 精确匹配（IPSum 有 23万+）
 #define MAX_IPV4_CIDR_ENTRIES 10000    // IPv4 CIDR（Spamhaus 1,454 + 预留）
-#define MAX_IPV6_LIST_ENTRIES 10000    // IPv6 精确匹配（预留）
-#define MAX_IPV6_CIDR_ENTRIES 10000    // IPv6 CIDR（预留）
 
 // Default prefix lengths for IP lookups
-#define DEFAULT_IPV6_PREFIX  128 // Full IPv6 address length for LPM lookup
 #define DEFAULT_IPV4_PREFIX  32  // Full IPv4 address length for LPM lookup
 #define DEFAULT_KEY 0
 
-// IPv6 extension header limits (防止 DoS 攻击)
-#define MAX_IPV6_EXT_HEADERS 8   // 最多处理的扩展头数量
-
 /* Packet information structure for processing and event reporting
- * 总大小: 54 bytes, packed 避免填充
+ * 总大小: 22 bytes, packed 避免填充
  * 包含传输层协议信息、TCP 标志位和目标端口
  */
 struct packet_info {
@@ -80,12 +67,8 @@ struct packet_info {
     __be32 src_ip;                  // 源 IPv4 地址
     __be32 dst_ip;                  // 目的 IPv4 地址
 
-    // Network layer - IPv6 addresses (32 bytes)
-    __be32 src_ipv6[4];             // 源 IPv6 地址 (128 bits)
-    __be32 dst_ipv6[4];             // 目的 IPv6 地址 (128 bits)
-
     // Protocol information (4 bytes)
-    __u16 eth_proto;                // 以太网协议类型 (ETH_P_IP/ETH_P_IPV6)
+    __u16 eth_proto;                // 以太网协议类型 (ETH_P_IP)
     __u8 ip_protocol;               // IP 协议类型 (TCP=6, UDP=17, ICMP=1)
     __u8 tcp_flags;                 // TCP 标志位 (SYN=0x02, ACK=0x10, etc.)
 
@@ -95,7 +78,7 @@ struct packet_info {
     // Metadata (8 bytes)
     __u32 pkt_size;                 // 数据包总大小
     __u32 match_type;               // 匹配的规则类型
-} __attribute__((packed));          // 54 bytes
+} __attribute__((packed));          // 22 bytes
 
 /* eBPF maps definitions
  * All maps are limited to MAX_ENTRIES_SIZE entries
@@ -125,31 +108,6 @@ struct {
     __uint(max_entries, MAX_IPV4_CIDR_ENTRIES);
     __uint(map_flags, BPF_F_NO_PREALLOC);
 } block_ipv4_cidr_trie SEC(".maps");
-
-// IPv6 exact match hash table
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, struct in6_addr);
-    __type(value, struct block_value);
-    __uint(max_entries, MAX_IPV6_LIST_ENTRIES);
-} block_ipv6_list SEC(".maps");
-
-/* LPM (Longest Prefix Match) Trie key for IPv6 CIDR matching
- * Used with BPF_MAP_TYPE_LPM_TRIE map
- */
-struct ipv6_trie_key {
-    __u32 prefixlen;        // CIDR prefix length
-    struct in6_addr addr;    // IPv6 address
-};
-
-// IPv6 CIDR LPM trie
-struct {
-    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
-    __type(key, struct ipv6_trie_key);
-    __type(value, struct block_value);
-    __uint(max_entries, MAX_IPV6_CIDR_ENTRIES);
-    __uint(map_flags, BPF_F_NO_PREALLOC);
-} block_ipv6_cidr_trie SEC(".maps");
 
 // Scratch map for storing packet information
 struct {
@@ -276,23 +234,6 @@ struct {
     __uint(map_flags, BPF_F_NO_PREALLOC);
 } whitelist_ipv4_cidr_trie SEC(".maps");
 
-// IPv6 whitelist exact match hash table
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, struct in6_addr);
-    __type(value, struct block_value);
-    __uint(max_entries, MAX_WHITELIST_IPV6_LIST_ENTRIES);
-} whitelist_ipv6_list SEC(".maps");
-
-// IPv6 whitelist CIDR LPM trie
-struct {
-    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
-    __type(key, struct ipv6_trie_key);
-    __type(value, struct block_value);
-    __uint(max_entries, MAX_WHITELIST_IPV6_CIDR_ENTRIES);
-    __uint(map_flags, BPF_F_NO_PREALLOC);
-} whitelist_ipv6_cidr_trie SEC(".maps");
-
 // ============================================
 // Transport layer parsing helper functions
 // ============================================
@@ -398,20 +339,6 @@ static __always_inline int check_whitelist(struct packet_info *pi) {
         };
         val = bpf_map_lookup_elem(&whitelist_ipv4_cidr_trie, &v4_key);
         if (val && val->source_mask != 0) return 1;
-    } else if (pi->eth_proto == ETH_P_IPV6) {
-        // IPv6 精确匹配
-        struct in6_addr ipv6_addr;
-        __builtin_memcpy(&ipv6_addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(ipv6_addr.in6_u.u6_addr32));
-        struct block_value *val = bpf_map_lookup_elem(&whitelist_ipv6_list, &ipv6_addr);
-        if (val && val->source_mask != 0) return 1;
-
-        // IPv6 CIDR 匹配
-        struct ipv6_trie_key v6_key = {
-            .prefixlen = DEFAULT_IPV6_PREFIX,
-        };
-        __builtin_memcpy(&v6_key.addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(v6_key.addr.in6_u.u6_addr32));
-        val = bpf_map_lookup_elem(&whitelist_ipv6_cidr_trie, &v6_key);
-        if (val && val->source_mask != 0) return 1;
     }
 
     return 0; // 未命中白名单
@@ -429,7 +356,7 @@ static __always_inline int check_geo_blocking(struct packet_info *pi) {
     if (UNLIKELY(!config || !config->enabled))
         return 1;  // Pass
 
-    // Only process IPv4 packets (IPv6 暂不处理)
+    // Only process IPv4 packets
     if (pi->eth_proto == ETH_P_IP) {
         // Check IPv4 against whitelist
         struct ipv4_trie_key v4_key = {
@@ -447,15 +374,15 @@ static __always_inline int check_geo_blocking(struct packet_info *pi) {
         }
     }
 
-    // Pass for IPv6 or non-IP packets
+    // Pass for non-IPv4 packets
     return 1;
 }
 
 /* 检查数据包是否匹配配置的过滤规则
  * @pi: 包含已解析数据包信息的结构体
- * 返回值: 匹配类型 (MATCH_BY_IP4_EXACT/IP4_CIDR/IP6_EXACT/IP6_CIDR) 或 MATCH_BY_PASS
+ * 返回值: 匹配类型 (MATCH_BY_IP4_EXACT/IP4_CIDR) 或 MATCH_BY_PASS
  *
- * 匹配顺序: IPv4 精确匹配 -> IPv4 CIDR 匹配 -> IPv6 精确匹配 -> IPv6 CIDR 匹配
+ * 匹配顺序: IPv4 精确匹配 -> IPv4 CIDR 匹配
  */
 static __always_inline __u32 match_by_rule(struct packet_info *pi) {
     // 快速跳过: 黑名单为空时无需查询
@@ -465,13 +392,10 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
         return MATCH_BY_PASS;
 
     // ETH_P_IP 宏定义的是 网络字节序的值, pi->eth_proto 从数据包中读出的也是 网络字节序
-    // bpf_printk("match_by_rule eth_proto: %d %d\n", pi->eth_proto, bpf_htons(ETH_P_IP));
-
     // reference: https://docs.kernel.org/next/bpf/map_lpm_trie.html#bpf-map-lookup-elem
     // Process IPv4 packets
     if (pi->eth_proto == ETH_P_IP) {
         // Try exact match first
-        // bpf_printk("match_by_rule IP: %d\n", pi->src_ip);
         struct block_value *ipv4_value = bpf_map_lookup_elem(&block_ipv4_list, &pi->src_ip);
         if (ipv4_value && ipv4_value->source_mask != 0) return MATCH_BY_IP4_EXACT;
 
@@ -482,21 +406,6 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
         };
         struct block_value *ipv4_cidr_value = bpf_map_lookup_elem(&block_ipv4_cidr_trie, &v4_key);
         if (ipv4_cidr_value && ipv4_cidr_value->source_mask != 0) return MATCH_BY_IP4_CIDR;
-
-    } else if (pi->eth_proto == ETH_P_IPV6) {
-        // Try exact match first - 直接使用 src_ipv6 数组，避免 memset
-        struct in6_addr ipv6_addr;
-        __builtin_memcpy(&ipv6_addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(ipv6_addr.in6_u.u6_addr32));
-        struct block_value *ipv6_value = bpf_map_lookup_elem(&block_ipv6_list, &ipv6_addr);
-        if (ipv6_value && ipv6_value->source_mask != 0) return MATCH_BY_IP6_EXACT;
-
-        // Then try CIDR match using LPM Trie - 直接初始化 LPM key
-        struct ipv6_trie_key v6_key = {
-            .prefixlen = DEFAULT_IPV6_PREFIX,
-        };
-        __builtin_memcpy(&v6_key.addr.in6_u.u6_addr32, pi->src_ipv6, sizeof(v6_key.addr.in6_u.u6_addr32));
-        struct block_value *ipv6_cidr_value = bpf_map_lookup_elem(&block_ipv6_cidr_trie, &v6_key);
-        if (ipv6_cidr_value && ipv6_cidr_value->source_mask != 0) return MATCH_BY_IP6_CIDR;
     }
     return MATCH_BY_PASS;
 }
@@ -510,8 +419,7 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
  * 处理流程:
  * 1. 解析以太网头
  * 2. 处理 VLAN 标签 (802.1Q/802.1AD)
- * 3. 解析 IPv4 或 IPv6 头部
- * 4. 处理 IPv6 扩展头链
+ * 3. 解析 IPv4 头部
  */
 static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *data, void *data_end) {
 
@@ -533,7 +441,7 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
         pkt_info->eth_proto = bpf_ntohs(vlan->h_vlan_encapsulated_proto);
     }
     
-    // 根据以太网协议类型判断是 IPv4 还是 IPv6
+    // 只处理 IPv4 数据包
     if (pkt_info->eth_proto == ETH_P_IP) {
         // IPv4 处理
         struct iphdr *iph = (struct iphdr *)ip_data;
@@ -551,28 +459,10 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
             return 1;
 
         // 验证协议类型 (确保是已知协议)
-        // 常见协议: TCP(6), UDP(17), ICMP(1), ESP(50), AH(51)
-        // 这里只做基本验证，不接受未知协议
         if (iph->protocol == 0 || iph->protocol > 255)
             return 1;
 
         // IPv4 分片处理: 只处理首片分片
-        //
-        // frag_off 字段结构:
-        //   bit 0-12: Fragment Offset (以8字节为单位)
-        //   bit 13:   DF (Don't Fragment)
-        //   bit 14:   MF (More Fragments)
-        //   bit 15:   Reserved
-        //
-        // IP_OFFSET (0x1FFF) 提取 Fragment Offset 部分
-        //
-        // 分片类型:
-        //   - 首片: offset=0 (可能设置 MF)
-        //   - 后续片: offset>0 (可能设置 MF)
-        //   - 最后片: offset>0, MF=0
-        //
-        // 策略: 只处理首片 (offset=0)，丢弃后续分片
-        // 原因: 后续分片不包含完整的 IP 头信息，无法提取源 IP
         if (iph->frag_off & bpf_htons(IP_OFFSET))
             return 1;
 
@@ -585,76 +475,10 @@ static __always_inline int parse_ip_header(struct packet_info *pkt_info, void *d
         // 解析传输层（TCP 标志位）
         parse_transport_layer(pkt_info, ip_data, iph_len, data_end, iph->protocol);
         
-    } else if (pkt_info->eth_proto == ETH_P_IPV6) {
-        // IPv6 处理
-        struct ipv6hdr *ipv6h = (struct ipv6hdr *)ip_data;
-        if ((void *)(ipv6h + 1) > data_end)
-            return 1;
-
-        // 复制 IPv6 地址（128 位 = 4 * 32 位）
-        __builtin_memcpy(pkt_info->src_ipv6, ipv6h->saddr.in6_u.u6_addr32, sizeof(pkt_info->src_ipv6));
-        __builtin_memcpy(pkt_info->dst_ipv6, ipv6h->daddr.in6_u.u6_addr32, sizeof(pkt_info->dst_ipv6));
-
-        __u8 nexthdr = ipv6h->nexthdr;
-        void *ext_hdr = (void *)(ipv6h + 1);
-
-        // 处理 IPv6 扩展头链（仅当存在扩展头时）
-        // 常见扩展头: 0:Hop-by-Hop, 43:Routing, 44:Fragment, 50:ESP, 51:AH, 60:DestOpts
-        if (nexthdr != IPPROTO_TCP && nexthdr != IPPROTO_UDP &&
-            nexthdr != 59 /* No Next Header */ &&
-            nexthdr != IPPROTO_ICMPV6) {
-            int hdr_count = 0;
-
-            while (nexthdr != IPPROTO_TCP && nexthdr != IPPROTO_UDP &&
-                   nexthdr != 59) {
-                // 防止 DoS: 限制扩展头数量
-                if (hdr_count++ >= MAX_IPV6_EXT_HEADERS)
-                    return 1;
-
-                // 验证至少有 8 字节 (IPv6 扩展头最小长度)
-                if (ext_hdr + 8 > data_end)
-                    return 1;
-
-                // 读取 nexthdr 字段 (扩展头第一个字节)
-                __u8 next = *(__u8 *)ext_hdr;
-
-                // 特殊处理: Fragment 扩展头
-                if (nexthdr == IPPROTO_FRAGMENT) {
-                    if (ext_hdr + sizeof(struct frag_hdr) > data_end)
-                        return 1;
-                    struct frag_hdr *frag = (struct frag_hdr *)ext_hdr;
-                    if (frag->frag_off & bpf_htons(IP6F_OFF_MASK))
-                        return 1;
-                }
-
-                // 读取扩展头长度并验证边界
-                __u8 hdrlen = *(__u8 *)(ext_hdr + 1);
-                __u32 ext_hdr_len = (__u32)(hdrlen + 1) * 8;
-
-                // 验证跳过扩展头后仍然在数据包边界内
-                if (ext_hdr + ext_hdr_len > data_end)
-                    return 1;
-
-                // 更新 nexthdr
-                nexthdr = next;
-
-                // 跳过扩展头: 实际长度 = (Hdr Ext Len + 1) × 8 字节
-                ext_hdr += ext_hdr_len;
-            }
-        }
-
-        // 解析 IPv6 传输层（支持 TCP/UDP 端口和标志位提取，用于异常检测）
-        // 首先验证 ext_hdr 仍然在数据包边界内
-        if (ext_hdr > data_end)
-            return 1;
-
-        __u32 ipv6_hdr_len = (__u32)(ext_hdr - (void *)ipv6h);
-        parse_transport_layer(pkt_info, (void *)ipv6h, ipv6_hdr_len, data_end, nexthdr);
-    } else {
-        return 2; // 不是 IPv4 或 IPv6
+        return 0;
     }
     
-    return 0;
+    return 2; // 非 IPv4 协议
 }
 
 /* XDP 程序主入口点
@@ -689,7 +513,7 @@ int xdp_prog(struct xdp_md *ctx)
     }
 
     // 只初始化 parse_ip_header 不会覆盖的字段
-    // eth_proto/src_ip/dst_ip/src_ipv6/dst_ipv6/ip_protocol/tcp_flags/dst_port
+    // eth_proto/src_ip/dst_ip/ip_protocol/tcp_flags/dst_port
     // 均由 parse_ip_header 在各分支中设置，无需预先清零
     pkt_info->pkt_size = data_end - data;
     pkt_info->match_type = 0;
@@ -749,21 +573,20 @@ submit:
                 // 采样逻辑：random % sample_rate == 0 则上报
                 __u32 random_val = bpf_get_prandom_u32();
                 if ((random_val % sample_rate) == 0) {
-                    // 端口过滤检查：如果启用了端口过滤，只上报匹配端口的数据包
-                    // 但是 ICMP/ICMPv6 没有端口，应该始终上报用于 Flood 检测
-                    int pass_port_check = 1;
-                    if (cfg->port_filter_enabled) {
-                        // ICMP (1) 和 ICMPv6 (58) 绕过端口过滤
-                        if (pkt_info->ip_protocol != IPPROTO_ICMP &&
-                            pkt_info->ip_protocol != 58 /* IPPROTO_ICMPV6 */) {
-                            __u32 port_key = bpf_ntohs(pkt_info->dst_port);
-                            __u32 *port_val = bpf_map_lookup_elem(&anomaly_ports, &port_key);
-                            // ARRAY map: 未设置的端口值为 0
-                            if (!port_val || *port_val == 0) {
-                                pass_port_check = 0;
+                        // 端口过滤检查：如果启用了端口过滤，只上报匹配端口的数据包
+                        // 但是 ICMP 没有端口，应该始终上报用于 Flood 检测
+                        int pass_port_check = 1;
+                        if (cfg->port_filter_enabled) {
+                            // ICMP (1) 绕过端口过滤
+                            if (pkt_info->ip_protocol != IPPROTO_ICMP) {
+                                __u32 port_key = bpf_ntohs(pkt_info->dst_port);
+                                __u32 *port_val = bpf_map_lookup_elem(&anomaly_ports, &port_key);
+                                // ARRAY map: 未设置的端口值为 0
+                                if (!port_val || *port_val == 0) {
+                                    pass_port_check = 0;
+                                }
                             }
                         }
-                    }
 
                     if (pass_port_check) {
                         // 上报到 anomaly_events ring buffer

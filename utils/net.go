@@ -14,9 +14,6 @@ const (
 	IPTypeUnknown  IPType = 0
 	IPTypeIPv4     IPType = 1
 	IPTypeIPV4CIDR IPType = 2
-	IPTypeIPv6     IPType = 3
-	IPTypeIPv6CIDR IPType = 4
-	IPTypeMAC      IPType = 5
 )
 
 func ParseStringToIPType(value string) IPType {
@@ -25,23 +22,18 @@ func ParseStringToIPType(value string) IPType {
 	if err != nil {
 		ip := net.ParseIP(value)
 		if ip == nil {
-			_, err := net.ParseMAC(value)
-			if err != nil {
-				return IPTypeUnknown
-			}
-			return IPTypeMAC
+			return IPTypeUnknown
 		}
 		if ip.To4() != nil {
 			return IPTypeIPv4
-		} else {
-			return IPTypeIPv6
 		}
+		// 不支持 IPv6，返回 Unknown
+		return IPTypeUnknown
 	}
 	if ipNet.IP.To4() != nil {
 		return IPTypeIPV4CIDR
-	} else if ipNet.IP.To16() != nil {
-		return IPTypeIPv6CIDR
 	}
+	// 不支持 IPv6 CIDR，返回 Unknown
 	return IPTypeUnknown
 }
 
@@ -54,21 +46,13 @@ func ParseValueToBytes(value string) ([]byte, IPType, error) {
 		// try to parse as IP
 		ip := net.ParseIP(value)
 		if ip == nil {
-			// try to parse as MAC
-			macAddr, err := net.ParseMAC(value)
-			if err != nil {
-				return nil, IPTypeUnknown, fmt.Errorf("invalid value: %s", value)
-			}
-
-			return macAddr, IPTypeMAC, nil
+			return nil, IPTypeUnknown, fmt.Errorf("invalid value: %s (only IPv4 or IPv4 CIDR supported)", value)
 		}
 		if ip.To4() != nil {
 			return ip.To4(), IPTypeIPv4, nil
-		} else if ip.To16() != nil {
-			return ip.To16(), IPTypeIPv6, nil
-		} else {
-			return nil, IPTypeUnknown, fmt.Errorf("invalid value: %s", value)
 		}
+		// 不支持 IPv6
+		return nil, IPTypeUnknown, fmt.Errorf("invalid value: %s (only IPv4 or IPv4 CIDR supported)", value)
 	}
 	ones, _ := ipNet.Mask.Size()
 	if ipNet.IP.To4() != nil && len(ipNet.IP) == net.IPv4len {
@@ -76,14 +60,9 @@ func ParseValueToBytes(value string) ([]byte, IPType, error) {
 		binary.LittleEndian.PutUint32(bytes[:4], uint32(ones))
 		copy(bytes[4:], ipNet.IP.To4())
 		return bytes[:], IPTypeIPV4CIDR, nil
-	} else if ipNet.IP.To16() != nil && len(ipNet.IP) == net.IPv6len {
-		var bytes [20]byte
-		binary.LittleEndian.PutUint32(bytes[:4], uint32(ones))
-		copy(bytes[4:], ipNet.IP.To16())
-		return bytes[:], IPTypeIPv6CIDR, nil
-	} else {
-		return nil, IPTypeUnknown, fmt.Errorf("invalid value: %s", value)
 	}
+	// 不支持 IPv6 CIDR
+	return nil, IPTypeUnknown, fmt.Errorf("invalid value: %s (only IPv4 or IPv4 CIDR supported)", value)
 }
 
 

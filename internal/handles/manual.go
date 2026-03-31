@@ -47,11 +47,11 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 	}
 	logger.Infof("[Manual] Add rule: %s", req.Value)
 
-	// 校验规则格式（IPv4、IPv6、CIDR，不支持 MAC）
+	// 校验规则格式（IPv4、CIDR）
 	value := strings.TrimSpace(req.Value)
 	ipType := utils.ParseStringToIPType(value)
-	if ipType == utils.IPTypeUnknown || ipType == utils.IPTypeMAC {
-		response.BadRequest(c, "invalid rule format: must be a valid IPv4, IPv6, or CIDR address (MAC not supported)")
+	if ipType == utils.IPTypeUnknown {
+		response.BadRequest(c, "invalid rule format: must be a valid IPv4 or CIDR address")
 		return
 	}
 
@@ -229,11 +229,11 @@ func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {
 	}
 	logger.Infof("[Whitelist] Add rule: %s", req.Value)
 
-	// 校验规则格式（IPv4、IPv6、CIDR，不支持 MAC）
+	// 校验规则格式（IPv4、CIDR）
 	value := strings.TrimSpace(req.Value)
 	ipType := utils.ParseStringToIPType(value)
-	if ipType == utils.IPTypeUnknown || ipType == utils.IPTypeMAC {
-		response.BadRequest(c, "invalid whitelist rule format: must be a valid IPv4, IPv6 or CIDR address (MAC not supported)")
+	if ipType == utils.IPTypeUnknown {
+		response.BadRequest(c, "invalid whitelist rule format: must be a valid IPv4 or CIDR address")
 		return
 	}
 
