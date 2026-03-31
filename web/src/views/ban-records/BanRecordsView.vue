@@ -28,7 +28,8 @@
             range-separator="至"
             start-placeholder="开始时间"
             end-placeholder="结束时间"
-            value-format="YYYY-MM-DDTHH:mm:ss"
+            format="YYYY-MM-DD HH:mm:ss"
+            value-format="YYYY-MM-DD HH:mm:ss"
             :shortcuts="timeShortcuts"
             style="width: 360px"
           />
@@ -46,6 +47,7 @@
           <el-select v-model="filters.status" placeholder="全部状态" clearable style="width: 120px">
             <el-option label="生效中" value="active" />
             <el-option label="已过期" value="expired" />
+            <el-option label="重启解封" value="auto_unblock" />
             <el-option label="手动解封" value="manual_unblock" />
           </el-select>
         </el-form-item>

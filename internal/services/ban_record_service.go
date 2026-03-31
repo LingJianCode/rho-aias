@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"time"
 
 	"rho-aias/internal/models"
@@ -8,6 +9,36 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// chinaLocation 中国时区 (UTC+8)
+var chinaLocation *time.Location
+
+func init() {
+	var err error
+	chinaLocation, err = time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		// 如果加载失败，使用固定偏移量 UTC+8
+		chinaLocation = time.FixedZone("CST", 8*60*60)
+	}
+}
+
+// parseLocalTime 解析本地时间字符串 (假设为中国时区 UTC+8)
+// 支持格式:
+//   - "2006-01-02 15:04:05" (推荐，前端 el-date-picker 使用)
+//   - time.RFC3339: "2006-01-02T15:04:05Z07:00" (向后兼容)
+func parseLocalTime(timeStr string) (time.Time, error) {
+	// 1. 先尝试 "2006-01-02 15:04:05" 格式 (中国时区)
+	if t, err := time.ParseInLocation("2006-01-02 15:04:05", timeStr, chinaLocation); err == nil {
+		return t, nil
+	}
+
+	// 2. 尝试 RFC3339 格式 (向后兼容)
+	if t, err := time.Parse(time.RFC3339, timeStr); err == nil {
+		return t, nil
+	}
+
+	return time.Time{}, fmt.Errorf("无法解析时间格式: %s (支持格式: 2006-01-02 15:04:05 或 RFC3339)", timeStr)
+}
 
 // BanRecordService 封禁记录服务
 type BanRecordService struct {
@@ -29,8 +60,8 @@ type BanRecordFilter struct {
 	IP        string `form:"ip"`         // 按封禁 IP 过滤
 	Source    string `form:"source"`     // 按来源过滤: waf, rate_limit, anomaly, manual, failguard
 	Status    string `form:"status"`     // 按状态过滤: active, expired, manual_unblock
-	StartTime string `form:"start_time"` // 开始时间 (RFC3339 格式)
-	EndTime   string `form:"end_time"`   // 结束时间 (RFC3339 格式)
+	StartTime string `form:"start_time"` // 开始时间 (格式: "2006-01-02 15:04:05" 中国时区，或 RFC3339)
+	EndTime   string `form:"end_time"`   // 结束时间 (格式: "2006-01-02 15:04:05" 中国时区，或 RFC3339)
 	Limit     int    `form:"limit"`      // 限制返回条数
 	Offset    int    `form:"offset"`     // 偏移量（分页）
 	OrderBy   string `form:"order_by"`   // 排序字段: created_at, ip, source (默认 created_at)
@@ -95,14 +126,14 @@ func (s *BanRecordService) QueryRecords(filter BanRecordFilter) ([]models.BanRec
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
 	}
-	// 时间范围过滤
+	// 时间范围过滤 (支持 "2006-01-02 15:04:05" 中国时区格式)
 	if filter.StartTime != "" {
-		if t, err := time.Parse(time.RFC3339, filter.StartTime); err == nil {
+		if t, err := parseLocalTime(filter.StartTime); err == nil {
 			query = query.Where("created_at >= ?", t)
 		}
 	}
 	if filter.EndTime != "" {
-		if t, err := time.Parse(time.RFC3339, filter.EndTime); err == nil {
+		if t, err := parseLocalTime(filter.EndTime); err == nil {
 			query = query.Where("created_at <= ?", t)
 		}
 	}
