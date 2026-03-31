@@ -12,6 +12,7 @@
     "types": ["node"],
     "moduleResolution": "bundler",
     "skipLibCheck": true,
-    "jsx": "preserve"
+    "jsx": "preserve",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
   }
 }
