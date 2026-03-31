@@ -34,11 +34,7 @@
         </el-menu-item>
         <el-menu-item index="/sources">
           <el-icon><Connection /></el-icon>
-          <template #title>数据源</template>
-        </el-menu-item>
-        <el-menu-item index="/intel">
-          <el-icon><Warning /></el-icon>
-          <template #title>威胁情报</template>
+          <template #title>威胁情报数据源</template>
         </el-menu-item>
         <el-menu-item index="/geoblocking">
           <el-icon><Location /></el-icon>

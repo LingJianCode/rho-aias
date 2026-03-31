@@ -20,7 +20,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'blocklog', name: 'BlockLog', component: () => import('@/views/blocklog/BlockLogView.vue') },
       { path: 'ban-records', name: 'BanRecords', component: () => import('@/views/ban-records/BanRecordsView.vue') },
       { path: 'sources', name: 'Sources', component: () => import('@/views/sources/SourcesView.vue') },
-      { path: 'intel', name: 'Intel', component: () => import('@/views/intel/IntelView.vue') },
       { path: 'geoblocking', name: 'GeoBlocking', component: () => import('@/views/geoblocking/GeoBlockingView.vue') },
       { path: 'settings/users', name: 'Users', component: () => import('@/views/settings/UsersView.vue'), meta: { requiresAdmin: true } },
       { path: 'settings/api-keys', name: 'ApiKeys', component: () => import('@/views/settings/ApiKeysView.vue') },
