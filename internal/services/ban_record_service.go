@@ -259,7 +259,7 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 }
 
 // UpsertActiveBan 插入或忽略：如果同一 IP+来源已存在 active 记录则跳过
-// 使用 ON CONFLICT DO NOTHING 避免重复写入
+// 使用 ON CONFLICT DO NOTHING 避免重复写入，需要 idx_ip_source_status 唯一索引
 func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration int) error {
 	now := time.Now()
 	record := &models.BanRecord{
@@ -272,16 +272,10 @@ func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration i
 		ExpiresAt: now.Add(time.Duration(duration) * time.Second),
 	}
 
-	// 先检查是否已存在 active 记录
-	var count int64
-	s.db.Model(&models.BanRecord{}).
-		Where("ip = ? AND source = ? AND status = ?", ip, source, models.BanStatusActive).
-		Count(&count)
-	if count > 0 {
-		return nil
-	}
-
-	return s.db.Create(record).Error
+	return s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "ip"}, {Name: "source"}, {Name: "status"}},
+		DoNothing: true,
+	}).Create(record).Error
 }
 
 // GetRecordByID 根据 ID 获取封禁记录
@@ -325,7 +319,5 @@ func (s *BanRecordService) MarkAllActiveAsAutoUnblock() (int64, error) {
 
 // init 确保 BanRecord 表存在（用于 UPSERT 时需要唯一索引）
 func init() {
-	// GORM AutoMigrate 会处理表创建
-	// 这里不需要额外操作
-	_ = clause.OnConflict{}
+	// GORM AutoMigrate 会处理表创建，包括 idx_ip_source_status 唯一索引
 }

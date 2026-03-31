@@ -50,7 +50,10 @@ func main() {
 		panic(fmt.Sprintf("[Kernel] %v", err))
 	}
 
-	cfg := config.NewConfig(*configPath)
+	cfg, err := config.NewConfig(*configPath)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to load config: %v", err))
+	}
 
 	// Initialize logger
 	if err := logger.Init(&logger.Config{
@@ -180,7 +183,7 @@ func main() {
 	if authDBPath == "" {
 		authDBPath = "./data/auth.db"
 	}
-	authDB, err = database.NewDatabase(authDBPath)
+	authDB, err = database.NewDatabase(authDBPath, cfg.Log.Level == "debug")
 	if err != nil {
 		logger.Warnf("[Main] Failed to initialize auth database: %v", err)
 	}
@@ -191,7 +194,7 @@ func main() {
 	if bizDBPath == "" {
 		bizDBPath = "./data/business.db"
 	}
-	bizDB, err = database.NewDatabase(bizDBPath)
+	bizDB, err = database.NewDatabase(bizDBPath, cfg.Log.Level == "debug")
 	if err != nil {
 		logger.Warnf("[Main] Failed to initialize business database: %v (status recording will be disabled)", err)
 	}

@@ -182,11 +182,11 @@ type AttackConfig struct {
 	MinPackets     int     `yaml:"min_packets"`     // 触发检测的最小包数（0 表示使用默认值）
 }
 
-func NewConfig(fileName string) *Config {
+func NewConfig(fileName string) (*Config, error) {
 	// 打开 YAML 文件
 	file, err := os.Open(fileName)
 	if err != nil {
-		panic(fmt.Sprintf("Error opening file:%e", err))
+		return nil, fmt.Errorf("error opening config file: %w", err)
 	}
 	defer file.Close()
 
@@ -197,11 +197,20 @@ func NewConfig(fileName string) *Config {
 	var config Config
 
 	// 解析 YAML 数据
-	err = decoder.Decode(&config)
-	if err != nil {
-		panic(fmt.Sprintf("Error decoding YAML:%e", err))
+	if err := decoder.Decode(&config); err != nil {
+		return nil, fmt.Errorf("error decoding config YAML: %w", err)
 	}
 
+	applyDefaults(&config)
+
+	// 展开环境变量
+	config.expandEnvVars()
+
+	return &config, nil
+}
+
+// applyDefaults 设置配置默认值
+func applyDefaults(config *Config) {
 	// 设置默认值
 	if config.Auth.TokenDuration == 0 {
 		config.Auth.TokenDuration = 1440 // 默认 24 小时
@@ -354,11 +363,6 @@ func NewConfig(fileName string) *Config {
 	if config.AnomalyDetection.Attacks.AckFlood.MinPackets == 0 {
 		config.AnomalyDetection.Attacks.AckFlood.MinPackets = 1000
 	}
-
-	// 展开环境变量
-	config.expandEnvVars()
-
-	return &config
 }
 
 // expandEnvVars 展开配置中的环境变量（支持 ${VAR_NAME} 格式）

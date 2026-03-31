@@ -23,9 +23,13 @@ type Database struct {
 }
 
 // NewDatabase 创建数据库连接
-func NewDatabase(dsn string) (*Database, error) {
+func NewDatabase(dsn string, debug bool) (*Database, error) {
+	logLevel := gormlogger.Warn
+	if debug {
+		logLevel = gormlogger.Info
+	}
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Info),
+		Logger: gormlogger.Default.LogMode(logLevel),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
