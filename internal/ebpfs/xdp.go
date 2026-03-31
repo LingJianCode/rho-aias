@@ -32,6 +32,7 @@ type Xdp struct {
 	linkType      string
 	callback      BlockLogCallback // 阻断事件回调
 	closeMu       sync.Mutex       // 保护 Close/Start 的并发安全
+	mapMu         sync.RWMutex     // 保护 eBPF map 操作的并发安全
 	anomalyPorts  []uint32         // 已配置的异常检测端口列表（用于 ARRAY 清理）
 }
 
@@ -121,6 +122,7 @@ const (
 
 // updateFeatureFlags 扫描所有白名单/黑名单 map，更新 feature_flags 位图
 // 由用户空间在规则增删后调用，使 eBPF 跳过空 map 的无用 lookup
+// 注意：调用者必须已持有 mapMu 锁
 func (x *Xdp) updateFeatureFlags() {
 	if x.objects == nil {
 		return
@@ -251,6 +253,9 @@ func matchTypeToString(mt MatchType) string {
 // getRuleSourceFromPacket 根据数据包信息从 eBPF map 中查询规则来源
 // 通过 SrcIP 在 eBPF map 中查找 BlockValue 的 SourceMask，转换为来源名称
 func (x *Xdp) getRuleSourceFromPacket(srcIP [4]byte, srcIPv6 [16]byte, ethProto uint16, mt MatchType) string {
+	x.mapMu.RLock()
+	defer x.mapMu.RUnlock()
+
 	switch mt {
 	case MatchByIP4Exact:
 		var blockValue BlockValue
@@ -325,13 +330,57 @@ func (x *Xdp) updateMap(iptype utils.IPType, value []byte, blockValue BlockValue
 
 // AddRule 添加手动规则（设置 MANUAL 位）
 func (x *Xdp) AddRule(value string) error {
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
+
 	bytes, iptype, err := utils.ParseValueToBytes(value)
 	if err != nil {
 		return err
 	}
 	logger.Debugf("[XDP] AddRule: bytes=%v, iptype=%v", bytes, iptype)
-	// 手动规则设置 MANUAL 位 (0x04)
-	blockValue := NewBlockValue(SourceMaskManual)
+
+	// 先读取现有值（如果存在），保留其他来源的位
+	var currentValue BlockValue
+	var exists bool
+	switch iptype {
+	case utils.IPTypeIPv4:
+		var key [4]byte
+		copy(key[:], bytes)
+		if x.objects.BlockIpv4List.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	case utils.IPTypeIPV4CIDR:
+		var key IPv4TrieKey
+		copy(key.Addr[:], bytes[4:])
+		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
+		if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	case utils.IPTypeIPv6:
+		var key [16]byte
+		copy(key[:], bytes)
+		if x.objects.BlockIpv6List.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	case utils.IPTypeIPv6CIDR:
+		var key IPv6TrieKey
+		copy(key.Addr[:], bytes[16:])
+		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:16])
+		if x.objects.BlockIpv6CidrTrie.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	}
+
+	var blockValue BlockValue
+	if exists {
+		// 存在则合并掩码，保留 Priority 和 Expiry
+		newMask := currentValue.SourceMask | SourceMaskManual
+		blockValue = NewBlockValueWithPreserve(newMask, currentValue.Priority, currentValue.Expiry)
+	} else {
+		// 不存在则新建
+		blockValue = NewBlockValue(SourceMaskManual)
+	}
+
 	err = x.updateMap(iptype, bytes, blockValue, true)
 	if err == nil {
 		x.updateFeatureFlags()
@@ -341,6 +390,9 @@ func (x *Xdp) AddRule(value string) error {
 
 // DeleteRule 删除规则（完全删除，不论来源）
 func (x *Xdp) DeleteRule(value string) error {
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
+
 	bytes, iptype, err := utils.ParseValueToBytes(value)
 	if err != nil {
 		return err
@@ -355,11 +407,56 @@ func (x *Xdp) DeleteRule(value string) error {
 
 // AddRuleWithSource 添加指定来源的规则
 func (x *Xdp) AddRuleWithSource(value string, sourceMask uint32) error {
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
+
 	bytes, iptype, err := utils.ParseValueToBytes(value)
 	if err != nil {
 		return err
 	}
-	blockValue := NewBlockValue(sourceMask)
+
+	// 先读取现有值（如果存在）
+	var currentValue BlockValue
+	var exists bool
+	switch iptype {
+	case utils.IPTypeIPv4:
+		var key [4]byte
+		copy(key[:], bytes)
+		if x.objects.BlockIpv4List.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	case utils.IPTypeIPV4CIDR:
+		var key IPv4TrieKey
+		copy(key.Addr[:], bytes[4:])
+		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
+		if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	case utils.IPTypeIPv6:
+		var key [16]byte
+		copy(key[:], bytes)
+		if x.objects.BlockIpv6List.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	case utils.IPTypeIPv6CIDR:
+		var key IPv6TrieKey
+		copy(key.Addr[:], bytes[16:])
+		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:16])
+		if x.objects.BlockIpv6CidrTrie.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	}
+
+	var blockValue BlockValue
+	if exists {
+		// 存在则合并掩码，保留 Priority 和 Expiry
+		newMask := currentValue.SourceMask | sourceMask
+		blockValue = NewBlockValueWithPreserve(newMask, currentValue.Priority, currentValue.Expiry)
+	} else {
+		// 不存在则新建
+		blockValue = NewBlockValue(sourceMask)
+	}
+
 	err = x.updateMap(iptype, bytes, blockValue, true)
 	if err == nil {
 		x.updateFeatureFlags()
@@ -370,14 +467,63 @@ func (x *Xdp) AddRuleWithSource(value string, sourceMask uint32) error {
 // AddRuleWithSourceAndExpiry 添加带过期时间的规则
 // duration: 封禁时长（秒），0 表示永久封禁
 func (x *Xdp) AddRuleWithSourceAndExpiry(value string, sourceMask uint32, duration int) error {
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
+
 	bytes, iptype, err := utils.ParseValueToBytes(value)
 	if err != nil {
 		return err
 	}
-	blockValue := NewBlockValue(sourceMask)
-	if duration > 0 {
-		blockValue.Expiry = uint64(time.Now().Unix()) + uint64(duration)
+
+	// 先读取现有值（如果存在）
+	var currentValue BlockValue
+	var exists bool
+	switch iptype {
+	case utils.IPTypeIPv4:
+		var key [4]byte
+		copy(key[:], bytes)
+		if x.objects.BlockIpv4List.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	case utils.IPTypeIPV4CIDR:
+		var key IPv4TrieKey
+		copy(key.Addr[:], bytes[4:])
+		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
+		if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	case utils.IPTypeIPv6:
+		var key [16]byte
+		copy(key[:], bytes)
+		if x.objects.BlockIpv6List.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
+	case utils.IPTypeIPv6CIDR:
+		var key IPv6TrieKey
+		copy(key.Addr[:], bytes[16:])
+		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:16])
+		if x.objects.BlockIpv6CidrTrie.Lookup(&key, &currentValue) == nil {
+			exists = true
+		}
 	}
+
+	var blockValue BlockValue
+	if exists {
+		// 存在则合并掩码
+		newMask := currentValue.SourceMask | sourceMask
+		newExpiry := currentValue.Expiry
+		if duration > 0 {
+			newExpiry = uint64(time.Now().Unix()) + uint64(duration)
+		}
+		blockValue = NewBlockValueWithPreserve(newMask, currentValue.Priority, newExpiry)
+	} else {
+		// 不存在则新建
+		blockValue = NewBlockValue(sourceMask)
+		if duration > 0 {
+			blockValue.Expiry = uint64(time.Now().Unix()) + uint64(duration)
+		}
+	}
+
 	err = x.updateMap(iptype, bytes, blockValue, true)
 	if err == nil {
 		x.updateFeatureFlags()
@@ -386,6 +532,9 @@ func (x *Xdp) AddRuleWithSourceAndExpiry(value string, sourceMask uint32, durati
 }
 
 func (x *Xdp) GetRule() ([]Rule, error) {
+	x.mapMu.RLock()
+	defer x.mapMu.RUnlock()
+
 	var res []Rule
 	ipv4List, err := x.ipv4List()
 	if err != nil {
@@ -401,6 +550,7 @@ func (x *Xdp) GetRule() ([]Rule, error) {
 }
 
 // ipv4List 获取 IPv4 精确匹配规则列表
+// 注意：调用者必须已持有 mapMu 读锁
 func (x *Xdp) ipv4List() ([]Rule, error) {
 	iter := x.objects.BlockIpv4List.Iterate()
 	var key []byte
@@ -421,6 +571,7 @@ func (x *Xdp) ipv4List() ([]Rule, error) {
 }
 
 // ipv4TrieKey 获取 IPv4 CIDR 规则列表
+// 注意：调用者必须已持有 mapMu 读锁
 func (x *Xdp) ipv4TrieKey() ([]Rule, error) {
 	iter := x.objects.BlockIpv4CidrTrie.Iterate()
 	var key IPv4TrieKey
@@ -443,14 +594,15 @@ func (x *Xdp) ipv4TrieKey() ([]Rule, error) {
 // BatchAddRules 批量添加规则（高性能）
 // sourceMask: 来源掩码，指定规则的来源
 func (x *Xdp) BatchAddRules(values []string, sourceMask uint32) error {
-	// 按类型分组并准备批量数据
-	ipv4ExactKeys := make([][4]byte, 0)
-	ipv4ExactValues := make([]BlockValue, 0)
-	ipv4CIDRKeys := make([]IPv4TrieKey, 0)
-	ipv4CIDRValues := make([]BlockValue, 0)
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
 
-	// 预创建 BlockValue 模板
-	blockValue := NewBlockValue(sourceMask)
+	// 按类型分组并准备批量数据
+	type entry struct {
+		iptype utils.IPType
+		key    []byte
+	}
+	entries := make([]entry, 0, len(values))
 
 	for _, value := range values {
 		bytes, iptype, err := utils.ParseValueToBytes(value)
@@ -458,40 +610,56 @@ func (x *Xdp) BatchAddRules(values []string, sourceMask uint32) error {
 			logger.Warnf("[XDP] Failed to parse value %s: %v", value, err)
 			continue
 		}
+		keyCopy := make([]byte, len(bytes))
+		copy(keyCopy, bytes)
+		entries = append(entries, entry{iptype: iptype, key: keyCopy})
+	}
 
-		switch iptype {
+	for _, e := range entries {
+		// 先读取现有值（如果存在）
+		var currentValue BlockValue
+		var exists bool
+		switch e.iptype {
 		case utils.IPTypeIPv4:
 			var key [4]byte
-			copy(key[:], bytes)
-			ipv4ExactKeys = append(ipv4ExactKeys, key)
-			ipv4ExactValues = append(ipv4ExactValues, blockValue)
+			copy(key[:], e.key)
+			if x.objects.BlockIpv4List.Lookup(&key, &currentValue) == nil {
+				exists = true
+			}
 		case utils.IPTypeIPV4CIDR:
-			// bytes 格式: [4 bytes prefixlen (LE) + 4 bytes IP]
 			var key IPv4TrieKey
-			copy(key.Addr[:], bytes[4:])
-			key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
-			ipv4CIDRKeys = append(ipv4CIDRKeys, key)
-			ipv4CIDRValues = append(ipv4CIDRValues, blockValue)
-		default:
-			logger.Warnf("[XDP] Unsupported IP type: %v for value %s", iptype, value)
-		}
-	}
-
-	// 批量更新 IPv4 精确匹配
-	if len(ipv4ExactKeys) > 0 {
-		for i, key := range ipv4ExactKeys {
-			if err := x.objects.BlockIpv4List.Put(key, ipv4ExactValues[i]); err != nil {
-				return fmt.Errorf("put IPv4 exact key %v failed: %w", key, err)
+			copy(key.Addr[:], e.key[4:])
+			key.PrefixLen = binary.LittleEndian.Uint32(e.key[:4])
+			if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
+				exists = true
+			}
+		case utils.IPTypeIPv6:
+			var key [16]byte
+			copy(key[:], e.key)
+			if x.objects.BlockIpv6List.Lookup(&key, &currentValue) == nil {
+				exists = true
+			}
+		case utils.IPTypeIPv6CIDR:
+			var key IPv6TrieKey
+			copy(key.Addr[:], e.key[16:])
+			key.PrefixLen = binary.LittleEndian.Uint32(e.key[:16])
+			if x.objects.BlockIpv6CidrTrie.Lookup(&key, &currentValue) == nil {
+				exists = true
 			}
 		}
-	}
 
-	// 批量更新 IPv4 CIDR
-	if len(ipv4CIDRKeys) > 0 {
-		for i, key := range ipv4CIDRKeys {
-			if err := x.objects.BlockIpv4CidrTrie.Put(key, ipv4CIDRValues[i]); err != nil {
-				return fmt.Errorf("put IPv4 CIDR key %v failed: %w", key, err)
-			}
+		var blockValue BlockValue
+		if exists {
+			// 存在则合并掩码，保留 Priority 和 Expiry
+			newMask := currentValue.SourceMask | sourceMask
+			blockValue = NewBlockValueWithPreserve(newMask, currentValue.Priority, currentValue.Expiry)
+		} else {
+			// 不存在则新建
+			blockValue = NewBlockValue(sourceMask)
+		}
+
+		if err := x.updateMap(e.iptype, e.key, blockValue, true); err != nil {
+			logger.Warnf("[XDP] Failed to update rule for key %v: %v", e.key, err)
 		}
 	}
 
@@ -501,13 +669,25 @@ func (x *Xdp) BatchAddRules(values []string, sourceMask uint32) error {
 
 // BatchDeleteRules 批量删除规则
 func (x *Xdp) BatchDeleteRules(values []string) error {
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
+
 	var errs []error
 	for _, value := range values {
-		if err := x.DeleteRule(value); err != nil {
+		bytes, iptype, err := utils.ParseValueToBytes(value)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		// 直接调用 updateMap 删除，避免递归加锁
+		err = x.updateMap(iptype, bytes, BlockValue{}, false)
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
-	// DeleteRule 已在每次成功删除后调用 updateFeatureFlags
+	// 最后统一更新 feature_flags
+	x.updateFeatureFlags()
+
 	if len(errs) > 0 {
 		return fmt.Errorf("batch delete failed with %d errors, first: %v", len(errs), errs[0])
 	}
@@ -519,6 +699,9 @@ func (x *Xdp) BatchDeleteRules(values []string) error {
 // removeMask: 要移除的来源位掩码
 // 返回: 更新后的掩码, 规则是否存在, 是否有变化, 错误
 func (x *Xdp) UpdateRuleSourceMask(value string, removeMask uint32) (newMask uint32, exists bool, changed bool, err error) {
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
+
 	bytes, iptype, err := utils.ParseValueToBytes(value)
 	if err != nil {
 		return 0, false, false, err
@@ -583,11 +766,12 @@ func (x *Xdp) UpdateRuleSourceMask(value string, removeMask uint32) (newMask uin
 		return currentMask, true, false, nil
 	}
 
-	// 如果新掩码为 0，删除规则
+	// 如果新掩码为 0，删除规则（注意：这里直接调用 updateMap 而不是 DeleteRule，避免递归加锁）
 	if newMask == 0 {
-		if err := x.DeleteRule(value); err != nil {
+		if err := x.updateMap(iptype, bytes, BlockValue{}, false); err != nil {
 			return 0, true, true, fmt.Errorf("delete rule failed: %w", err)
 		}
+		x.updateFeatureFlags()
 		return 0, true, true, nil
 	}
 
@@ -596,6 +780,7 @@ func (x *Xdp) UpdateRuleSourceMask(value string, removeMask uint32) (newMask uin
 	if err := x.updateMap(iptype, bytes, newBlockValue, true); err != nil {
 		return currentMask, true, true, fmt.Errorf("update rule failed: %w", err)
 	}
+	x.updateFeatureFlags()
 
 	return newMask, true, true, nil
 }
@@ -605,20 +790,101 @@ func (x *Xdp) UpdateRuleSourceMask(value string, removeMask uint32) (newMask uin
 // removeMask: 要移除的来源位掩码
 // 返回: 需要删除的规则列表（掩码变为 0 的规则），更新失败的错误
 func (x *Xdp) BatchUpdateRuleSourceMask(values []string, removeMask uint32) ([]string, error) {
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
+
 	var toDelete []string
 	var errs []error
 
 	for _, value := range values {
-		newMask, exists, changed, err := x.UpdateRuleSourceMask(value, removeMask)
+		bytes, iptype, err := utils.ParseValueToBytes(value)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("update %s failed: %w", value, err))
+			errs = append(errs, fmt.Errorf("parse %s failed: %w", value, err))
 			continue
 		}
-		if exists && changed && newMask == 0 {
-			// 掩码变为 0，规则已被删除
-			toDelete = append(toDelete, value)
+
+		// 根据 IP 类型查询当前规则值
+		var currentMask uint32
+		var currentPriority uint32
+		var currentExpiry uint64
+		var exists bool
+		switch iptype {
+		case utils.IPTypeIPv4:
+			var key [4]byte
+			copy(key[:], bytes)
+			var blockValue BlockValue
+			if x.objects.BlockIpv4List.Lookup(&key, &blockValue) == nil {
+				exists = true
+				currentMask = blockValue.SourceMask
+				currentPriority = blockValue.Priority
+				currentExpiry = blockValue.Expiry
+			}
+		case utils.IPTypeIPV4CIDR:
+			var key IPv4TrieKey
+			copy(key.Addr[:], bytes[4:])
+			key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
+			var blockValue BlockValue
+			if x.objects.BlockIpv4CidrTrie.Lookup(&key, &blockValue) == nil {
+				exists = true
+				currentMask = blockValue.SourceMask
+				currentPriority = blockValue.Priority
+				currentExpiry = blockValue.Expiry
+			}
+		case utils.IPTypeIPv6:
+			var key [16]byte
+			copy(key[:], bytes)
+			var blockValue BlockValue
+			if x.objects.BlockIpv6List.Lookup(&key, &blockValue) == nil {
+				exists = true
+				currentMask = blockValue.SourceMask
+				currentPriority = blockValue.Priority
+				currentExpiry = blockValue.Expiry
+			}
+		case utils.IPTypeIPv6CIDR:
+			var key IPv6TrieKey
+			copy(key.Addr[:], bytes[16:])
+			key.PrefixLen = binary.LittleEndian.Uint32(bytes[:16])
+			var blockValue BlockValue
+			if x.objects.BlockIpv6CidrTrie.Lookup(&key, &blockValue) == nil {
+				exists = true
+				currentMask = blockValue.SourceMask
+				currentPriority = blockValue.Priority
+				currentExpiry = blockValue.Expiry
+			}
+		default:
+			errs = append(errs, fmt.Errorf("unsupported IP type: %v for %s", iptype, value))
+			continue
+		}
+
+		if !exists {
+			continue
+		}
+
+		// 计算新掩码
+		newMask := currentMask &^ removeMask
+
+		if newMask == currentMask {
+			continue // 没有变化
+		}
+
+		if newMask == 0 {
+			// 删除规则
+			if err := x.updateMap(iptype, bytes, BlockValue{}, false); err != nil {
+				errs = append(errs, fmt.Errorf("delete %s failed: %w", value, err))
+			} else {
+				toDelete = append(toDelete, value)
+			}
+		} else {
+			// 更新规则
+			newBlockValue := NewBlockValueWithPreserve(newMask, currentPriority, currentExpiry)
+			if err := x.updateMap(iptype, bytes, newBlockValue, true); err != nil {
+				errs = append(errs, fmt.Errorf("update %s failed: %w", value, err))
+			}
 		}
 	}
+
+	// 最后统一更新 feature_flags
+	x.updateFeatureFlags()
 
 	if len(errs) > 0 {
 		return toDelete, fmt.Errorf("batch update failed with %d errors, first: %v", len(errs), errs[0])
@@ -965,6 +1231,9 @@ func (x *Xdp) updateWhitelistMap(iptype utils.IPType, value []byte, add bool) er
 
 // AddWhitelistRule 添加白名单规则（支持 IP 和 CIDR，不支持 MAC）
 func (x *Xdp) AddWhitelistRule(value string) error {
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
+
 	value = strings.TrimSpace(value)
 	b, iptype, err := utils.ParseValueToBytes(value)
 	if err != nil {
@@ -984,6 +1253,9 @@ func (x *Xdp) AddWhitelistRule(value string) error {
 
 // DeleteWhitelistRule 删除白名单规则
 func (x *Xdp) DeleteWhitelistRule(value string) error {
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
+
 	value = strings.TrimSpace(value)
 	b, iptype, err := utils.ParseValueToBytes(value)
 	if err != nil {
@@ -999,6 +1271,9 @@ func (x *Xdp) DeleteWhitelistRule(value string) error {
 
 // GetWhitelistRules 获取所有白名单规则
 func (x *Xdp) GetWhitelistRules() ([]string, error) {
+	x.mapMu.RLock()
+	defer x.mapMu.RUnlock()
+
 	var rules []string
 
 	// IPv4 精确匹配
