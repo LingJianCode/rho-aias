@@ -85,6 +85,11 @@ export interface WhitelistResponse {
   total: number
 }
 
+export interface BlacklistResponse {
+  rules: ManualRuleItem[]
+  total: number
+}
+
 // ============================================
 // 阻断日志
 // ============================================

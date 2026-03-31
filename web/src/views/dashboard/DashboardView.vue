@@ -12,12 +12,6 @@
         icon-color="#f56c6c"
       />
       <StatsCard
-        label="在线规则数"
-        :value="stats.active_rules"
-        :icon="List"
-        icon-color="#409eff"
-      />
-      <StatsCard
         label="健康数据源"
         :value="stats.healthy_sources"
         :icon="Connection"
@@ -92,7 +86,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
-import { Document, List, Connection, TrendCharts } from '@element-plus/icons-vue'
+import { Document, Connection, TrendCharts } from '@element-plus/icons-vue'
 import StatsCard from '@/components/StatsCard.vue'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
@@ -100,7 +94,6 @@ import { formatDateTime } from '@/utils/format'
 import { getBlockLogStats, getBlockLogs } from '@/api/blocklog'
 import { getBanRecordStats } from '@/api/ban-records'
 import { getSourcesStatus } from '@/api/sources'
-import { getRules } from '@/api/rules'
 
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
@@ -109,7 +102,6 @@ let chart: echarts.ECharts | null = null
 // 数据格式参考（模拟数据已注释保留作为格式提示）：
 // {
 //   total_blocks: 125846,        // 总阻断数 - 来自 getBlockLogStats().total_blocks
-//   active_rules: 45678,         // 规则数 - 来自 getRules({ source: 'manual' }).total
 //   healthy_sources: 8,          // 健康数据源数 - 来自 getSourcesStatus() 计算健康数量
 //   today_bans: 234,             // 今日封禁数 - 来自 getBanRecordStats().today_count
 //   block_trend: [               // 阻断趋势 - 来自 getBlockLogStats().hourly_trend
@@ -127,10 +119,10 @@ let chart: echarts.ECharts | null = null
 //     { name: 'DDoS', status: 'unhealthy' },
 //   ],
 // }
+// 注：active_rules 已移除，因为 GET /api/rules?source=manual 从 eBPF map 获取全部 IP 会影响性能
 
 const stats = ref({
   total_blocks: 0,
-  active_rules: 0,
   healthy_sources: 0,
   today_bans: 0,
   block_trend: [] as { date: string; count: number }[],
@@ -145,7 +137,6 @@ async function fetchStats() {
     fetchBanStats(),
     fetchSourceStatus(),
     fetchRecentBlocks(),
-    fetchRulesCount(),
   ])
   updateChart()
 }
@@ -198,17 +189,6 @@ async function fetchRecentBlocks() {
     const res = await getBlockLogs({ page_size: 5 })
     if (res.data?.records) {
       stats.value.recent_blocks = res.data.records
-    }
-  } catch {
-    // 接口失败时保持默认值
-  }
-}
-
-async function fetchRulesCount() {
-  try {
-    const res = await getRules({ source: 'manual' })
-    if (res.data) {
-      stats.value.active_rules = res.data.total || 0
     }
   } catch {
     // 接口失败时保持默认值

@@ -16,6 +16,7 @@ type Config struct {
 	GeoBlocking      GeoBlockingConfig      `yaml:"geo_blocking"`
 	Manual           ManualConfig           `yaml:"manual"`
 	Auth             AuthConfig             `yaml:"auth"`
+	Business         BusinessConfig         `yaml:"business"`
 	BlockLog         BlockLogConfig         `yaml:"blocklog"`
 	WAF              WAFConfig              `yaml:"waf"`
 	FailGuard        FailGuardConfig        `yaml:"failguard"`
@@ -88,14 +89,19 @@ type ManualConfig struct {
 
 // AuthConfig 认证配置
 type AuthConfig struct {
-	Enabled         bool          `yaml:"enabled"`          // 是否启用认证
-	JWTSecret       string        `yaml:"jwt_secret"`       // JWT 密钥（建议从环境变量读取）
-	JWTIssuer       string        `yaml:"jwt_issuer"`       // JWT 签发者
-	TokenDuration   int           `yaml:"token_duration"`   // Token 有效期（分钟）
-	DatabasePath    string        `yaml:"database_path"`    // 数据库路径
-	CaptchaEnabled  bool          `yaml:"captcha_enabled"`  // 是否启用验证码
-	CaptchaDuration int           `yaml:"captcha_duration"` // 验证码有效期（分钟）
-	APIKeys         []APIKeyConfig `yaml:"api_keys"`       // 预定义的 API Key
+	Enabled         bool           `yaml:"enabled"`          // 是否启用认证
+	JWTSecret       string         `yaml:"jwt_secret"`       // JWT 密钥（建议从环境变量读取）
+	JWTIssuer       string         `yaml:"jwt_issuer"`       // JWT 签发者
+	TokenDuration   int            `yaml:"token_duration"`   // Token 有效期（分钟）
+	DatabasePath    string         `yaml:"database_path"`    // 认证数据库路径
+	CaptchaEnabled  bool           `yaml:"captcha_enabled"`  // 是否启用验证码
+	CaptchaDuration int            `yaml:"captcha_duration"` // 验证码有效期（分钟）
+	APIKeys         []APIKeyConfig `yaml:"api_keys"`         // 预定义的 API Key
+}
+
+// BusinessConfig 业务数据配置
+type BusinessConfig struct {
+	DatabasePath string `yaml:"database_path"` // 业务数据库路径（封禁记录、情报状态等）
 }
 
 // APIKeyConfig API Key 配置
@@ -202,6 +208,11 @@ func NewConfig(fileName string) *Config {
 	}
 	if config.Auth.CaptchaDuration == 0 {
 		config.Auth.CaptchaDuration = 5 // 默认 5 分钟
+	}
+
+	// Business 默认值
+	if config.Business.DatabasePath == "" {
+		config.Business.DatabasePath = "./data/business.db"
 	}
 
 	// Log 默认值

@@ -173,27 +173,48 @@ func main() {
 	})
 	blockLogHandle := handles.NewBlockLogHandle(blockLog)
 
-	// Initialize database (needed for Intel and GeoBlocking status recording)
-	var db *database.Database
-	dbPath := cfg.Auth.DatabasePath
-	if dbPath == "" {
-		dbPath = "./data/auth.db"
+	// Initialize databases
+	// Auth database (for User, APIKey, AuditLog)
+	var authDB *database.Database
+	authDBPath := cfg.Auth.DatabasePath
+	if authDBPath == "" {
+		authDBPath = "./data/auth.db"
 	}
-	db, err = database.NewDatabase(dbPath)
+	authDB, err = database.NewDatabase(authDBPath)
 	if err != nil {
-		logger.Warnf("[Main] Failed to initialize database: %v (status recording will be disabled)", err)
-	} else {
-		// Auto migrate
-		if err := db.AutoMigrate(); err != nil {
-			logger.Warnf("[Main] Failed to migrate database: %v", err)
+		logger.Warnf("[Main] Failed to initialize auth database: %v", err)
+	}
+
+	// Business database (for BanRecord, SourceStatusRecord)
+	var bizDB *database.Database
+	bizDBPath := cfg.Business.DatabasePath
+	if bizDBPath == "" {
+		bizDBPath = "./data/business.db"
+	}
+	bizDB, err = database.NewDatabase(bizDBPath)
+	if err != nil {
+		logger.Warnf("[Main] Failed to initialize business database: %v (status recording will be disabled)", err)
+	}
+
+	// Auto migrate auth tables
+	if authDB != nil {
+		if err := authDB.AutoMigrateAuth(); err != nil {
+			logger.Warnf("[Main] Failed to migrate auth database: %v", err)
+		}
+	}
+
+	// Auto migrate business tables
+	if bizDB != nil {
+		if err := bizDB.AutoMigrateBusiness(); err != nil {
+			logger.Warnf("[Main] Failed to migrate business database: %v", err)
 		}
 	}
 
 	// Initialize Intel Manager (if enabled)
 	var intelMgr *threatintel.Manager
 	var dbConn *gorm.DB
-	if db != nil {
-		dbConn = db.DB
+	if bizDB != nil {
+		dbConn = bizDB.DB
 	}
 	if cfg.Intel.Enabled {
 		intelMgr = threatintel.NewManager(&cfg.Intel, xdp, dbConn)
@@ -259,8 +280,8 @@ func main() {
 		}
 		wafMonitor.SetOffsetStore(watcher.NewOffsetStore(wafOffsetFile))
 		wafMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-		if db != nil {
-			banRecordService := services.NewBanRecordService(db.DB)
+		if bizDB != nil {
+			banRecordService := services.NewBanRecordService(bizDB.DB)
 			wafMonitor.SetBanRecordStore(banRecordService)
 		}
 		if err := wafMonitor.Start(); err != nil {
@@ -281,8 +302,8 @@ func main() {
 		}
 		failguardMonitor.SetOffsetStore(watcher.NewOffsetStore(failguardOffsetFile))
 		failguardMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-		if db != nil {
-			banRecordService := services.NewBanRecordService(db.DB)
+		if bizDB != nil {
+			banRecordService := services.NewBanRecordService(bizDB.DB)
 			failguardMonitor.SetBanRecordStore(banRecordService)
 		}
 		if err := failguardMonitor.Start(); err != nil {
@@ -353,8 +374,8 @@ func main() {
 				return err
 			}
 			// 持久化封禁记录到数据库
-			if db != nil {
-				banRecordService := services.NewBanRecordService(db.DB)
+			if bizDB != nil {
+				banRecordService := services.NewBanRecordService(bizDB.DB)
 				if err := banRecordService.UpsertActiveBan(ip, models.BanSourceAnomaly, reason, duration); err != nil {
 					logger.Warnf("[AnomalyDetection] Failed to persist ban record for IP %s: %v", ip, err)
 				}
@@ -372,8 +393,8 @@ func main() {
 				return err
 			}
 			// 更新数据库中的封禁状态为已过期
-			if db != nil {
-				banRecordService := services.NewBanRecordService(db.DB)
+			if bizDB != nil {
+				banRecordService := services.NewBanRecordService(bizDB.DB)
 				if err := banRecordService.MarkExpired(ip, models.BanSourceAnomaly); err != nil {
 					logger.Warnf("[AnomalyDetection] Failed to mark ban record expired for IP %s: %v", ip, err)
 				}
@@ -424,11 +445,11 @@ func main() {
 		captchaStore   *captcha.MemoryStore
 		casbinEnforcer *casbin.Enforcer
 	)
-	if cfg.Auth.Enabled && db != nil {
-		defer db.Close()
+	if cfg.Auth.Enabled && authDB != nil {
+		defer authDB.Close()
 
 		// Initialize Casbin
-		casbinEnforcer, err = casbin.NewEnforcer(db.DB)
+		casbinEnforcer, err = casbin.NewEnforcer(authDB.DB)
 		if err != nil {
 			logger.Fatalf("[Auth] Failed to initialize casbin: %v", err)
 		}
@@ -439,12 +460,12 @@ func main() {
 		}
 
 		// Initialize default admin
-		if err := db.InitDefaultUser(casbinEnforcer); err != nil {
+		if err := authDB.InitDefaultUser(casbinEnforcer); err != nil {
 			logger.Warnf("[Auth] Failed to initialize default user: %v", err)
 		}
 
 		// Initialize API Keys from config
-		if err := db.InitAPIKeysFromConfig(casbinEnforcer, cfg.Auth.APIKeys); err != nil {
+		if err := authDB.InitAPIKeysFromConfig(casbinEnforcer, cfg.Auth.APIKeys); err != nil {
 			logger.Warnf("[Auth] Failed to initialize API keys from config: %v", err)
 		}
 
@@ -464,10 +485,10 @@ func main() {
 			cfg.Auth.JWTIssuer,
 		)
 
-		authService = services.NewAuthService(db.DB, jwtService)
-		userService = services.NewUserService(db.DB)
-		apiKeyService = services.NewAPIKeyService(db.DB, casbinEnforcer)
-		auditService = services.NewAuditService(db.DB)
+		authService = services.NewAuthService(authDB.DB, jwtService)
+		userService = services.NewUserService(authDB.DB)
+		apiKeyService = services.NewAPIKeyService(authDB.DB, casbinEnforcer)
+		auditService = services.NewAuditService(authDB.DB)
 
 		// Initialize captcha
 		captchaStore = captcha.NewMemoryStore()
@@ -516,8 +537,8 @@ func main() {
 		}
 
 		// Register Source status routes (需要数据库)
-		if db != nil {
-			sourceHandle := handles.NewSourceHandle(db.DB, intelMgr, geoMgr)
+		if bizDB != nil {
+			sourceHandle := handles.NewSourceHandle(bizDB.DB, intelMgr, geoMgr)
 			routers.RegisterSourceRoutes(api, sourceHandle, casbinEnforcer, authService, apiKeyService)
 		}
 
@@ -547,8 +568,8 @@ func main() {
 		}
 
 		// Register Ban Record routes (需要数据库)
-		if db != nil {
-			banRecordService := services.NewBanRecordService(db.DB)
+		if bizDB != nil {
+			banRecordService := services.NewBanRecordService(bizDB.DB)
 			banRecordHandle := handles.NewBanRecordHandle(banRecordService)
 			routers.RegisterBanRecordRoutes(api, banRecordHandle, casbinEnforcer, authService, apiKeyService)
 		}
@@ -567,8 +588,8 @@ func main() {
 		routers.RegisterRuleRoutes(api, ruleQueryHandle, nil, nil, nil)
 
 		// Register Source status routes
-		if db != nil {
-			sourceHandle := handles.NewSourceHandle(db.DB, intelMgr, geoMgr)
+		if bizDB != nil {
+			sourceHandle := handles.NewSourceHandle(bizDB.DB, intelMgr, geoMgr)
 			routers.RegisterSourceRoutes(api, sourceHandle, nil, nil, nil)
 		}
 
@@ -587,8 +608,8 @@ func main() {
 		}
 
 		// Register Ban Record routes (需要数据库)
-		if db != nil {
-			banRecordService := services.NewBanRecordService(db.DB)
+		if bizDB != nil {
+			banRecordService := services.NewBanRecordService(bizDB.DB)
 			banRecordHandle := handles.NewBanRecordHandle(banRecordService)
 			routers.RegisterBanRecordRoutes(api, banRecordHandle, nil, nil, nil)
 		}
@@ -619,6 +640,13 @@ func main() {
 	logger.Info("[Main] 已取消所有后台 goroutine")
 
 	// 停止情报管理器
+
+	// Close business database
+	if bizDB != nil {
+		if err := bizDB.Close(); err != nil {
+			logger.Warnf("[Main] Failed to close business database: %v", err)
+		}
+	}
 
 	// ebpf由defer关闭
 	// 优雅关闭Gin服务（设置超时时间，避免无限等待）

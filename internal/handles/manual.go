@@ -161,6 +161,42 @@ func (m *ManualHandle) removeRuleFromCache(value string) error {
 	return m.cache.Save(cacheData)
 }
 
+// ListManualRules 查询手动黑名单规则列表（从磁盘缓存查询，避免遍历 eBPF map）
+func (m *ManualHandle) ListManualRules(c *gin.Context) {
+	// 响应结构
+	type ruleWithTime struct {
+		Value   string `json:"value"`
+		AddedAt string `json:"added_at,omitempty"`
+	}
+
+	result := make([]ruleWithTime, 0)
+
+	// 从磁盘缓存加载
+	if m.cache != nil && m.cache.Exists() {
+		cacheData, err := m.cache.Load()
+		if err != nil {
+			// 缓存加载失败，返回空列表
+			response.OK(c, gin.H{
+				"rules": result,
+				"total": 0,
+			})
+			return
+		}
+
+		for _, entry := range cacheData.Rules {
+			result = append(result, ruleWithTime{
+				Value:   entry.Value,
+				AddedAt: entry.AddedAt.Format("2006-01-02T15:04:05Z"),
+			})
+		}
+	}
+
+	response.OK(c, gin.H{
+		"rules": result,
+		"total": len(result),
+	})
+}
+
 // ============================================
 // 白名单管理 API 处理器
 // ============================================

@@ -1,9 +1,13 @@
 import request from './request'
-import type { ApiResponse, WhitelistResponse } from '@/types/api'
+import type { ApiResponse, WhitelistResponse, BlacklistResponse } from '@/types/api'
 
 // ============================================
 // 黑名单 API
 // ============================================
+
+export function getBlacklist(): Promise<ApiResponse<BlacklistResponse>> {
+  return request.get('/api/manual/blacklist/rules').then((res) => res.data)
+}
 
 export function addBlacklistRule(value: string): Promise<ApiResponse<void>> {
   return request.post('/api/manual/blacklist/rules', { value }).then((res) => res.data)

@@ -20,6 +20,7 @@ func RegisterManualRoutes(group *gin.RouterGroup, manualHandle *handles.ManualHa
 	if enforcer == nil || authService == nil || apiKeyService == nil {
 		blacklist.POST("/rules", manualHandle.AddRule)
 		blacklist.DELETE("/rules", manualHandle.DelRule)
+		blacklist.GET("/rules", manualHandle.ListManualRules)
 		return
 	}
 
@@ -37,6 +38,13 @@ func RegisterManualRoutes(group *gin.RouterGroup, manualHandle *handles.ManualHa
 			middleware.AuthMiddleware(authService, apiKeyService),
 			middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
 			manualHandle.DelRule,
+		)
+
+		// 查询黑名单规则列表 - 需要 firewall:read 权限
+		blacklist.GET("/rules",
+			middleware.AuthMiddleware(authService, apiKeyService),
+			middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
+			manualHandle.ListManualRules,
 		)
 	}
 }
