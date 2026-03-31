@@ -53,7 +53,7 @@ func (h *SourceHandle) GetStatus(c *gin.Context) {
 	var maxIDs []struct {
 		MaxID uint
 	}
-	h.db.Raw("(?)", subQuery).Scan(&maxIDs)
+	subQuery.Scan(&maxIDs)
 
 	// 获取最新记录
 	var results []Result
@@ -100,7 +100,7 @@ func (h *SourceHandle) GetStatusByType(c *gin.Context) {
 	var maxIDs []struct {
 		MaxID uint
 	}
-	h.db.Raw("(?)", subQuery).Scan(&maxIDs)
+	subQuery.Scan(&maxIDs)
 
 	// 获取最新记录
 	if len(maxIDs) > 0 {

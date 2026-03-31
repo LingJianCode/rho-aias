@@ -127,10 +127,10 @@ func (s *CaptchaService) Generate() (string, string, error) {
 		return "", "", err
 	}
 
-	// 转换为 base64
+	// 转换为 base64 (EncodeB64string 已经包含 data:image/png;base64, 前缀)
 	base64Img := item.EncodeB64string()
 
-	return id, "data:image/png;base64," + base64Img, nil
+	return id, base64Img, nil
 }
 
 // Verify 验证验证码
