@@ -44,17 +44,6 @@ func NewDatabase(dsn string) (*Database, error) {
 	return &Database{db}, nil
 }
 
-// AutoMigrate 自动迁移所有表（兼容旧调用）
-func (db *Database) AutoMigrate() error {
-	return db.DB.AutoMigrate(
-		&models.User{},
-		&models.APIKey{},
-		&models.AuditLog{},
-		&models.SourceStatusRecord{},
-		&models.BanRecord{},
-	)
-}
-
 // AutoMigrateAuth 迁移认证相关表
 func (db *Database) AutoMigrateAuth() error {
 	return db.DB.AutoMigrate(
