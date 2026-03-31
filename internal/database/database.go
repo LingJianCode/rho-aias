@@ -114,7 +114,12 @@ func (db *Database) InitAPIKeysFromConfig(enforcer *casbin.Enforcer, apiKeys []c
 		}
 
 		// 检查是否已存在相同 Key（计算 Hash 后比较）
-		hash := sha256.Sum256([]byte(keyConfig.Key))
+		// 使用 []byte 并在 hash 计算后立即清零，避免明文 Key 残留在内存中
+		keyBytes := []byte(keyConfig.Key)
+		hash := sha256.Sum256(keyBytes)
+		for i := range keyBytes {
+			keyBytes[i] = 0
+		}
 		hashStr := hex.EncodeToString(hash[:])
 		var count int64
 		db.Model(&models.APIKey{}).Where("key = ?", hashStr).Count(&count)
@@ -173,6 +178,9 @@ func (db *Database) InitAPIKeysFromConfig(enforcer *casbin.Enforcer, apiKeys []c
 
 		createdCount++
 		logger.Infof("[Database] API key created: %s (prefix: %s)", keyConfig.Name, keyPrefix)
+
+		// 清空配置中的明文 Key，减少内存中敏感数据残留时间
+		keyConfig.Key = ""
 	}
 
 	if createdCount > 0 {
