@@ -34,6 +34,9 @@ type Detector struct {
 	running   bool
 	done      chan struct{}
 
+	// 防止 runDetection 并发执行
+	detectionMu sync.Mutex
+
 	// Cron 定时任务
 	cron *cron.Cron
 
@@ -165,6 +168,9 @@ func (d *Detector) RecordPacket(ip string, protocol uint8, tcpFlags uint8, pktSi
 
 // runDetection 执行检测
 func (d *Detector) runDetection() {
+	d.detectionMu.Lock()
+	defer d.detectionMu.Unlock()
+
 	allStats := d.collector.GetAllStats()
 
 	for ip, stats := range allStats {

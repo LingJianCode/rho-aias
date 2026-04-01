@@ -41,16 +41,25 @@ type Logger struct {
 
 var (
 	globalLogger *Logger
-	once         sync.Once
+	initMu       sync.Mutex
 )
 
 // Init 初始化全局日志管理器
+// 首次失败后可重试，已成功初始化则直接返回 nil
 func Init(cfg *Config) error {
-	var initErr error
-	once.Do(func() {
-		globalLogger, initErr = NewLogger(cfg)
-	})
-	return initErr
+	initMu.Lock()
+	defer initMu.Unlock()
+
+	if globalLogger != nil {
+		return nil
+	}
+
+	l, err := NewLogger(cfg)
+	if err != nil {
+		return err
+	}
+	globalLogger = l
+	return nil
 }
 
 // NewLogger 创建新的日志管理器

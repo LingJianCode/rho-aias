@@ -507,7 +507,10 @@ func main() {
 		auditService = services.NewAuditService(authDB.DB)
 
 		// Initialize captcha
-		captchaStore = captcha.NewMemoryStore()
+		captchaStore, err = captcha.NewMemoryStore()
+		if err != nil {
+			logger.Fatalf("Failed to initialize captcha store: %v", err)
+		}
 		captchaService := captcha.NewCaptchaService(
 			captchaStore,
 			time.Duration(cfg.Auth.CaptchaDuration)*time.Minute,
