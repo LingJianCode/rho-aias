@@ -113,6 +113,8 @@ func main() {
 	// Initialize Whitelist Cache and Load Whitelist Rules
 	var whitelistCache *manual.Cache
 	var whitelistHandle *handles.WhitelistHandle
+	// 初始化保护网段（包含本机 IP）并记录日志
+	manual.InitProtectedNets(logger.Infof)
 	whitelistChecker := manual.NewWhitelistChecker()
 	if cfg.Manual.Enabled {
 		whitelistCache = manual.NewCache(cfg.Manual.PersistenceDir)

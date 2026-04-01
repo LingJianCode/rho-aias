@@ -71,4 +71,55 @@ func ParseValueToBytes(value string) ([]byte, IPType, error) {
 	return nil, IPTypeUnknown, fmt.Errorf("invalid value: %s (only IPv4 or IPv4 CIDR supported)", value)
 }
 
+// GetLocalIPNets 获取本机所有非回环的 IPv4 地址，返回 /32 CIDR 格式的 net.IPNet 列表
+func GetLocalIPNets() ([]*net.IPNet, error) {
+	var nets []*net.IPNet
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, iface := range ifaces {
+		// 跳过未启用和 loopback 接口
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+
+			// 跳过 loopback 和 IPv6 地址
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+
+			ipv4 := ip.To4()
+			if ipv4 == nil {
+				continue
+			}
+
+			// 创建 /32 CIDR
+			ipNet := &net.IPNet{
+				IP:   ipv4,
+				Mask: net.CIDRMask(32, 32),
+			}
+			nets = append(nets, ipNet)
+		}
+	}
+
+	return nets, nil
+}
+
 
