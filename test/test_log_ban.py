@@ -84,11 +84,11 @@ WAF_INTERRUPTED_LINES = [
     json.dumps({
         "transaction": {
             "timestamp": "2026/04/01 09:48:44",
+            "client_ip": "198.51.100.100",
             "request": {
                 "uri": "/wp-admin",
                 "method": "POST",
                 "headers": {"X-Forwarded-For": "198.51.100.100"},
-                "remote_addr": "198.51.100.100",
             },
             "response": {"status": 403},
             "is_interrupted": True,
@@ -97,11 +97,11 @@ WAF_INTERRUPTED_LINES = [
     json.dumps({
         "transaction": {
             "timestamp": "2026/04/01 09:48:45",
+            "client_ip": "198.51.100.101",
             "request": {
                 "uri": "/phpmyadmin",
                 "method": "GET",
                 "headers": {"X-Forwarded-For": "198.51.100.101"},
-                "remote_addr": "198.51.100.101",
             },
             "response": {"status": 403},
             "is_interrupted": True,
