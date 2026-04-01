@@ -5,6 +5,13 @@ import (
 	"sync"
 )
 
+// protectedNets 内置保护网段，不可通过 API 移除
+// 用于防止本机回环地址被封禁导致服务不可用
+var protectedNets = func() []*net.IPNet {
+	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
+	return []*net.IPNet{loopback}
+}()
+
 // WhitelistChecker 用户态白名单检查器
 // 维护白名单规则的内存索引，提供高效的 IP/CIDR 匹配检查，
 // 避免封禁模块将白名单 IP 持续写入黑名单 map
@@ -102,16 +109,25 @@ func (wc *WhitelistChecker) Remove(value string) {
 }
 
 // IsWhitelisted 检查 IP 是否在白名单中
-// 支持精确 IP 匹配和 CIDR 范围匹配
+// 支持精确 IP 匹配、CIDR 范围匹配和内置保护网段（不可移除）
 func (wc *WhitelistChecker) IsWhitelisted(ip string) bool {
+	parsedIP := net.ParseIP(ip)
+
+	// 0. 内置保护网段检查（优先级最高，不受 Add/Remove/LoadFromCache 影响）
+	if parsedIP != nil {
+		for _, net := range protectedNets {
+			if net.Contains(parsedIP) {
+				return true
+			}
+		}
+	}
+
 	wc.mu.RLock()
 	defer wc.mu.RUnlock()
 
 	if len(wc.exactIPs) == 0 && len(wc.cidrNets) == 0 {
 		return false
 	}
-
-	parsedIP := net.ParseIP(ip)
 
 	// 1. 精确匹配
 	if parsedIP != nil {

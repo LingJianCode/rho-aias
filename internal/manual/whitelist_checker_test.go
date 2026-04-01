@@ -12,6 +12,57 @@ func TestWhitelistChecker_Empty(t *testing.T) {
 	}
 }
 
+// ============================================
+// 内置保护网段测试（不可通过 API 移除）
+// ============================================
+
+func TestWhitelistChecker_ProtectedLoopback(t *testing.T) {
+	tests := []struct {
+		name  string
+		ip    string
+		match bool
+	}{
+		{"loopback classic", "127.0.0.1", true},
+		{"loopback 127.0.0.2", "127.0.0.2", true},
+		{"loopback 127.255.255.255", "127.255.255.255", true},
+		{"loopback 127.0.0.0", "127.0.0.0", true},
+		{"non-loopback 10.0.0.1", "10.0.0.1", false},
+		{"non-loopback 1.2.3.4", "1.2.3.4", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wc := NewWhitelistChecker()
+			got := wc.IsWhitelisted(tt.ip)
+			if got != tt.match {
+				t.Errorf("IsWhitelisted(%q) = %v, want %v", tt.ip, got, tt.match)
+			}
+		})
+	}
+}
+
+func TestWhitelistChecker_ProtectedCannotBeRemoved(t *testing.T) {
+	wc := NewWhitelistChecker()
+
+	// 127.0.0.1 应该被内置保护
+	if !wc.IsWhitelisted("127.0.0.1") {
+		t.Error("127.0.0.1 should be protected by default")
+	}
+
+	// 尝试通过 Remove 移除（不应生效）
+	wc.Remove("127.0.0.0/8")
+	if !wc.IsWhitelisted("127.0.0.1") {
+		t.Error("127.0.0.1 should still be protected after Remove")
+	}
+
+	// LoadFromCache 也应不影响保护
+	data := NewWhitelistCacheData()
+	wc.LoadFromCache(data)
+	if !wc.IsWhitelisted("127.0.0.1") {
+		t.Error("127.0.0.1 should still be protected after LoadFromCache with empty data")
+	}
+}
+
 func TestWhitelistChecker_ExactIPv4(t *testing.T) {
 	wc := NewWhitelistChecker()
 	data := NewWhitelistCacheData()
