@@ -227,14 +227,18 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 	}
 
 	// 总数
-	s.db.Model(&models.BanRecord{}).Count(&stats.Total)
+	if err := s.db.Model(&models.BanRecord{}).Count(&stats.Total).Error; err != nil {
+		return nil, fmt.Errorf("failed to count total ban records: %w", err)
+	}
 
 	// 按来源统计
 	var bySource []struct {
 		Source string
 		Count  int64
 	}
-	s.db.Model(&models.BanRecord{}).Select("source, count(*) as count").Group("source").Find(&bySource)
+	if err := s.db.Model(&models.BanRecord{}).Select("source, count(*) as count").Group("source").Find(&bySource).Error; err != nil {
+		return nil, fmt.Errorf("failed to count ban records by source: %w", err)
+	}
 	for _, item := range bySource {
 		stats.BySource[item.Source] = item.Count
 	}
@@ -244,7 +248,9 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 		Status string
 		Count  int64
 	}
-	s.db.Model(&models.BanRecord{}).Select("status, count(*) as count").Group("status").Find(&byStatus)
+	if err := s.db.Model(&models.BanRecord{}).Select("status, count(*) as count").Group("status").Find(&byStatus).Error; err != nil {
+		return nil, fmt.Errorf("failed to count ban records by status: %w", err)
+	}
 	for _, item := range byStatus {
 		stats.ByStatus[item.Status] = item.Count
 	}
@@ -252,9 +258,11 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 
 	// Top 封禁 IP
 	var topIPs []TopIPStat
-	s.db.Model(&models.BanRecord{}).Select("ip, count(*) as count").
+	if err := s.db.Model(&models.BanRecord{}).Select("ip, count(*) as count").
 		Group("ip").Order("count DESC").Limit(10).
-		Find(&topIPs)
+		Find(&topIPs).Error; err != nil {
+		return nil, fmt.Errorf("failed to get top banned IPs: %w", err)
+	}
 	stats.TopIPs = topIPs
 
 	return stats, nil

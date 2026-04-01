@@ -237,7 +237,9 @@ func (l *Logger) cleanupOldLogs() {
 		// 检查文件修改时间
 		if info.ModTime().Before(cutoff) {
 			filePath := filepath.Join(l.config.OutputDir, entry.Name())
-			os.Remove(filePath)
+			if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+				Warnf("failed to remove old log file %s: %v", filePath, err)
+			}
 		}
 	}
 }

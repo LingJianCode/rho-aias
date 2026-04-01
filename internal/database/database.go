@@ -104,9 +104,8 @@ func (db *Database) InitAPIKeysFromConfig(enforcer *casbin.Enforcer, apiKeys []c
 
 	// 获取管理员用户 ID
 	var admin models.User
-	db.Where("role = ?", "admin").First(&admin)
-	if admin.ID == 0 {
-		return fmt.Errorf("admin user not found, cannot create API keys")
+	if err := db.Where("role = ?", "admin").First(&admin).Error; err != nil {
+		return fmt.Errorf("admin user not found, cannot create API keys: %w", err)
 	}
 
 	createdCount := 0
