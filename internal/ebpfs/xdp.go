@@ -927,6 +927,9 @@ func (x *Xdp) SetAnomalyConfig(enabled bool, sampleRate uint32) error {
 // enabled: 是否启用端口过滤 (true=仅检测配置的端口, false=检测所有端口)
 // ports: 需要检测的端口列表（同时应用于 TCP 和 UDP）
 func (x *Xdp) SetAnomalyPortFilter(enabled bool, ports []uint32) error {
+	x.mapMu.Lock()
+	defer x.mapMu.Unlock()
+
 	// 更新配置中的 port_filter_enabled 标志
 	key := uint32(0)
 	config := AnomalyConfig{}
