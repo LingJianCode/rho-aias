@@ -12,6 +12,7 @@ import (
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/watcher"
+	"rho-aias/utils"
 
 	"github.com/robfig/cron/v3"
 )
@@ -37,7 +38,7 @@ func NewMonitor(cfg *config.RateLimitConfig, xdp watcher.XDPRuleManager, ctx con
 	return &Monitor{
 		cfg:     cfg,
 		watcher: watcher.NewLogWatcher("RateLimit", "rate_limit", xdp, ctx),
-		ipRegex: regexp.MustCompile(`\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b`),
+		ipRegex: regexp.MustCompile(utils.IPv4RegexPattern),
 	}
 }
 

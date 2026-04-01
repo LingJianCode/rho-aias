@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+// IPv4RegexPatternRaw 匹配 IPv4 地址的正则表达式（无边界锚定，用于嵌入其他正则）
+const IPv4RegexPatternRaw = `(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)`
+
+// IPv4RegexPattern 匹配 IPv4 地址的正则表达式（含词边界，用于 FindAllString 提取）
+const IPv4RegexPattern = `\b` + IPv4RegexPatternRaw + `\b`
+
 // IPType IP 地址类型
 type IPType uint8
 
