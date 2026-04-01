@@ -19,6 +19,7 @@ type Config struct {
 	Business         BusinessConfig         `yaml:"business"`
 	BlockLog         BlockLogConfig         `yaml:"blocklog"`
 	WAF              WAFConfig              `yaml:"waf"`
+	RateLimit        RateLimitConfig        `yaml:"rate_limit"`
 	FailGuard        FailGuardConfig        `yaml:"failguard"`
 	AnomalyDetection AnomalyDetectionConfig `yaml:"anomaly_detection"`
 }
@@ -138,11 +139,18 @@ type FailGuardConfig struct {
 
 // WAFConfig WAF 日志监控配置
 type WAFConfig struct {
-	Enabled          bool   `yaml:"enabled"`              // 是否启用 WAF 日志监控
-	WAFLogPath       string `yaml:"waf_log_path"`         // WAF 审计日志路径（Caddy + Coraza）
-	RateLimitLogPath string `yaml:"rate_limit_log_path"`  // Rate Limit 日志路径
-	BanDuration      int    `yaml:"ban_duration"`         // 封禁时长（秒）
-	OffsetStateFile  string `yaml:"offset_state_file"`    // 偏移量持久化文件路径（默认 ./data/waf_offset.json）
+	Enabled         bool   `yaml:"enabled"`           // 是否启用 WAF 日志监控
+	WAFLogPath      string `yaml:"waf_log_path"`       // WAF 审计日志路径（Caddy + Coraza）
+	BanDuration     int    `yaml:"ban_duration"`       // 封禁时长（秒）
+	OffsetStateFile string `yaml:"offset_state_file"`  // 偏移量持久化文件路径（默认 ./data/waf_offset.json）
+}
+
+// RateLimitConfig Rate Limit 日志监控配置
+type RateLimitConfig struct {
+	Enabled         bool   `yaml:"enabled"`           // 是否启用 Rate Limit 日志监控
+	LogPath         string `yaml:"log_path"`           // Rate Limit 日志路径
+	BanDuration     int    `yaml:"ban_duration"`       // 封禁时长（秒）
+	OffsetStateFile string `yaml:"offset_state_file"`  // 偏移量持久化文件路径（默认 ./data/ratelimit_offset.json）
 }
 
 // AnomalyDetectionConfig 异常检测配置
@@ -254,9 +262,13 @@ func applyDefaults(config *Config) {
 
 	// WAF 默认值
 	setIfEmpty(&config.WAF.WAFLogPath, "/logs/waf_audit.log")
-	setIfEmpty(&config.WAF.RateLimitLogPath, "/logs/rate_limit.log")
 	setIfZero(&config.WAF.BanDuration, 3600)            // 默认 1 小时
 	setIfEmpty(&config.WAF.OffsetStateFile, "./data/waf_offset.json")
+
+	// RateLimit 默认值
+	setIfEmpty(&config.RateLimit.LogPath, "/logs/rate_limit.log")
+	setIfZero(&config.RateLimit.BanDuration, 3600)            // 默认 1 小时
+	setIfEmpty(&config.RateLimit.OffsetStateFile, "./data/ratelimit_offset.json")
 
 	// AnomalyDetection 默认值
 	setIfZero(&config.AnomalyDetection.SampleRate, 100)

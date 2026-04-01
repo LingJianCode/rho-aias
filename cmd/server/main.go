@@ -22,6 +22,7 @@ import (
 	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
 	"rho-aias/internal/models"
+	"rho-aias/internal/ratelimit"
 	"rho-aias/internal/routers"
 	"rho-aias/internal/services"
 	"rho-aias/internal/threatintel"
@@ -289,6 +290,24 @@ func main() {
 		} else {
 			logger.Info("[Main] WAF monitor module initialized")
 			defer wafMonitor.Stop()
+		}
+	}
+
+	// Initialize Rate Limit Monitor (if enabled)
+	var rateLimitMonitor *ratelimit.Monitor
+	if cfg.RateLimit.Enabled {
+		rateLimitMonitor = ratelimit.NewMonitor(&cfg.RateLimit, xdp, ctx)
+		rateLimitMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.RateLimit.OffsetStateFile))
+		rateLimitMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
+		if bizDB != nil {
+			banRecordService := services.NewBanRecordService(bizDB.DB)
+			rateLimitMonitor.SetBanRecordStore(banRecordService)
+		}
+		if err := rateLimitMonitor.Start(); err != nil {
+			logger.Warnf("[Main] Rate Limit monitor start failed: %v", err)
+		} else {
+			logger.Info("[Main] Rate Limit monitor module initialized")
+			defer rateLimitMonitor.Stop()
 		}
 	}
 

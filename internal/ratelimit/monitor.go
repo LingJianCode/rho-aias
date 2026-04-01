@@ -1,6 +1,6 @@
-// Package waf WAF 日志监控模块
-// 监听 Caddy + Coraza WAF 日志，触发 IP 封禁并实现去重机制
-package waf
+// Package ratelimit Rate Limit 日志监控模块
+// 监听 Caddy rate limit 日志，触发 IP 封禁并实现去重机制
+package ratelimit
 
 import (
 	"context"
@@ -16,17 +16,15 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-// LogEntry Caddy + Coraza WAF 审计日志结构
+// LogEntry Caddy rate limit 日志结构
 type LogEntry struct {
-	Transaction struct {
-		ClientIP      string `json:"client_ip"`
-		IsInterrupted bool   `json:"is_interrupted"`
-	} `json:"transaction"`
+	RemoteIP string `json:"remote_ip"`
+	Msg      string `json:"msg"`
 }
 
-// Monitor WAF 日志监控器
+// Monitor Rate Limit 日志监控器
 type Monitor struct {
-	cfg     *config.WAFConfig
+	cfg     *config.RateLimitConfig
 	watcher *watcher.LogWatcher
 	cron    *cron.Cron
 
@@ -34,11 +32,11 @@ type Monitor struct {
 	ipRegex *regexp.Regexp
 }
 
-// NewMonitor 创建 WAF 日志监控器
-func NewMonitor(cfg *config.WAFConfig, xdp watcher.XDPRuleManager, ctx context.Context) *Monitor {
+// NewMonitor 创建 Rate Limit 日志监控器
+func NewMonitor(cfg *config.RateLimitConfig, xdp watcher.XDPRuleManager, ctx context.Context) *Monitor {
 	return &Monitor{
 		cfg:     cfg,
-		watcher: watcher.NewLogWatcher("WAF", "waf", xdp, ctx),
+		watcher: watcher.NewLogWatcher("RateLimit", "rate_limit", xdp, ctx),
 		ipRegex: regexp.MustCompile(`\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b`),
 	}
 }
@@ -58,13 +56,13 @@ func (m *Monitor) SetWhitelistCheck(fn func(ip string) bool) {
 	m.watcher.SetWhitelistCheck(fn)
 }
 
-// Start 启动 WAF 日志监控
+// Start 启动 Rate Limit 日志监控
 func (m *Monitor) Start() error {
 	m.watcher.SetLineHandler(m.handleLine)
 
-	logPath := m.cfg.WAFLogPath
+	logPath := m.cfg.LogPath
 	if logPath == "" {
-		logger.Warn("[WAF] No log path configured, monitor will not watch any files")
+		logger.Warn("[RateLimit] No log path configured, monitor will not watch any files")
 		return nil
 	}
 
@@ -73,7 +71,7 @@ func (m *Monitor) Start() error {
 	}
 
 	if err := m.watcher.WatchLogFile(logPath); err != nil {
-		logger.Warnf("[WAF] Failed to watch log: %v", err)
+		logger.Warnf("[RateLimit] Failed to watch log: %v", err)
 	}
 
 	m.cron = cron.New(cron.WithSeconds())
@@ -85,7 +83,7 @@ func (m *Monitor) Start() error {
 	}
 	m.cron.Start()
 
-	logger.Infof("[WAF] Monitor started, ban_duration=%d seconds, log_path=%s", m.cfg.BanDuration, logPath)
+	logger.Infof("[RateLimit] Monitor started, ban_duration=%d seconds, log_path=%s", m.cfg.BanDuration, logPath)
 	return nil
 }
 
@@ -95,7 +93,7 @@ func (m *Monitor) Stop() {
 		m.cron.Stop()
 	}
 	m.watcher.Stop()
-	logger.Info("[WAF] Monitor stopped")
+	logger.Info("[RateLimit] Monitor stopped")
 }
 
 // handleLine 处理一行日志，返回是否需要封禁
@@ -104,30 +102,23 @@ func (m *Monitor) handleLine(line string) (string, uint32, string, int, bool) {
 	if ip == "" {
 		return "", 0, "", 0, false
 	}
-	return ip, ebpfs.SourceMaskWAF, fmt.Sprintf("banned from waf log"), m.cfg.BanDuration, true
+	return ip, ebpfs.SourceMaskRateLimit, fmt.Sprintf("banned from rate_limit log"), m.cfg.BanDuration, true
 }
 
-// extractIP 从 WAF 审计日志行中提取 IP
-// 只有 is_interrupted==true 时才封禁 client_ip
+// extractIP 从 Rate limit 日志行中提取 IP
 func (m *Monitor) extractIP(line string) string {
-	var entry LogEntry
-	if err := json.Unmarshal([]byte(line), &entry); err != nil {
-		// JSON 解析失败，尝试正则匹配（向后兼容）
-		matches := m.ipRegex.FindAllString(line, -1)
-		if len(matches) == 0 {
-			return ""
+	trimmed := json.RawMessage{}
+	if err := json.Unmarshal([]byte(line), &trimmed); err == nil {
+		var entry LogEntry
+		if err := json.Unmarshal(trimmed, &entry); err == nil && entry.RemoteIP != "" {
+			return entry.RemoteIP
 		}
-		if len(matches) > 1 {
-			return matches[len(matches)-1]
-		}
-		return matches[0]
 	}
-
-	if !entry.Transaction.IsInterrupted {
+	matches := m.ipRegex.FindAllString(line, -1)
+	if len(matches) == 0 {
 		return ""
 	}
-
-	return entry.Transaction.ClientIP
+	return matches[0]
 }
 
 // GetBannedIPs 获取当前已封禁的 IP 列表

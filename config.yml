@@ -98,9 +98,15 @@ blocklog:
 waf:
   enabled: true                     # 是否启用 WAF 日志监控
   waf_log_path: /caddy-logs/waf_audit.log      # WAF 审计日志路径（Caddy + Coraza）
-  rate_limit_log_path: /caddy-logs/rate_limit.log  # Rate Limit 日志路径
   ban_duration: 3600                # 封禁时长（秒，默认1小时）
   offset_state_file: ./data/waf_offset.json    # 偏移量持久化文件路径
+
+# Rate Limit 日志监控配置
+rate_limit:
+  enabled: true                     # 是否启用 Rate Limit 日志监控
+  log_path: /caddy-logs/rate_limit.log  # Rate Limit 日志路径
+  ban_duration: 3600                # 封禁时长（秒，默认1小时）
+  offset_state_file: ./data/ratelimit_offset.json    # 偏移量持久化文件路径
 
 # SSH 防爆破配置（参考 fail2ban 核心功能）
 # 日志匹配 + 滑动窗口计数 + 达阈值即封禁
@@ -112,7 +118,7 @@ failguard:
   # normal: 密码错误/无效用户/PAM失败等（参考 fail2ban normal 模式）
   # ddos: normal + 未发送识别字符串/认证超时/preauth断连等（参考 fail2ban ddos 模式）
   # aggressive: ddos + 协议版本错误/密钥协商失败/banner异常等（参考 fail2ban aggressive 模式）
-  mode: normal                      # 检测模式（默认 normal）
+  mode: aggressive                      # 检测模式（默认 normal）
   # fail_regex 和 ignore_regex 留空则使用内置默认值（参考 fail2ban filter.d/sshd.conf）
   # fail_regex:                       # 自定义失败匹配正则（留空则按 mode 使用内置规则）
   #   - "Failed \\w+ for (?:invalid user )?(\\S+) from <HOST> port \\d+ ssh2"

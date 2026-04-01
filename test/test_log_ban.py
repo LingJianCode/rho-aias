@@ -201,9 +201,14 @@ class RhoAiasProcess:
         # 配置 WAF 日志监控
         config['waf']['enabled'] = True
         config['waf']['waf_log_path'] = self.waf_log
-        config['waf']['rate_limit_log_path'] = self.rate_limit_log
         config['waf']['ban_duration'] = 3600
         config['waf']['offset_state_file'] = os.path.join(self.config_dir, 'waf_offset.json')
+
+        # 配置 Rate Limit 日志监控
+        config['rate_limit']['enabled'] = True
+        config['rate_limit']['log_path'] = self.rate_limit_log
+        config['rate_limit']['ban_duration'] = 3600
+        config['rate_limit']['offset_state_file'] = os.path.join(self.config_dir, 'ratelimit_offset.json')
 
         # 配置 FailGuard（SSH 防爆破）
         config['failguard']['enabled'] = True
