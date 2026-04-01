@@ -576,7 +576,9 @@ func TestReadLogFile_FileRotation(t *testing.T) {
 		t.Fatalf("failed to write initial log: %v", err)
 	}
 
-	monitor.watcher.WatchLogFile(wafLogPath)
+	if err := monitor.watcher.WatchLogFile(wafLogPath); err != nil {
+		t.Fatalf("WatchLogFile failed: %v", err)
+	}
 
 	if err := monitor.watcher.ReadLogFile(wafLogPath); err != nil {
 		t.Fatalf("readLogFile failed: %v", err)
@@ -641,7 +643,9 @@ func TestReadLogFile_IncrementalReading(t *testing.T) {
 		t.Fatalf("failed to write: %v", err)
 	}
 
-	monitor.watcher.WatchLogFile(logPath)
+	if err := monitor.watcher.WatchLogFile(logPath); err != nil {
+		t.Fatalf("WatchLogFile failed: %v", err)
+	}
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("first read failed: %v", err)
@@ -847,7 +851,9 @@ func TestRealLog_ReadLogFile_WAFAudit(t *testing.T) {
 		t.Fatalf("failed to write log: %v", err)
 	}
 
-	monitor.watcher.WatchLogFile(logPath)
+	if err := monitor.watcher.WatchLogFile(logPath); err != nil {
+		t.Fatalf("WatchLogFile failed: %v", err)
+	}
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("ReadLogFile failed: %v", err)

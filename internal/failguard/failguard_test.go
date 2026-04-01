@@ -426,7 +426,9 @@ func TestReadLogFile_RealSSHLog_Aggressive(t *testing.T) {
 		t.Fatalf("failed to write log: %v", err)
 	}
 
-	monitor.watcher.WatchLogFile(logPath)
+	if err := monitor.watcher.WatchLogFile(logPath); err != nil {
+		t.Fatalf("WatchLogFile failed: %v", err)
+	}
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("ReadLogFile failed: %v", err)
@@ -474,7 +476,9 @@ func TestReadLogFile_RealSSHPreauth_Aggressive(t *testing.T) {
 		t.Fatalf("failed to write log: %v", err)
 	}
 
-	monitor.watcher.WatchLogFile(logPath)
+	if err := monitor.watcher.WatchLogFile(logPath); err != nil {
+		t.Fatalf("WatchLogFile failed: %v", err)
+	}
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("ReadLogFile failed: %v", err)
