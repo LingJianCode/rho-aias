@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"rho-aias/internal/config"
+	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/watcher"
 )
 
@@ -378,7 +379,7 @@ func TestBanIP_NewBan(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	monitor.watcher.BanIP("1.2.3.4", sourceMaskWAF, "test ban", cfg.BanDuration)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
 
 	if !monitor.IsBanned("1.2.3.4") {
 		t.Error("IP should be banned")
@@ -391,16 +392,16 @@ func TestBanIP_NewBan(t *testing.T) {
 	if record.Expiry.Before(time.Now()) {
 		t.Error("expiry should be in the future")
 	}
-	if record.SourceMask != sourceMaskWAF {
-		t.Errorf("record SourceMask should be sourceMaskWAF (%d), got %d", sourceMaskWAF, record.SourceMask)
+	if record.SourceMask != ebpfs.SourceMaskWAF {
+		t.Errorf("record SourceMask should be ebpfs.SourceMaskWAF (%d), got %d", ebpfs.SourceMaskWAF, record.SourceMask)
 	}
 
 	addedIPs := mockXDP.getAddedIPs()
 	if _, ok := addedIPs["1.2.3.4"]; !ok {
 		t.Error("XDP AddRuleWithSource should have been called with IP 1.2.3.4")
 	}
-	if addedIPs["1.2.3.4"] != sourceMaskWAF {
-		t.Errorf("source mask should be sourceMaskWAF (%d), got %d", sourceMaskWAF, addedIPs["1.2.3.4"])
+	if addedIPs["1.2.3.4"] != ebpfs.SourceMaskWAF {
+		t.Errorf("source mask should be ebpfs.SourceMaskWAF (%d), got %d", ebpfs.SourceMaskWAF, addedIPs["1.2.3.4"])
 	}
 }
 
@@ -410,8 +411,8 @@ func TestBanIP_DuplicateBanSkipped(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	monitor.watcher.BanIP("1.2.3.4", sourceMaskWAF, "test ban", cfg.BanDuration)
-	monitor.watcher.BanIP("1.2.3.4", sourceMaskWAF, "test ban", cfg.BanDuration)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
 
 	if mockXDP.addCallCount != 1 {
 		t.Errorf("AddRuleWithSource should be called once, got %d calls", mockXDP.addCallCount)
@@ -427,9 +428,9 @@ func TestBanIP_ReBanAfterExpiry(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	monitor.watcher.BanIP("1.2.3.4", sourceMaskWAF, "test ban", cfg.BanDuration)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
 	time.Sleep(1100 * time.Millisecond)
-	monitor.watcher.BanIP("1.2.3.4", sourceMaskWAF, "test ban", cfg.BanDuration)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
 
 	if mockXDP.addCallCount != 2 {
 		t.Errorf("AddRuleWithSource should be called twice, got %d calls", mockXDP.addCallCount)
@@ -447,13 +448,13 @@ func TestBanIP_MultipleDifferentIPs(t *testing.T) {
 
 	ips := []string{"1.2.3.4", "5.6.7.8", "10.20.30.40"}
 	for _, ip := range ips {
-		monitor.watcher.BanIP(ip, sourceMaskRateLimit, "rate limit ban", cfg.BanDuration)
+		monitor.watcher.BanIP(ip, ebpfs.SourceMaskRateLimit, "rate limit ban", cfg.BanDuration)
 	}
 
 	addedIPs := mockXDP.getAddedIPs()
 	for _, ip := range ips {
-		if addedIPs[ip] != sourceMaskRateLimit {
-			t.Errorf("source mask for rate_limit IP %s should be sourceMaskRateLimit (%d), got %d", ip, sourceMaskRateLimit, addedIPs[ip])
+		if addedIPs[ip] != ebpfs.SourceMaskRateLimit {
+			t.Errorf("source mask for rate_limit IP %s should be ebpfs.SourceMaskRateLimit (%d), got %d", ip, ebpfs.SourceMaskRateLimit, addedIPs[ip])
 		}
 	}
 
@@ -478,7 +479,7 @@ func TestBanIP_XDPError(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	monitor.watcher.BanIP("1.2.3.4", sourceMaskWAF, "test ban", cfg.BanDuration)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
 
 	if monitor.IsBanned("1.2.3.4") {
 		t.Error("IP should not be banned when XDP fails")
@@ -500,10 +501,10 @@ func TestCleanup_RemovesExpiredBans(t *testing.T) {
 
 	now := time.Now()
 	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
-		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: sourceMaskWAF,
+		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
 	})
 	monitor.watcher.SetBanRecordForTest("5.6.7.8", watcher.IPBanRecord{
-		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: sourceMaskRateLimit,
+		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: ebpfs.SourceMaskRateLimit,
 	})
 
 	monitor.watcher.CleanupExpiredBans()
@@ -521,8 +522,8 @@ func TestCleanup_RemovesExpiredBans(t *testing.T) {
 		t.Errorf("UpdateRuleSourceMask should be called once, got %d", mockXDP.removeCallCount)
 	}
 	removed := mockXDP.getRemovedSources()
-	if removed["1.2.3.4"] != sourceMaskWAF {
-		t.Errorf("should remove sourceMaskWAF, got %d", removed["1.2.3.4"])
+	if removed["1.2.3.4"] != ebpfs.SourceMaskWAF {
+		t.Errorf("should remove ebpfs.SourceMaskWAF, got %d", removed["1.2.3.4"])
 	}
 }
 
@@ -535,7 +536,7 @@ func TestCleanup_RemovesXDPRuleForExpiredIP(t *testing.T) {
 	now := time.Now()
 	for _, ip := range []string{"1.2.3.4", "5.6.7.8", "10.20.30.40"} {
 		monitor.watcher.SetBanRecordForTest(ip, watcher.IPBanRecord{
-			BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: sourceMaskWAF,
+			BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
 		})
 	}
 
@@ -557,7 +558,7 @@ func TestCleanup_NoExpiredBans(t *testing.T) {
 
 	now := time.Now()
 	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
-		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: sourceMaskWAF,
+		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
 	})
 
 	monitor.watcher.CleanupExpiredBans()
@@ -598,13 +599,13 @@ func TestGetBannedIPs_ReturnsOnlyActive(t *testing.T) {
 
 	now := time.Now()
 	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
-		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: sourceMaskWAF,
+		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
 	})
 	monitor.watcher.SetBanRecordForTest("5.6.7.8", watcher.IPBanRecord{
-		BannedAt: now, Expiry: now.Add(2 * time.Hour), SourceMask: sourceMaskRateLimit,
+		BannedAt: now, Expiry: now.Add(2 * time.Hour), SourceMask: ebpfs.SourceMaskRateLimit,
 	})
 	monitor.watcher.SetBanRecordForTest("10.20.30.40", watcher.IPBanRecord{
-		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: sourceMaskWAF,
+		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
 	})
 
 	ips := monitor.GetBannedIPs()
@@ -635,10 +636,10 @@ func TestGetBanCount(t *testing.T) {
 
 	now := time.Now()
 	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
-		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: sourceMaskWAF,
+		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
 	})
 	monitor.watcher.SetBanRecordForTest("10.20.30.40", watcher.IPBanRecord{
-		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: sourceMaskWAF,
+		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
 	})
 
 	if monitor.GetBanCount() != 1 {
@@ -658,14 +659,14 @@ func TestIsBanned(t *testing.T) {
 
 	now := time.Now()
 	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
-		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: sourceMaskWAF,
+		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
 	})
 	if !monitor.IsBanned("1.2.3.4") {
 		t.Error("active IP should be banned")
 	}
 
 	monitor.watcher.SetBanRecordForTest("5.6.7.8", watcher.IPBanRecord{
-		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: sourceMaskRateLimit,
+		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: ebpfs.SourceMaskRateLimit,
 	})
 	if monitor.IsBanned("5.6.7.8") {
 		t.Error("expired IP should not be banned")
@@ -839,7 +840,7 @@ func TestConcurrentBanAndQuery(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < opsPerGoroutine; j++ {
 				ip := fmt.Sprintf("10.%d.%d.1", id, j)
-				monitor.watcher.BanIP(ip, sourceMaskWAF, "concurrent test", cfg.BanDuration)
+				monitor.watcher.BanIP(ip, ebpfs.SourceMaskWAF, "concurrent test", cfg.BanDuration)
 			}
 		}(i)
 	}
@@ -874,8 +875,8 @@ func TestFullWorkflow_BanAndCleanup(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	monitor.watcher.BanIP("1.2.3.4", sourceMaskWAF, "test ban", cfg.BanDuration)
-	monitor.watcher.BanIP("5.6.7.8", sourceMaskRateLimit, "rate limit ban", cfg.BanDuration)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
+	monitor.watcher.BanIP("5.6.7.8", ebpfs.SourceMaskRateLimit, "rate limit ban", cfg.BanDuration)
 
 	if monitor.GetBanCount() != 2 {
 		t.Fatalf("expected 2 bans, got %d", monitor.GetBanCount())
@@ -895,7 +896,7 @@ func TestFullWorkflow_BanAndCleanup(t *testing.T) {
 		t.Errorf("expected 2 XDP removes, got %d", mockXDP.removeCallCount)
 	}
 
-	monitor.watcher.BanIP("1.2.3.4", sourceMaskWAF, "re-ban", cfg.BanDuration)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "re-ban", cfg.BanDuration)
 	if !monitor.IsBanned("1.2.3.4") {
 		t.Error("IP should be banned again after cleanup and re-ban")
 	}
@@ -973,8 +974,8 @@ func TestRealLog_HandleLine_RateLimit(t *testing.T) {
 	if ip != "222.209.44.8" {
 		t.Errorf("expected IP '222.209.44.8', got %s", ip)
 	}
-	if sourceMask != sourceMaskRateLimit {
-		t.Errorf("expected sourceMask %d, got %d", sourceMaskRateLimit, sourceMask)
+	if sourceMask != ebpfs.SourceMaskRateLimit {
+		t.Errorf("expected sourceMask %d, got %d", ebpfs.SourceMaskRateLimit, sourceMask)
 	}
 	if reason != "banned from rate_limit log" {
 		t.Errorf("expected reason 'banned from rate_limit log', got %s", reason)
@@ -996,8 +997,8 @@ func TestRealLog_HandleLine_WAFAudit(t *testing.T) {
 	if ip != "172.68.10.79" {
 		t.Errorf("expected IP '172.68.10.79', got %s", ip)
 	}
-	if sourceMask != sourceMaskWAF {
-		t.Errorf("expected sourceMask %d, got %d", sourceMaskWAF, sourceMask)
+	if sourceMask != ebpfs.SourceMaskWAF {
+		t.Errorf("expected sourceMask %d, got %d", ebpfs.SourceMaskWAF, sourceMask)
 	}
 	if reason != "banned from waf log" {
 		t.Errorf("expected reason 'banned from waf log', got %s", reason)
@@ -1109,10 +1110,10 @@ func TestRealLog_ReadLogFile_MixedSources(t *testing.T) {
 	}
 
 	addedIPs := mockXDP.getAddedIPs()
-	if addedIPs["172.68.10.79"] != sourceMaskWAF {
-		t.Errorf("172.68.10.79 should have sourceMaskWAF (%d), got %d", sourceMaskWAF, addedIPs["172.68.10.79"])
+	if addedIPs["172.68.10.79"] != ebpfs.SourceMaskWAF {
+		t.Errorf("172.68.10.79 should have ebpfs.SourceMaskWAF (%d), got %d", ebpfs.SourceMaskWAF, addedIPs["172.68.10.79"])
 	}
-	if addedIPs["222.209.44.8"] != sourceMaskRateLimit {
-		t.Errorf("222.209.44.8 should have sourceMaskRateLimit (%d), got %d", sourceMaskRateLimit, addedIPs["222.209.44.8"])
+	if addedIPs["222.209.44.8"] != ebpfs.SourceMaskRateLimit {
+		t.Errorf("222.209.44.8 should have ebpfs.SourceMaskRateLimit (%d), got %d", ebpfs.SourceMaskRateLimit, addedIPs["222.209.44.8"])
 	}
 }

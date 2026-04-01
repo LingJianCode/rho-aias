@@ -515,100 +515,63 @@ func main() {
 		routers.RegisterAuthRoutes(api, authHandle, authService, apiKeyService, casbinEnforcer)
 	}
 
-	// Register protected routes
+	// 认证未启用时给出安全警告
+	if !cfg.Auth.Enabled {
+		logger.Warn("[Security] Authentication is DISABLED - all APIs are publicly accessible without any protection!")
+		logger.Warn("[Security] Enable authentication by setting 'auth.enabled: true' in config.yml for production use")
+	}
+
+	// Build auth context: when auth is disabled, all fields are nil (safe for routers with built-in nil guards)
+	var authEnforcer *casbin.Enforcer
+	var authSvc *services.AuthService
+	var apiKeySvc *services.APIKeyService
 	if cfg.Auth.Enabled && authService != nil && apiKeyService != nil && casbinEnforcer != nil {
-		// Register API Key management routes
+		authEnforcer = casbinEnforcer
+		authSvc = authService
+		apiKeySvc = apiKeyService
+
+		// Register auth-only routes (no built-in nil guard, only call when auth is active)
 		if apiKeyHandle != nil {
-			routers.RegisterAPIKeyRoutes(api, apiKeyHandle, casbinEnforcer, authService, apiKeyService)
+			routers.RegisterAPIKeyRoutes(api, apiKeyHandle, authEnforcer, authSvc, apiKeySvc)
 		}
-
-		// Register User management routes
 		if userHandle != nil {
-			routers.RegisterUserRoutes(api, userHandle, casbinEnforcer, authService, apiKeyService)
+			routers.RegisterUserRoutes(api, userHandle, authEnforcer, authSvc, apiKeySvc)
 		}
-
-		// Register Audit log routes
 		if auditHandle != nil {
-			routers.RegisterAuditRoutes(api, auditHandle, casbinEnforcer, authService, apiKeyService)
+			routers.RegisterAuditRoutes(api, auditHandle, authEnforcer, authSvc, apiKeySvc)
 		}
+	}
 
-		// Register Source status routes (需要数据库)
-		if bizDB != nil {
-			sourceHandle := handles.NewSourceHandle(bizDB.DB, intelMgr, geoMgr)
-			routers.RegisterSourceRoutes(api, sourceHandle, casbinEnforcer, authService, apiKeyService)
-		}
+	// Register common routes (all have built-in nil guards for authEnforcer/authSvc/apiKeySvc)
+	routers.RegisterManualRoutes(api, manualHandle, authEnforcer, authSvc, apiKeySvc)
+	routers.RegisterWhitelistRoutes(api, whitelistHandle, authEnforcer, authSvc, apiKeySvc)
+	routers.RegisterBlockLogRoutes(api, blockLogHandle, authEnforcer, authSvc, apiKeySvc)
 
-		// Register protected routes with Casbin middleware
-		routers.RegisterManualRoutes(api, manualHandle, casbinEnforcer, authService, apiKeyService)
-		routers.RegisterWhitelistRoutes(api, whitelistHandle, casbinEnforcer, authService, apiKeyService)
-		routers.RegisterBlockLogRoutes(api, blockLogHandle, casbinEnforcer, authService, apiKeyService)
+	ruleQueryHandle := handles.NewRuleQueryHandle(xdp)
+	routers.RegisterRuleRoutes(api, ruleQueryHandle, authEnforcer, authSvc, apiKeySvc)
 
-		// Register Rule query routes
-		ruleQueryHandle := handles.NewRuleQueryHandle(xdp)
-		routers.RegisterRuleRoutes(api, ruleQueryHandle, casbinEnforcer, authService, apiKeyService)
+	eventHandle := handles.NewEventHandle(xdp)
+	routers.RegisterEventRoutes(api, eventHandle, authEnforcer, authSvc, apiKeySvc)
 
-		// Register Event Reporting routes
-		eventHandle := handles.NewEventHandle(xdp)
-		routers.RegisterEventRoutes(api, eventHandle, casbinEnforcer, authService, apiKeyService)
+	if bizDB != nil {
+		sourceHandle := handles.NewSourceHandle(bizDB.DB, intelMgr, geoMgr)
+		routers.RegisterSourceRoutes(api, sourceHandle, authEnforcer, authSvc, apiKeySvc)
+	}
 
-		// Register Intel routes (if enabled)
-		if cfg.Intel.Enabled && intelMgr != nil {
-			intelHandle := handles.NewIntelHandle(intelMgr)
-			routers.RegisterIntelRoutes(api, intelHandle, casbinEnforcer, authService, apiKeyService)
-		}
+	if cfg.Intel.Enabled && intelMgr != nil {
+		intelHandle := handles.NewIntelHandle(intelMgr)
+		routers.RegisterIntelRoutes(api, intelHandle, authEnforcer, authSvc, apiKeySvc)
+	}
 
-		// Register Geo-Blocking routes (if enabled)
-		if cfg.GeoBlocking.Enabled && geoMgr != nil {
-			geoHandle := handles.NewGeoBlockingHandle(geoMgr)
-			routers.RegisterGeoBlockingRoutes(api, geoHandle, casbinEnforcer, authService, apiKeyService)
-		}
+	if cfg.GeoBlocking.Enabled && geoMgr != nil {
+		geoHandle := handles.NewGeoBlockingHandle(geoMgr)
+		routers.RegisterGeoBlockingRoutes(api, geoHandle, authEnforcer, authSvc, apiKeySvc)
+	}
 
-		// Register Ban Record routes (需要数据库)
-		if bizDB != nil {
-			banRecordService := services.NewBanRecordService(bizDB.DB)
-			banRecordHandle := handles.NewBanRecordHandle(banRecordService, xdp)
-			routers.RegisterBanRecordRoutes(api, banRecordHandle, casbinEnforcer, authService, apiKeyService)
-		}
-	} else {
-		// 认证未启用，所有 API 无保护暴露
-		if !cfg.Auth.Enabled {
-			logger.Warn("[Security] Authentication is DISABLED - all APIs are publicly accessible without any protection!")
-			logger.Warn("[Security] Enable authentication by setting 'auth.enabled: true' in config.yml for production use")
-		}
-		routers.RegisterManualRoutes(api, manualHandle, nil, nil, nil)
-		routers.RegisterWhitelistRoutes(api, whitelistHandle, nil, nil, nil)
-		routers.RegisterBlockLogRoutes(api, blockLogHandle, nil, nil, nil)
-
-		// Register Rule query routes
-		ruleQueryHandle := handles.NewRuleQueryHandle(xdp)
-		routers.RegisterRuleRoutes(api, ruleQueryHandle, nil, nil, nil)
-
-		// Register Source status routes
-		if bizDB != nil {
-			sourceHandle := handles.NewSourceHandle(bizDB.DB, intelMgr, geoMgr)
-			routers.RegisterSourceRoutes(api, sourceHandle, nil, nil, nil)
-		}
-
-		// Register Event Reporting routes
-		eventHandle := handles.NewEventHandle(xdp)
-		routers.RegisterEventRoutes(api, eventHandle, nil, nil, nil)
-
-		if cfg.Intel.Enabled && intelMgr != nil {
-			intelHandle := handles.NewIntelHandle(intelMgr)
-			routers.RegisterIntelRoutes(api, intelHandle, nil, nil, nil)
-		}
-
-		if cfg.GeoBlocking.Enabled && geoMgr != nil {
-			geoHandle := handles.NewGeoBlockingHandle(geoMgr)
-			routers.RegisterGeoBlockingRoutes(api, geoHandle, nil, nil, nil)
-		}
-
-		// Register Ban Record routes (需要数据库)
-		if bizDB != nil {
-			banRecordService := services.NewBanRecordService(bizDB.DB)
-			banRecordHandle := handles.NewBanRecordHandle(banRecordService, xdp)
-			routers.RegisterBanRecordRoutes(api, banRecordHandle, nil, nil, nil)
-		}
+	if bizDB != nil {
+		banRecordService := services.NewBanRecordService(bizDB.DB)
+		banRecordHandle := handles.NewBanRecordHandle(banRecordService, xdp)
+		routers.RegisterBanRecordRoutes(api, banRecordHandle, authEnforcer, authSvc, apiKeySvc)
 	}
 
 	server := &http.Server{

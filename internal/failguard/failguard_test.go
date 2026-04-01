@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"rho-aias/internal/config"
+	"rho-aias/internal/ebpfs"
 )
 
 // mockXDPRuleManager 是 XDPRuleManager 接口的 mock 实现
@@ -369,8 +370,8 @@ func TestHandleLine_AggressiveMode(t *testing.T) {
 	if ip != "106.54.24.131" {
 		t.Errorf("expected IP 106.54.24.131, got %s", ip)
 	}
-	if sourceMask != sourceMaskFailGuard {
-		t.Errorf("expected sourceMask %d, got %d", sourceMaskFailGuard, sourceMask)
+	if sourceMask != ebpfs.SourceMaskFailGuard {
+		t.Errorf("expected sourceMask %d, got %d", ebpfs.SourceMaskFailGuard, sourceMask)
 	}
 	if reason != "SSH brute force" {
 		t.Errorf("expected reason 'SSH brute force', got %s", reason)
@@ -545,7 +546,7 @@ func TestConcurrentHandleLine(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < opsPerGoroutine; j++ {
 				ip := fmt.Sprintf("10.%d.%d.1", id, j)
-				monitor.watcher.BanIP(ip, sourceMaskFailGuard, "concurrent", 3600)
+				monitor.watcher.BanIP(ip, ebpfs.SourceMaskFailGuard, "concurrent", 3600)
 			}
 		}(i)
 	}
