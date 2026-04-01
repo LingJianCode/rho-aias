@@ -47,13 +47,14 @@ type LogWatcher struct {
 	LogTag     string // 日志标签（如 "[WAF]"、"[FailGuard]"）
 	BanSource  string // 封禁来源名称（如 "waf"、"failguard"），用于数据库记录
 
-	xdp         XDPRuleManager
-	banStore    BanRecordStore
-	ctx         context.Context
-	cancel      context.CancelFunc
-	watcher     *fsnotify.Watcher
-	filePos     map[string]int64
-	offsetStore *OffsetStore
+	xdp          XDPRuleManager
+	banStore     BanRecordStore
+	ctx          context.Context
+	cancel       context.CancelFunc
+	watcher      *fsnotify.Watcher
+	filePos      map[string]int64
+	offsetStore  *OffsetStore
+	watchedFiles map[string]struct{} // 需要监听的目标文件路径列表
 
 	// LineHandler 由外部模块注入，负责解析日志行并决定是否封禁
 	lineHandler LineHandler
@@ -74,13 +75,14 @@ type LogWatcher struct {
 func NewLogWatcher(logTag, banSource string, xdp XDPRuleManager, ctx context.Context) *LogWatcher {
 	childCtx, cancel := context.WithCancel(ctx)
 	return &LogWatcher{
-		LogTag:    logTag,
-		BanSource: banSource,
-		xdp:       xdp,
-		ctx:       childCtx,
-		cancel:    cancel,
-		filePos:   make(map[string]int64),
-		bannedIPs: make(map[string]IPBanRecord),
+		LogTag:       logTag,
+		BanSource:    banSource,
+		xdp:          xdp,
+		ctx:          childCtx,
+		cancel:       cancel,
+		filePos:      make(map[string]int64),
+		watchedFiles: make(map[string]struct{}),
+		bannedIPs:    make(map[string]IPBanRecord),
 	}
 }
 
@@ -111,16 +113,20 @@ func (w *LogWatcher) Context() context.Context {
 
 // WatchLogFile 监听单个日志文件所在目录
 func (w *LogWatcher) WatchLogFile(filePath string) error {
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		logger.Warnf("[%s] Log file does not exist, will monitor for creation: %s", w.LogTag, filePath)
+	cleanPath := filepath.Clean(filePath)
+	if _, err := os.Stat(cleanPath); os.IsNotExist(err) {
+		logger.Warnf("[%s] Log file does not exist, will monitor for creation: %s", w.LogTag, cleanPath)
 	}
 
-	dirPath := filepath.Dir(filePath)
+	// 记录需要监听的目标文件
+	w.watchedFiles[cleanPath] = struct{}{}
+
+	dirPath := filepath.Dir(cleanPath)
 	if err := w.watcher.Add(dirPath); err != nil {
 		return fmt.Errorf("failed to watch directory %s: %w", dirPath, err)
 	}
 
-	logger.Infof("[%s] Watching log file: %s", w.LogTag, filePath)
+	logger.Infof("[%s] Watching log file: %s", w.LogTag, cleanPath)
 	return nil
 }
 
@@ -164,15 +170,11 @@ func (w *LogWatcher) Stop() {
 	logger.Infof("[%s] Log watcher stopped", w.LogTag)
 }
 
-// IsWatchedFile 检查文件路径是否在监听列表中
-func (w *LogWatcher) IsWatchedFile(filePath string, watchedPaths []string) bool {
+// isWatchedFile 检查文件路径是否是需要监听的目标文件
+func (w *LogWatcher) isWatchedFile(filePath string) bool {
 	cleanPath := filepath.Clean(filePath)
-	for _, p := range watchedPaths {
-		if cleanPath == filepath.Clean(p) {
-			return true
-		}
-	}
-	return false
+	_, ok := w.watchedFiles[cleanPath]
+	return ok
 }
 
 // monitorLoop 监控循环
@@ -189,8 +191,11 @@ func (w *LogWatcher) monitorLoop() {
 			}
 			if event.Op&fsnotify.Write == fsnotify.Write ||
 				event.Op&fsnotify.Create == fsnotify.Create {
-				if err := w.ReadLogFile(event.Name); err != nil {
-					logger.Errorf("[%s] Failed to read log file %s: %v", w.LogTag, event.Name, err)
+				// 只处理目标文件
+				if w.isWatchedFile(event.Name) {
+					if err := w.ReadLogFile(event.Name); err != nil {
+						logger.Errorf("[%s] Failed to read log file %s: %v", w.LogTag, event.Name, err)
+					}
 				}
 			}
 
@@ -205,6 +210,11 @@ func (w *LogWatcher) monitorLoop() {
 
 // ReadLogFile 读取日志文件的新内容（增量读取，处理日志轮转）
 func (w *LogWatcher) ReadLogFile(filePath string) error {
+	// 安全检查：只处理目标文件
+	if !w.isWatchedFile(filePath) {
+		return nil
+	}
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
