@@ -340,12 +340,12 @@ func main() {
 			CheckInterval:   cfg.AnomalyDetection.CheckInterval,
 			MinPackets:      cfg.AnomalyDetection.MinPackets,
 			CleanupInterval: cfg.AnomalyDetection.CleanupInterval,
-			BlockDuration:   cfg.AnomalyDetection.BlockDuration,
 			Baseline: anomaly.BaselineConfig{
 				MinSampleCount:  cfg.AnomalyDetection.Baseline.MinSampleCount,
 				SigmaMultiplier: cfg.AnomalyDetection.Baseline.SigmaMultiplier,
 				MinThreshold:    cfg.AnomalyDetection.Baseline.MinThreshold,
 				MaxAge:          cfg.AnomalyDetection.Baseline.MaxAge,
+				BlockDuration:   cfg.AnomalyDetection.Baseline.BlockDuration,
 			},
 			Attacks: anomaly.AttacksConfig{
 				SynFlood: anomaly.AttackConfig{

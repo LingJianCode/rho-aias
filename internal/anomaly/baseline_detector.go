@@ -26,6 +26,9 @@ func NewBaselineDetector(config BaselineConfig) *BaselineDetector {
 	if config.MaxAge == 0 {
 		config.MaxAge = 1800 // 默认 30 分钟
 	}
+	if config.BlockDuration == 0 {
+		config.BlockDuration = 60
+	}
 
 	return &BaselineDetector{
 		config: config,

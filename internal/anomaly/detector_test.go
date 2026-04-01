@@ -79,13 +79,13 @@ func newTestDetector(recorder *mockBlockRecorder) *Detector {
 		CheckInterval:    1,
 		MinPackets:       100,
 		CleanupInterval:  300,
-		BlockDuration:    2, // 2秒封禁，便于测试
 		SampleRate:       100,
 		Baseline: BaselineConfig{
 			MinSampleCount:  3,
 			SigmaMultiplier: 2.0,
 			MinThreshold:    10,
 			MaxAge:          60,
+			BlockDuration:   2, // 2秒封禁，便于测试
 		},
 		Attacks: AttacksConfig{
 			SynFlood: AttackConfig{
@@ -341,13 +341,13 @@ func TestDetector_BaselineAnomaly_EndToEnd(t *testing.T) {
 		CheckInterval:    1,
 		MinPackets:       10,
 		CleanupInterval:  300,
-		BlockDuration:    2,
 		SampleRate:       100,
 		Baseline: BaselineConfig{
 			MinSampleCount:  3,
 			SigmaMultiplier: 2.0,
 			MinThreshold:    10,
 			MaxAge:          60,
+			BlockDuration:   2,
 		},
 		Attacks: AttacksConfig{
 			SynFlood:  AttackConfig{Enabled: false},

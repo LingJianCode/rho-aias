@@ -59,9 +59,6 @@ func NewDetector(config AnomalyDetectionConfig, blockCallback BlockCallback, unb
 	if config.CleanupInterval == 0 {
 		config.CleanupInterval = 300
 	}
-	if config.BlockDuration == 0 {
-		config.BlockDuration = 60
-	}
 	if config.SampleRate == 0 {
 		config.SampleRate = 100
 	}
@@ -196,7 +193,7 @@ func (d *Detector) runDetection() {
 					AttackType:    AttackTypeBaselineAnomaly,
 					CurrentPPS:    stats.Window.CurrentPPS,
 					Threshold:     threshold,
-					BlockDuration: d.config.BlockDuration,
+					BlockDuration: d.config.Baseline.BlockDuration,
 					Timestamp:     time.Now(),
 				}
 				d.handleDetection(result)

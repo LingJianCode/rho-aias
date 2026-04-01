@@ -160,7 +160,6 @@ type AnomalyDetectionConfig struct {
 	CheckInterval   int             `yaml:"check_interval"`   // 检测间隔（秒）
 	MinPackets      int             `yaml:"min_packets"`      // 最小包数（少于此值不检测）
 	CleanupInterval int             `yaml:"cleanup_interval"` // 清理过期数据间隔（秒）
-	BlockDuration   int             `yaml:"block_duration"`   // 临时封禁时长（秒）
 	Ports           []int           `yaml:"ports"`            // 需要检测的端口列表（同时应用于 TCP/UDP，为空则检测所有端口）
 	Baseline        BaselineConfig  `yaml:"baseline"`         // 3σ 基线配置
 	Attacks         AttacksConfig   `yaml:"attacks"`          // 攻击类型配置
@@ -172,6 +171,7 @@ type BaselineConfig struct {
 	SigmaMultiplier float64 `yaml:"sigma_multiplier"`  // σ 倍数
 	MinThreshold    int     `yaml:"min_threshold"`     // 最小 PPS 阈值
 	MaxAge          int     `yaml:"max_age"`           // 基线最大年龄（秒）
+	BlockDuration   int     `yaml:"block_duration"`    // 封禁时长（秒）
 }
 
 // AttacksConfig 攻击类型配置
@@ -275,13 +275,13 @@ func applyDefaults(config *Config) {
 	setIfZero(&config.AnomalyDetection.CheckInterval, 1)
 	setIfZero(&config.AnomalyDetection.MinPackets, 100)
 	setIfZero(&config.AnomalyDetection.CleanupInterval, 300)
-	setIfZero(&config.AnomalyDetection.BlockDuration, 60)
 
 	// Baseline 默认值
 	setIfZero(&config.AnomalyDetection.Baseline.MinSampleCount, 10)
 	setIfZeroFloat(&config.AnomalyDetection.Baseline.SigmaMultiplier, 3.0)
 	setIfZero(&config.AnomalyDetection.Baseline.MinThreshold, 100)
 	setIfZero(&config.AnomalyDetection.Baseline.MaxAge, 1800)
+	setIfZero(&config.AnomalyDetection.Baseline.BlockDuration, 60)
 
 	// Attack 默认值
 	applyAttackDefaults(&config.AnomalyDetection.Attacks.SynFlood, 0.5, 60, 1000)

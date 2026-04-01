@@ -146,9 +146,6 @@ anomaly_detection:
   min_packets: 200                  # 全局最小包数门槛：单 IP 每秒 <200 包直接跳过攻击检测
   cleanup_interval: 300             # 清理不活跃 IP 统计的间隔（秒）
 
-  # 封禁配置
-  block_duration: 60                # 临时封禁时长（秒）
-
   # 端口过滤配置（仅对指定端口进行异常检测，同时应用于 TCP/UDP，为空则检测所有端口）
   ports:
     - 80
@@ -164,6 +161,7 @@ anomaly_detection:
     sigma_multiplier: 4.0           # σ 倍数，4σ 覆盖 99.993%，平衡灵敏度与误报
     min_threshold: 1000             # 最小 PPS 阈值，PPS <1000 的 IP 豁免基线检测
     max_age: 3600                   # 基线最大有效期（秒），过期自动重置以适应流量变化
+    block_duration: 60              # 基线异常封禁时长（秒）
 
   # 攻击类型封禁配置
   # 封禁条件 = 全局 min_packets 通过 + 类型 min_packets 通过 + ratio_threshold 通过
