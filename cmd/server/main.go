@@ -75,7 +75,7 @@ func main() {
 			result.CurrentVersion, result.RecommendedVersion)
 	}
 
-	logger.Infof("%s", fmt.Sprintln(cfg))
+	logger.Debugf("Loaded config: %+v", cfg)
 	// Initialize XDP (existing functionality)
 	xdp := ebpfs.NewXdp(cfg.Ebpf.InterfaceName)
 	defer xdp.Close()

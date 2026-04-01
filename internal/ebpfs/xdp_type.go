@@ -2,10 +2,13 @@ package ebpfs
 
 // BlockValue 黑名单规则值结构 - 支持来源追踪
 // 用于 eBPF maps 中存储规则及其来源信息
+//
+// 注意: Expiry 字段仅由用户态读写，内核侧 XDP 程序不检查过期时间。
+// 过期清理由用户态定时任务完成（删除 map entry 后内核自然不再匹配）。
 type BlockValue struct {
 	SourceMask uint32 // 来源位掩码 - 标记哪些来源拥有此规则
 	Priority   uint32 // 优先级 (保留字段，用于未来扩展)
-	Expiry     uint64 // 过期时间戳 (保留字段，用于 TTL 支持)
+	Expiry     uint64 // 过期时间戳 (Unix 秒，仅用户态读写，内核不检查)
 }
 
 // NewBlockValue 创建新的 BlockValue，仅设置来源掩码

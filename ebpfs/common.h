@@ -10,11 +10,15 @@
  * 用于 eBPF maps 中存储 IP 规则及其来源信息
  * 黑名单：source_mask 标记具体来源（ipsum/waf/manual 等）
  * 白名单：仅用 source_mask != 0 判断存在性，无来源语义
+ *
+ * 注意: expiry 字段仅由用户态读写，内核侧 XDP 程序不检查过期时间。
+ * 过期清理由用户态定时任务完成（删除 map entry 后内核自然不再匹配），
+ * 这是因为内核中获取 wall clock 时间戳开销较大，不适合在逐包热路径上使用。
  */
 struct block_value {
     __u32 source_mask;  /* 来源位掩码 - 标记哪些来源拥有此规则 */
     __u32 priority;     /* 优先级 (保留字段，用于未来扩展) */
-    __u64 expiry;       /* 过期时间戳 (保留字段，用于 TTL 支持) */
+    __u64 expiry;       /* 过期时间戳 (Unix 秒，仅用户态读写，内核不检查) */
 } __attribute__((packed));
 
 /* 来源位掩码定义

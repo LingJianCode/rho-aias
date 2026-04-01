@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"rho-aias/internal/logger"
 	"rho-aias/internal/models"
 
 	"gorm.io/gorm"
@@ -18,6 +19,7 @@ func init() {
 	chinaLocation, err = time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		// 如果加载失败，使用固定偏移量 UTC+8
+		logger.Warnf("Failed to load timezone Asia/Shanghai, using FixedZone CST+0800: %v", err)
 		chinaLocation = time.FixedZone("CST", 8*60*60)
 	}
 }
