@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"rho-aias/internal/config"
+	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/watcher"
 
 	"github.com/robfig/cron/v3"
 )
 
-// sourceMaskFailGuard FailGuard 来源掩码，与 ebpfs.SourceMaskFailGuard (0x80) 保持一致
-const sourceMaskFailGuard uint32 = 0x80
+
 
 // Monitor FailGuard 日志监控器
 type Monitor struct {
@@ -182,7 +182,7 @@ func (m *Monitor) handleLine(line string) (string, uint32, string, int, bool) {
 
 	// 5. 滑动窗口计数，达阈值则封禁
 	if m.addFailureAndCheck(ip) {
-		return ip, sourceMaskFailGuard, "SSH brute force", m.cfg.BanDuration, true
+		return ip, ebpfs.SourceMaskFailGuard, "SSH brute force", m.cfg.BanDuration, true
 	}
 
 	return "", 0, "", 0, false

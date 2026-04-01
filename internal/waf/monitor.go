@@ -10,17 +10,14 @@ import (
 	"strings"
 
 	"rho-aias/internal/config"
+	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/watcher"
 
 	"github.com/robfig/cron/v3"
 )
 
-// sourceMaskWAF WAF 来源掩码，与 ebpfs.SourceMaskWAF (0x08) 保持一致
-const sourceMaskWAF uint32 = 0x08
 
-// sourceMaskRateLimit 频率限制来源掩码，与 ebpfs.SourceMaskRateLimit (0x20) 保持一致
-const sourceMaskRateLimit uint32 = 0x20
 
 // WAFLogEntry Caddy + Coraza WAF 审计日志结构
 type WAFLogEntry struct {
@@ -140,14 +137,14 @@ func (m *Monitor) handleLine(line string) (string, uint32, string, int, bool) {
 		if ip == "" {
 			return "", 0, "", 0, false
 		}
-		return ip, sourceMaskWAF, fmt.Sprintf("banned from waf log"), m.cfg.BanDuration, true
+		return ip, ebpfs.SourceMaskWAF, fmt.Sprintf("banned from waf log"), m.cfg.BanDuration, true
 
 	case "rate_limit":
 		ip := m.extractRateLimitIP(line)
 		if ip == "" {
 			return "", 0, "", 0, false
 		}
-		return ip, sourceMaskRateLimit, fmt.Sprintf("banned from rate_limit log"), m.cfg.BanDuration, true
+		return ip, ebpfs.SourceMaskRateLimit, fmt.Sprintf("banned from rate_limit log"), m.cfg.BanDuration, true
 
 	default:
 		return "", 0, "", 0, false

@@ -317,7 +317,4 @@ func (s *BanRecordService) MarkAllActiveAsAutoUnblock() (int64, error) {
 	return result.RowsAffected, nil
 }
 
-// init 确保 BanRecord 表存在（用于 UPSERT 时需要唯一索引）
-func init() {
-	// GORM AutoMigrate 会处理表创建，包括 idx_ip_source_status 唯一索引
-}
+
