@@ -414,7 +414,7 @@ static __always_inline __u32 match_by_rule(struct packet_info *pi) {
  * @pkt_info: 输出参数，填充解析后的数据包信息
  * @data: 数据包起始指针
  * @data_end: 数据包结束指针
- * 返回值: 0=成功, 1=数据包异常(应丢弃), 2=非 IP 协议
+ * 返回值: 0=成功, 1=数据包异常(应丢弃), 2=非 IP 协议, -1=数据包过短(应放行)
  *
  * 处理流程:
  * 1. 解析以太网头
