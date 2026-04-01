@@ -295,6 +295,28 @@ func (x *Xdp) getRuleSourceFromPacket(srcIP [4]byte, ethProto uint16, mt MatchTy
 	return "unknown"
 }
 
+// lookupExistingValue 根据 IP 类型构造 key 并从对应的 eBPF map 中查找现有值
+// 调用者必须已持有 mapMu 锁
+func (x *Xdp) lookupExistingValue(iptype utils.IPType, rawBytes []byte) (BlockValue, bool) {
+	var blockValue BlockValue
+	switch iptype {
+	case utils.IPTypeIPv4:
+		var key [4]byte
+		copy(key[:], rawBytes)
+		if x.objects.BlockIpv4List.Lookup(&key, &blockValue) == nil {
+			return blockValue, true
+		}
+	case utils.IPTypeIPV4CIDR:
+		var key IPv4TrieKey
+		copy(key.Addr[:], rawBytes[4:])
+		key.PrefixLen = binary.LittleEndian.Uint32(rawBytes[:4])
+		if x.objects.BlockIpv4CidrTrie.Lookup(&key, &blockValue) == nil {
+			return blockValue, true
+		}
+	}
+	return BlockValue{}, false
+}
+
 // updateMap 更新内核 map - 支持来源掩码
 // iptype: IP 类型
 // value: 键值（字节数组）
@@ -332,31 +354,13 @@ func (x *Xdp) AddRule(value string) error {
 	logger.Debugf("[XDP] AddRule: bytes=%v, iptype=%v", bytes, iptype)
 
 	// 先读取现有值（如果存在），保留其他来源的位
-	var currentValue BlockValue
-	var exists bool
-	switch iptype {
-	case utils.IPTypeIPv4:
-		var key [4]byte
-		copy(key[:], bytes)
-		if x.objects.BlockIpv4List.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	case utils.IPTypeIPV4CIDR:
-		var key IPv4TrieKey
-		copy(key.Addr[:], bytes[4:])
-		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
-		if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	}
+	currentValue, exists := x.lookupExistingValue(iptype, bytes)
 
 	var blockValue BlockValue
 	if exists {
-		// 存在则合并掩码，保留 Priority 和 Expiry
 		newMask := currentValue.SourceMask | SourceMaskManual
 		blockValue = NewBlockValueWithPreserve(newMask, currentValue.Priority, currentValue.Expiry)
 	} else {
-		// 不存在则新建
 		blockValue = NewBlockValue(SourceMaskManual)
 	}
 
@@ -395,23 +399,7 @@ func (x *Xdp) AddRuleWithSource(value string, sourceMask uint32) error {
 	}
 
 	// 先读取现有值（如果存在）
-	var currentValue BlockValue
-	var exists bool
-	switch iptype {
-	case utils.IPTypeIPv4:
-		var key [4]byte
-		copy(key[:], bytes)
-		if x.objects.BlockIpv4List.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	case utils.IPTypeIPV4CIDR:
-		var key IPv4TrieKey
-		copy(key.Addr[:], bytes[4:])
-		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
-		if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	}
+	currentValue, exists := x.lookupExistingValue(iptype, bytes)
 
 	var blockValue BlockValue
 	if exists {
@@ -442,23 +430,7 @@ func (x *Xdp) AddRuleWithSourceAndExpiry(value string, sourceMask uint32, durati
 	}
 
 	// 先读取现有值（如果存在）
-	var currentValue BlockValue
-	var exists bool
-	switch iptype {
-	case utils.IPTypeIPv4:
-		var key [4]byte
-		copy(key[:], bytes)
-		if x.objects.BlockIpv4List.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	case utils.IPTypeIPV4CIDR:
-		var key IPv4TrieKey
-		copy(key.Addr[:], bytes[4:])
-		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
-		if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
-			exists = true
-		}
-	}
+	currentValue, exists := x.lookupExistingValue(iptype, bytes)
 
 	var blockValue BlockValue
 	if exists {
@@ -570,23 +542,7 @@ func (x *Xdp) BatchAddRules(values []string, sourceMask uint32) error {
 
 	for _, e := range entries {
 		// 先读取现有值（如果存在）
-		var currentValue BlockValue
-		var exists bool
-		switch e.iptype {
-		case utils.IPTypeIPv4:
-			var key [4]byte
-			copy(key[:], e.key)
-			if x.objects.BlockIpv4List.Lookup(&key, &currentValue) == nil {
-				exists = true
-			}
-		case utils.IPTypeIPV4CIDR:
-			var key IPv4TrieKey
-			copy(key.Addr[:], e.key[4:])
-			key.PrefixLen = binary.LittleEndian.Uint32(e.key[:4])
-			if x.objects.BlockIpv4CidrTrie.Lookup(&key, &currentValue) == nil {
-				exists = true
-			}
-		}
+		currentValue, exists := x.lookupExistingValue(e.iptype, e.key)
 
 		var blockValue BlockValue
 		if exists {
@@ -648,34 +604,14 @@ func (x *Xdp) UpdateRuleSourceMask(value string, removeMask uint32) (newMask uin
 	}
 
 	// 根据 IP 类型查询当前规则值
-	var currentMask uint32
-	var currentPriority uint32
-	var currentExpiry uint64
-	switch iptype {
-	case utils.IPTypeIPv4:
-		var key [4]byte
-		copy(key[:], bytes)
-		var blockValue BlockValue
-		if err := x.objects.BlockIpv4List.Lookup(&key, &blockValue); err != nil {
-			return 0, false, false, nil // 规则不存在
-		}
-		currentMask = blockValue.SourceMask
-		currentPriority = blockValue.Priority
-		currentExpiry = blockValue.Expiry
-	case utils.IPTypeIPV4CIDR:
-		var key IPv4TrieKey
-		copy(key.Addr[:], bytes[4:])
-		key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
-		var blockValue BlockValue
-		if err := x.objects.BlockIpv4CidrTrie.Lookup(&key, &blockValue); err != nil {
-			return 0, false, false, nil // 规则不存在
-		}
-		currentMask = blockValue.SourceMask
-		currentPriority = blockValue.Priority
-		currentExpiry = blockValue.Expiry
-	default:
-		return 0, false, false, fmt.Errorf("unsupported IP type: %v", iptype)
+	currentValue, exists := x.lookupExistingValue(iptype, bytes)
+	if !exists {
+		return 0, false, false, nil
 	}
+
+	currentMask := currentValue.SourceMask
+	currentPriority := currentValue.Priority
+	currentExpiry := currentValue.Expiry
 
 	// 计算新掩码: newMask = oldMask &^ removeMask
 	newMask = currentMask &^ removeMask
@@ -723,40 +659,15 @@ func (x *Xdp) BatchUpdateRuleSourceMask(values []string, removeMask uint32) ([]s
 		}
 
 		// 根据 IP 类型查询当前规则值
-		var currentMask uint32
-		var currentPriority uint32
-		var currentExpiry uint64
-		var exists bool
-		switch iptype {
-		case utils.IPTypeIPv4:
-			var key [4]byte
-			copy(key[:], bytes)
-			var blockValue BlockValue
-			if x.objects.BlockIpv4List.Lookup(&key, &blockValue) == nil {
-				exists = true
-				currentMask = blockValue.SourceMask
-				currentPriority = blockValue.Priority
-				currentExpiry = blockValue.Expiry
-			}
-		case utils.IPTypeIPV4CIDR:
-			var key IPv4TrieKey
-			copy(key.Addr[:], bytes[4:])
-			key.PrefixLen = binary.LittleEndian.Uint32(bytes[:4])
-			var blockValue BlockValue
-			if x.objects.BlockIpv4CidrTrie.Lookup(&key, &blockValue) == nil {
-				exists = true
-				currentMask = blockValue.SourceMask
-				currentPriority = blockValue.Priority
-				currentExpiry = blockValue.Expiry
-			}
-		default:
-			errs = append(errs, fmt.Errorf("unsupported IP type: %v for %s", iptype, value))
-			continue
-		}
+		currentValue, exists := x.lookupExistingValue(iptype, bytes)
 
 		if !exists {
 			continue
 		}
+
+		currentMask := currentValue.SourceMask
+		currentPriority := currentValue.Priority
+		currentExpiry := currentValue.Expiry
 
 		// 计算新掩码
 		newMask := currentMask &^ removeMask
