@@ -66,16 +66,7 @@ func (db *Database) AutoMigrateBusiness() error {
 		return err
 	}
 
-	// 删除旧的联合唯一索引（如果存在）
-	db.DB.Exec("DROP INDEX IF EXISTS idx_ip_source_status")
 
-	// 创建部分唯一索引：仅在 status='active' 时约束 ip+source 唯一
-	// 允许同一 IP+来源 存在多条非 active 状态的历史记录（expired, auto_unblock, manual_unblock）
-	db.DB.Exec(`
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_ip_source_active
-		ON ban_records(ip, source)
-		WHERE status = 'active'
-	`)
 
 	return nil
 }

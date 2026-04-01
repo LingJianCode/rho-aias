@@ -97,7 +97,7 @@ class RhoAiasProcess:
         config['anomaly_detection']['sample_rate'] = 1  # 100% 采样用于测试
         config['anomaly_detection']['check_interval'] = 1  # 1秒检测一次
         config['anomaly_detection']['min_packets'] = 10  # 降低最小包数阈值，适配测试环境
-        config['anomaly_detection']['block_duration'] = 60  # 60秒封禁
+
 
         # 配置各种攻击检测
         config['anomaly_detection']['attacks']['syn_flood']['enabled'] = True
@@ -125,6 +125,7 @@ class RhoAiasProcess:
         config['anomaly_detection']['baseline']['sigma_multiplier'] = 3.0
         config['anomaly_detection']['baseline']['min_threshold'] = 100
         config['anomaly_detection']['baseline']['max_age'] = 1800
+        config['anomaly_detection']['baseline']['block_duration'] = 60  # 60秒封禁
 
         # 禁用认证
         config['auth']['enabled'] = False

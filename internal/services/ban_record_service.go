@@ -8,7 +8,6 @@ import (
 	"rho-aias/internal/models"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // chinaLocation 中国时区 (UTC+8)
@@ -269,10 +268,17 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 }
 
 // UpsertActiveBan 插入或忽略：如果同一 IP+来源已存在 active 记录则跳过
-// 使用 ON CONFLICT DO NOTHING 避免重复写入，依赖 idx_ip_source_active 部分唯一索引
 func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration int) error {
+	var count int64
+	s.db.Model(&models.BanRecord{}).
+		Where("ip = ? AND source = ? AND status = ?", ip, source, models.BanStatusActive).
+		Count(&count)
+	if count > 0 {
+		return nil
+	}
+
 	now := time.Now()
-	record := &models.BanRecord{
+	return s.db.Create(&models.BanRecord{
 		IP:        ip,
 		Source:    source,
 		Reason:    reason,
@@ -280,12 +286,7 @@ func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration i
 		Status:    models.BanStatusActive,
 		CreatedAt: now,
 		ExpiresAt: now.Add(time.Duration(duration) * time.Second),
-	}
-
-	return s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "ip"}, {Name: "source"}},
-		DoNothing: true,
-	}).Create(record).Error
+	}).Error
 }
 
 // GetRecordByID 根据 ID 获取封禁记录
