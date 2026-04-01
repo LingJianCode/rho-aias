@@ -105,7 +105,7 @@ func (m *Monitor) handleLine(line string) (string, uint32, string, int, bool) {
 	if ip == "" {
 		return "", 0, "", 0, false
 	}
-	return ip, ebpfs.SourceMaskWAF, fmt.Sprintf("banned from waf log"), m.cfg.BanDuration, true
+	return ip, ebpfs.SourceMaskWAF, "banned from waf log", m.cfg.BanDuration, true
 }
 
 // extractIP 从 WAF 审计日志行中提取 IP

@@ -33,7 +33,6 @@ type Detector struct {
 	mu        sync.RWMutex
 	running   bool
 	done      chan struct{}
-	checkTick *time.Ticker
 
 	// Cron 定时任务
 	cron *cron.Cron

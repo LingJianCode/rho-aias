@@ -224,7 +224,7 @@ func TestBaselineDetector_ZeroVariance(t *testing.T) {
 	}
 
 	// value=101 应触发（101 > 100）
-	isAnomaly, threshold = detector.CheckAnomaly(baseline, 101)
+	isAnomaly, _ = detector.CheckAnomaly(baseline, 101)
 	if !isAnomaly {
 		t.Error("Expected anomaly for value slightly above mean with zero variance")
 	}

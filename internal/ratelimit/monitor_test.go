@@ -612,8 +612,10 @@ func TestReadLogFile_IncrementalReading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open for append: %v", err)
 	}
-	f.WriteString(`{"remote_ip":"5.6.7.8","msg":"rate limit exceeded"}
-`)
+	if _, err := f.WriteString(`{"remote_ip":"5.6.7.8","msg":"rate limit exceeded"}
+`); err != nil {
+		t.Fatalf("failed to write test log: %v", err)
+	}
 	f.Close()
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {

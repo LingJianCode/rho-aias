@@ -6,6 +6,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"rho-aias/internal/logger"
 )
 
 // BlockRecord 阻断记录
@@ -66,8 +68,7 @@ func (bl *BlockLog) AddRecord(record BlockRecord) {
 	// 异步写入文件（Write 是非阻塞的，可以安全地在锁内调用）
 	if bl.asyncWriter != nil {
 		if err := bl.asyncWriter.Write(record); err != nil {
-			// 异步写入失败不影响内存记录，仅记录日志
-			// 由于当前实现 Write 总是返回 nil，此处日志仅用于未来扩展
+			logger.Warnf("async write failed: %v", err)
 		}
 	}
 }

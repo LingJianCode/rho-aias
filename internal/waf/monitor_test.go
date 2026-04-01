@@ -640,8 +640,10 @@ func TestReadLogFile_IncrementalReading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open for append: %v", err)
 	}
-	f.WriteString(`{"transaction":{"client_ip":"5.6.7.8","is_interrupted":true}}
-`)
+	if _, err := f.WriteString(`{"transaction":{"client_ip":"5.6.7.8","is_interrupted":true}}
+`); err != nil {
+		t.Fatalf("failed to write test log: %v", err)
+	}
 	f.Close()
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {

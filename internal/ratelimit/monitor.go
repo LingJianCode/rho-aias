@@ -103,7 +103,7 @@ func (m *Monitor) handleLine(line string) (string, uint32, string, int, bool) {
 	if ip == "" {
 		return "", 0, "", 0, false
 	}
-	return ip, ebpfs.SourceMaskRateLimit, fmt.Sprintf("banned from rate_limit log"), m.cfg.BanDuration, true
+	return ip, ebpfs.SourceMaskRateLimit, "banned from rate_limit log", m.cfg.BanDuration, true
 }
 
 // extractIP 从 Rate limit 日志行中提取 IP

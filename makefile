@@ -2,7 +2,7 @@ APP := rho-aias
 GO ?= go
 BPF_GEN_DIR := ./internal/ebpfs
 
-.PHONY: all gen build run clean test coverage help
+.PHONY: all gen build run clean test lint coverage help
 
 all: gen build
 
@@ -28,6 +28,15 @@ test:
 	@echo "==> Testing"
 	$(GO) test -v ./...
 
+GOLANGCI_LINT := $(shell command -v golangci-lint 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/golangci-lint")
+
+lint:
+	@echo "==> Running go vet"
+	$(GO) vet ./...
+	@echo "==> Running golangci-lint"
+	@command -v golangci-lint >/dev/null 2>&1 || $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	$(GOLANGCI_LINT) run ./...
+
 help:
 	@echo "Targets:"
 	@echo "  make all       - 生成并编译"
@@ -36,4 +45,5 @@ help:
 	@echo "  make run       - 运行程序（需要 root）"
 	@echo "  make clean     - 清理构建产物"
 	@echo "  make test      - 运行单元测试"
+	@echo "  make lint      - 运行静态检查（go vet / staticcheck / golangci-lint）"
 

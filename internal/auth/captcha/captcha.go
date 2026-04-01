@@ -39,9 +39,11 @@ func NewMemoryStore() *MemoryStore {
 	store.cron = cron.New(cron.WithSeconds())
 
 	// 添加定时清理任务（每 1 分钟）
-	store.cron.AddFunc("@every 1m", func() {
+	if _, err := store.cron.AddFunc("@every 1m", func() {
 		store.cleanup()
-	})
+	}); err != nil {
+		return nil
+	}
 
 	// 启动定时任务
 	store.cron.Start()

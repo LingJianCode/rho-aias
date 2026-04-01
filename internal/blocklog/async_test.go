@@ -24,7 +24,11 @@ func TestAsyncWriter_Write(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create async writer: %v", err)
 	}
-	defer aw.Stop()
+	defer func() {
+		if err := aw.Stop(); err != nil {
+			t.Logf("aw.Stop() error: %v", err)
+		}
+	}()
 
 	// 写入测试记录
 	record := BlockRecord{
@@ -100,7 +104,9 @@ func TestAsyncWriter_Stop(t *testing.T) {
 			MatchType:  "ip4_exact",
 			PacketSize: 64,
 		}
-		aw.Write(record)
+		if err := aw.Write(record); err != nil {
+			t.Logf("aw.Write() error: %v", err)
+		}
 	}
 
 	// 等待一下让写入协程处理记录

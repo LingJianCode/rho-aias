@@ -950,7 +950,9 @@ func (x *Xdp) SetAnomalyPortFilter(enabled bool, ports []uint32) error {
 		// 清除之前设置的端口（ARRAY map 需要逐个清零）
 		for _, oldPort := range x.anomalyPorts {
 			zero := uint32(0)
-			x.objects.AnomalyPorts.Put(&oldPort, &zero)
+			if err := x.objects.AnomalyPorts.Put(&oldPort, &zero); err != nil {
+				logger.Warnf("failed to clear anomaly port: %v", err)
+			}
 		}
 		x.anomalyPorts = nil
 		logger.Info("[XDP] Anomaly port filter disabled")
@@ -960,7 +962,9 @@ func (x *Xdp) SetAnomalyPortFilter(enabled bool, ports []uint32) error {
 	// 清除旧端口，设置新端口（ARRAY map 需要显式清零旧条目）
 	for _, oldPort := range x.anomalyPorts {
 		zero := uint32(0)
-		x.objects.AnomalyPorts.Put(&oldPort, &zero)
+		if err := x.objects.AnomalyPorts.Put(&oldPort, &zero); err != nil {
+			logger.Warnf("failed to clear old anomaly port: %v", err)
+		}
 	}
 
 	// 添加端口到 ARRAY map

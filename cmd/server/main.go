@@ -113,8 +113,7 @@ func main() {
 	// Initialize Whitelist Cache and Load Whitelist Rules
 	var whitelistCache *manual.Cache
 	var whitelistHandle *handles.WhitelistHandle
-	var whitelistChecker *manual.WhitelistChecker
-	whitelistChecker = manual.NewWhitelistChecker()
+	whitelistChecker := manual.NewWhitelistChecker()
 	if cfg.Manual.Enabled {
 		whitelistCache = manual.NewCache(cfg.Manual.PersistenceDir)
 

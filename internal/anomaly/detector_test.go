@@ -72,22 +72,6 @@ func (r *mockBlockRecorder) waitForBlock(ip string, timeout time.Duration) bool 
 	return false
 }
 
-func (r *mockBlockRecorder) waitForUnblock(ip string, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		r.mu.Lock()
-		for _, u := range r.unblocked {
-			if u == ip {
-				r.mu.Unlock()
-				return true
-			}
-		}
-		r.mu.Unlock()
-		time.Sleep(50 * time.Millisecond)
-	}
-	return false
-}
-
 // newTestDetector 创建用于测试的 Detector（短间隔）
 func newTestDetector(recorder *mockBlockRecorder) *Detector {
 	config := AnomalyDetectionConfig{
@@ -157,7 +141,9 @@ func TestDetector_SynFlood_EndToEnd(t *testing.T) {
 	recorder := &mockBlockRecorder{}
 	detector := newTestDetector(recorder)
 
-	detector.Start()
+	if err := detector.Start(); err != nil {
+		t.Fatalf("detector.Start() failed: %v", err)
+	}
 	defer detector.Stop()
 
 	attackIP := "192.168.1.100"
@@ -196,7 +182,9 @@ func TestDetector_NormalTraffic_NoBlock(t *testing.T) {
 	recorder := &mockBlockRecorder{}
 	detector := newTestDetector(recorder)
 
-	detector.Start()
+	if err := detector.Start(); err != nil {
+		t.Fatalf("detector.Start() failed: %v", err)
+	}
 	defer detector.Stop()
 
 	normalIP := "10.0.0.5"
@@ -236,7 +224,9 @@ func TestDetector_UnblockAfterDuration(t *testing.T) {
 	recorder := &mockBlockRecorder{}
 	detector := newTestDetector(recorder)
 
-	detector.Start()
+	if err := detector.Start(); err != nil {
+		t.Fatalf("detector.Start() failed: %v", err)
+	}
 	defer detector.Stop()
 
 	attackIP := "172.16.0.1"
@@ -288,7 +278,9 @@ func TestDetector_Disabled_NoBlock(t *testing.T) {
 		},
 	}
 	detector := NewDetector(config, recorder.blockFn, recorder.unblockFn)
-	detector.Start()
+	if err := detector.Start(); err != nil {
+		t.Fatalf("detector.Start() failed: %v", err)
+	}
 	defer detector.Stop()
 
 	attackIP := "1.2.3.4"
@@ -309,7 +301,9 @@ func TestDetector_Stop_CleansTimers(t *testing.T) {
 	recorder := &mockBlockRecorder{}
 	detector := newTestDetector(recorder)
 
-	detector.Start()
+	if err := detector.Start(); err != nil {
+		t.Fatalf("detector.Start() failed: %v", err)
+	}
 
 	attackIP := "10.20.30.40"
 	stop := make(chan struct{})
@@ -363,7 +357,9 @@ func TestDetector_BaselineAnomaly_EndToEnd(t *testing.T) {
 		},
 	}
 	detector := NewDetector(config, recorder.blockFn, recorder.unblockFn)
-	detector.Start()
+	if err := detector.Start(); err != nil {
+		t.Fatalf("detector.Start() failed: %v", err)
+	}
 	defer detector.Stop()
 
 	attackIP := "10.0.0.99"

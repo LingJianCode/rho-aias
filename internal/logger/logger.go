@@ -96,9 +96,11 @@ func NewLogger(cfg *Config) (*Logger, error) {
 	l.cron = cron.New(cron.WithSeconds())
 
 	// 添加定时清理任务（每 1 小时）
-	l.cron.AddFunc("@every 1h", func() {
+	if _, err := l.cron.AddFunc("@every 1h", func() {
 		l.cleanupOldLogs()
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("failed to add cleanup cron job: %w", err)
+	}
 
 	// 启动定时任务
 	l.cron.Start()

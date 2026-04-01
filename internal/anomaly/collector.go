@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"rho-aias/internal/logger"
+
 	"github.com/robfig/cron/v3"
 )
 
@@ -47,9 +49,11 @@ func (c *Collector) Start() {
 		cleanInterval = "5m" // 默认 5 分钟
 	}
 	cleanExpr := "@every " + cleanInterval
-	c.cron.AddFunc(cleanExpr, func() {
+	if _, err := c.cron.AddFunc(cleanExpr, func() {
 		c.cleanup()
-	})
+	}); err != nil {
+		logger.Warnf("failed to add cleanup cron job: %v", err)
+	}
 
 	// 启动定时任务
 	c.cron.Start()
