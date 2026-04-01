@@ -532,6 +532,11 @@ func TestReadLogFile_FileRotation(t *testing.T) {
 
 	monitor.watcher.SetLineHandler(monitor.handleLine)
 
+	if err := monitor.watcher.Start(); err != nil {
+		t.Fatalf("failed to start watcher: %v", err)
+	}
+	defer monitor.watcher.Stop()
+
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "rate_limit.log")
 
@@ -542,6 +547,8 @@ func TestReadLogFile_FileRotation(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(initialContent), 0644); err != nil {
 		t.Fatalf("failed to write initial log: %v", err)
 	}
+
+	monitor.watcher.WatchLogFile(logPath)
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("readLogFile failed: %v", err)
@@ -592,6 +599,11 @@ func TestReadLogFile_IncrementalReading(t *testing.T) {
 
 	monitor.watcher.SetLineHandler(monitor.handleLine)
 
+	if err := monitor.watcher.Start(); err != nil {
+		t.Fatalf("failed to start watcher: %v", err)
+	}
+	defer monitor.watcher.Stop()
+
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -600,6 +612,8 @@ func TestReadLogFile_IncrementalReading(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(content1), 0644); err != nil {
 		t.Fatalf("failed to write: %v", err)
 	}
+
+	monitor.watcher.WatchLogFile(logPath)
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("first read failed: %v", err)
@@ -782,12 +796,19 @@ func TestRealLog_ReadLogFile(t *testing.T) {
 
 	monitor.watcher.SetLineHandler(monitor.handleLine)
 
+	if err := monitor.watcher.Start(); err != nil {
+		t.Fatalf("failed to start watcher: %v", err)
+	}
+	defer monitor.watcher.Stop()
+
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "rate_limit.log")
 
 	if err := os.WriteFile(logPath, []byte(realRateLimitLog+"\n"), 0644); err != nil {
 		t.Fatalf("failed to write log: %v", err)
 	}
+
+	monitor.watcher.WatchLogFile(logPath)
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("ReadLogFile failed: %v", err)

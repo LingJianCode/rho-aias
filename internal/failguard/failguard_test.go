@@ -413,6 +413,11 @@ func TestReadLogFile_RealSSHLog_Aggressive(t *testing.T) {
 
 	monitor.watcher.SetLineHandler(monitor.handleLine)
 
+	if err := monitor.watcher.Start(); err != nil {
+		t.Fatalf("failed to start watcher: %v", err)
+	}
+	defer monitor.watcher.Stop()
+
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "auth.log")
 
@@ -420,6 +425,8 @@ func TestReadLogFile_RealSSHLog_Aggressive(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(content), 0644); err != nil {
 		t.Fatalf("failed to write log: %v", err)
 	}
+
+	monitor.watcher.WatchLogFile(logPath)
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("ReadLogFile failed: %v", err)
@@ -454,6 +461,11 @@ func TestReadLogFile_RealSSHPreauth_Aggressive(t *testing.T) {
 
 	monitor.watcher.SetLineHandler(monitor.handleLine)
 
+	if err := monitor.watcher.Start(); err != nil {
+		t.Fatalf("failed to start watcher: %v", err)
+	}
+	defer monitor.watcher.Stop()
+
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "auth.log")
 
@@ -461,6 +473,8 @@ func TestReadLogFile_RealSSHPreauth_Aggressive(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(content), 0644); err != nil {
 		t.Fatalf("failed to write log: %v", err)
 	}
+
+	monitor.watcher.WatchLogFile(logPath)
 
 	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("ReadLogFile failed: %v", err)
