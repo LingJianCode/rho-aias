@@ -211,49 +211,26 @@ func NewConfig(fileName string) (*Config, error) {
 
 // applyDefaults 设置配置默认值
 func applyDefaults(config *Config) {
-	// 设置默认值
-	if config.Auth.TokenDuration == 0 {
-		config.Auth.TokenDuration = 1440 // 默认 24 小时
-	}
-	if config.Auth.CaptchaDuration == 0 {
-		config.Auth.CaptchaDuration = 5 // 默认 5 分钟
-	}
+	// Auth 默认值
+	setIfZero(&config.Auth.TokenDuration, 1440)   // 默认 24 小时
+	setIfZero(&config.Auth.CaptchaDuration, 5)     // 默认 5 分钟
+	setIfEmpty(&config.Auth.DatabasePath, "./data/auth.db")
 
 	// Business 默认值
-	if config.Business.DatabasePath == "" {
-		config.Business.DatabasePath = "./data/business.db"
-	}
+	setIfEmpty(&config.Business.DatabasePath, "./data/business.db")
 
 	// Log 默认值
-	if config.Log.Level == "" {
-		config.Log.Level = "info"
-	}
-	if config.Log.Format == "" {
-		config.Log.Format = "console"
-	}
-	if config.Log.OutputDir == "" {
-		config.Log.OutputDir = "./logs"
-	}
-	if config.Log.MaxAgeDays == 0 {
-		config.Log.MaxAgeDays = 30
-	}
-	if config.Log.RotationHours == 0 {
-		config.Log.RotationHours = 1
-	}
+	setIfEmpty(&config.Log.Level, "info")
+	setIfEmpty(&config.Log.Format, "console")
+	setIfEmpty(&config.Log.OutputDir, "./logs")
+	setIfZero(&config.Log.MaxAgeDays, 30)
+	setIfZero(&config.Log.RotationHours, 1)
 
 	// BlockLog 默认值
-	if config.BlockLog.LogDir == "" {
-		config.BlockLog.LogDir = "./logs/blocklog"
-	}
-	if config.BlockLog.MemoryCacheSize == 0 {
-		config.BlockLog.MemoryCacheSize = 10000
-	}
-	if config.BlockLog.BufferSize == 0 {
-		config.BlockLog.BufferSize = 1000
-	}
-	if config.BlockLog.FlushInterval == 0 {
-		config.BlockLog.FlushInterval = 5 // 默认 5 秒
-	}
+	setIfEmpty(&config.BlockLog.LogDir, "./logs/blocklog")
+	setIfZero(&config.BlockLog.MemoryCacheSize, 10000)
+	setIfZero(&config.BlockLog.BufferSize, 1000)
+	setIfZero(&config.BlockLog.FlushInterval, 5) // 默认 5 秒
 
 	// Intel sources 默认值
 	for name, source := range config.Intel.Sources {
@@ -268,100 +245,70 @@ func applyDefaults(config *Config) {
 	}
 
 	// FailGuard 默认值
-	if config.FailGuard.Mode == "" {
-		config.FailGuard.Mode = "normal"
-	}
-	if config.FailGuard.LogPath == "" {
-		config.FailGuard.LogPath = "/var/log/auth.log"
-	}
-	if config.FailGuard.MaxRetry == 0 {
-		config.FailGuard.MaxRetry = 5
-	}
-	if config.FailGuard.FindTime == 0 {
-		config.FailGuard.FindTime = 600 // 默认 10 分钟
-	}
-	if config.FailGuard.BanDuration == 0 {
-		config.FailGuard.BanDuration = 3600 // 默认 1 小时
-	}
+	setIfEmpty(&config.FailGuard.Mode, "normal")
+	setIfEmpty(&config.FailGuard.LogPath, "/var/log/auth.log")
+	setIfZero(&config.FailGuard.MaxRetry, 5)
+	setIfZero(&config.FailGuard.FindTime, 600)                          // 默认 10 分钟
+	setIfZero(&config.FailGuard.BanDuration, 3600)                      // 默认 1 小时
+	setIfEmpty(&config.FailGuard.OffsetStateFile, "./data/failguard_offset.json")
 
 	// WAF 默认值
-	if config.WAF.WAFLogPath == "" {
-		config.WAF.WAFLogPath = "/logs/waf_audit.log"
-	}
-	if config.WAF.RateLimitLogPath == "" {
-		config.WAF.RateLimitLogPath = "/logs/rate_limit.log"
-	}
-	if config.WAF.BanDuration == 0 {
-		config.WAF.BanDuration = 3600 // 默认 1 小时
-	}
+	setIfEmpty(&config.WAF.WAFLogPath, "/logs/waf_audit.log")
+	setIfEmpty(&config.WAF.RateLimitLogPath, "/logs/rate_limit.log")
+	setIfZero(&config.WAF.BanDuration, 3600)            // 默认 1 小时
+	setIfEmpty(&config.WAF.OffsetStateFile, "./data/waf_offset.json")
 
 	// AnomalyDetection 默认值
-	if config.AnomalyDetection.SampleRate == 0 {
-		config.AnomalyDetection.SampleRate = 100
-	}
-	if config.AnomalyDetection.CheckInterval == 0 {
-		config.AnomalyDetection.CheckInterval = 1
-	}
-	if config.AnomalyDetection.MinPackets == 0 {
-		config.AnomalyDetection.MinPackets = 100
-	}
-	if config.AnomalyDetection.CleanupInterval == 0 {
-		config.AnomalyDetection.CleanupInterval = 300
-	}
-	if config.AnomalyDetection.BlockDuration == 0 {
-		config.AnomalyDetection.BlockDuration = 60
-	}
+	setIfZero(&config.AnomalyDetection.SampleRate, 100)
+	setIfZero(&config.AnomalyDetection.CheckInterval, 1)
+	setIfZero(&config.AnomalyDetection.MinPackets, 100)
+	setIfZero(&config.AnomalyDetection.CleanupInterval, 300)
+	setIfZero(&config.AnomalyDetection.BlockDuration, 60)
 
 	// Baseline 默认值
-	if config.AnomalyDetection.Baseline.MinSampleCount == 0 {
-		config.AnomalyDetection.Baseline.MinSampleCount = 10
-	}
-	if config.AnomalyDetection.Baseline.SigmaMultiplier == 0 {
-		config.AnomalyDetection.Baseline.SigmaMultiplier = 3.0
-	}
-	if config.AnomalyDetection.Baseline.MinThreshold == 0 {
-		config.AnomalyDetection.Baseline.MinThreshold = 100
-	}
-	if config.AnomalyDetection.Baseline.MaxAge == 0 {
-		config.AnomalyDetection.Baseline.MaxAge = 1800
-	}
+	setIfZero(&config.AnomalyDetection.Baseline.MinSampleCount, 10)
+	setIfZeroFloat(&config.AnomalyDetection.Baseline.SigmaMultiplier, 3.0)
+	setIfZero(&config.AnomalyDetection.Baseline.MinThreshold, 100)
+	setIfZero(&config.AnomalyDetection.Baseline.MaxAge, 1800)
 
 	// Attack 默认值
-	if config.AnomalyDetection.Attacks.SynFlood.RatioThreshold == 0 {
-		config.AnomalyDetection.Attacks.SynFlood.RatioThreshold = 0.5
+	applyAttackDefaults(&config.AnomalyDetection.Attacks.SynFlood, 0.5, 60, 1000)
+	applyAttackDefaults(&config.AnomalyDetection.Attacks.UdpFlood, 0.8, 60, 1000)
+	applyAttackDefaults(&config.AnomalyDetection.Attacks.IcmpFlood, 0.5, 60, 100)
+	applyAttackDefaults(&config.AnomalyDetection.Attacks.AckFlood, 0.8, 60, 1000)
+}
+
+// setIfZero 当 *v 为零值时设为 def
+func setIfZero[T ~int | ~uint | ~uint32 | ~uint64 | ~int64](v *T, def T) {
+	if *v == 0 {
+		*v = def
 	}
-	if config.AnomalyDetection.Attacks.SynFlood.BlockDuration == 0 {
-		config.AnomalyDetection.Attacks.SynFlood.BlockDuration = 60
+}
+
+// setIfZeroFloat 当 *v 为零值时设为 def（float64 专用）
+func setIfZeroFloat(v *float64, def float64) {
+	if *v == 0 {
+		*v = def
 	}
-	if config.AnomalyDetection.Attacks.SynFlood.MinPackets == 0 {
-		config.AnomalyDetection.Attacks.SynFlood.MinPackets = 1000
+}
+
+// setIfEmpty 当 s 为空字符串时设为 def
+func setIfEmpty(s *string, def string) {
+	if *s == "" {
+		*s = def
 	}
-	if config.AnomalyDetection.Attacks.UdpFlood.RatioThreshold == 0 {
-		config.AnomalyDetection.Attacks.UdpFlood.RatioThreshold = 0.8
+}
+
+// applyAttackDefaults 设置单个攻击类型的默认值
+func applyAttackDefaults(a *AttackConfig, ratioThreshold float64, blockDuration, minPackets int) {
+	if a.RatioThreshold == 0 {
+		a.RatioThreshold = ratioThreshold
 	}
-	if config.AnomalyDetection.Attacks.UdpFlood.BlockDuration == 0 {
-		config.AnomalyDetection.Attacks.UdpFlood.BlockDuration = 60
+	if a.BlockDuration == 0 {
+		a.BlockDuration = blockDuration
 	}
-	if config.AnomalyDetection.Attacks.UdpFlood.MinPackets == 0 {
-		config.AnomalyDetection.Attacks.UdpFlood.MinPackets = 1000
-	}
-	if config.AnomalyDetection.Attacks.IcmpFlood.RatioThreshold == 0 {
-		config.AnomalyDetection.Attacks.IcmpFlood.RatioThreshold = 0.5
-	}
-	if config.AnomalyDetection.Attacks.IcmpFlood.BlockDuration == 0 {
-		config.AnomalyDetection.Attacks.IcmpFlood.BlockDuration = 60
-	}
-	if config.AnomalyDetection.Attacks.IcmpFlood.MinPackets == 0 {
-		config.AnomalyDetection.Attacks.IcmpFlood.MinPackets = 100
-	}
-	if config.AnomalyDetection.Attacks.AckFlood.RatioThreshold == 0 {
-		config.AnomalyDetection.Attacks.AckFlood.RatioThreshold = 0.8
-	}
-	if config.AnomalyDetection.Attacks.AckFlood.BlockDuration == 0 {
-		config.AnomalyDetection.Attacks.AckFlood.BlockDuration = 60
-	}
-	if config.AnomalyDetection.Attacks.AckFlood.MinPackets == 0 {
-		config.AnomalyDetection.Attacks.AckFlood.MinPackets = 1000
+	if a.MinPackets == 0 {
+		a.MinPackets = minPackets
 	}
 }
 

@@ -179,22 +179,14 @@ func main() {
 	// Initialize databases
 	// Auth database (for User, APIKey, AuditLog)
 	var authDB *database.Database
-	authDBPath := cfg.Auth.DatabasePath
-	if authDBPath == "" {
-		authDBPath = "./data/auth.db"
-	}
-	authDB, err = database.NewDatabase(authDBPath, cfg.Log.Level == "debug")
+	authDB, err = database.NewDatabase(cfg.Auth.DatabasePath, cfg.Log.Level == "debug")
 	if err != nil {
 		logger.Warnf("[Main] Failed to initialize auth database: %v", err)
 	}
 
 	// Business database (for BanRecord, SourceStatusRecord)
 	var bizDB *database.Database
-	bizDBPath := cfg.Business.DatabasePath
-	if bizDBPath == "" {
-		bizDBPath = "./data/business.db"
-	}
-	bizDB, err = database.NewDatabase(bizDBPath, cfg.Log.Level == "debug")
+	bizDB, err = database.NewDatabase(cfg.Business.DatabasePath, cfg.Log.Level == "debug")
 	if err != nil {
 		logger.Warnf("[Main] Failed to initialize business database: %v (status recording will be disabled)", err)
 	}
@@ -286,11 +278,7 @@ func main() {
 	var wafMonitor *waf.Monitor
 	if cfg.WAF.Enabled {
 		wafMonitor = waf.NewMonitor(&cfg.WAF, xdp, ctx)
-		wafOffsetFile := cfg.WAF.OffsetStateFile
-		if wafOffsetFile == "" {
-			wafOffsetFile = "./data/waf_offset.json"
-		}
-		wafMonitor.SetOffsetStore(watcher.NewOffsetStore(wafOffsetFile))
+		wafMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.WAF.OffsetStateFile))
 		wafMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
 		if bizDB != nil {
 			banRecordService := services.NewBanRecordService(bizDB.DB)
@@ -308,11 +296,7 @@ func main() {
 	var failguardMonitor *failguard.Monitor
 	if cfg.FailGuard.Enabled {
 		failguardMonitor = failguard.NewMonitor(&cfg.FailGuard, xdp, ctx)
-		failguardOffsetFile := cfg.FailGuard.OffsetStateFile
-		if failguardOffsetFile == "" {
-			failguardOffsetFile = "./data/failguard_offset.json"
-		}
-		failguardMonitor.SetOffsetStore(watcher.NewOffsetStore(failguardOffsetFile))
+		failguardMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.FailGuard.OffsetStateFile))
 		failguardMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
 		if bizDB != nil {
 			banRecordService := services.NewBanRecordService(bizDB.DB)
