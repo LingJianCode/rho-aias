@@ -245,8 +245,8 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 	s.db.Model(&models.BanRecord{}).Select("status, count(*) as count").Group("status").Find(&byStatus)
 	for _, item := range byStatus {
 		stats.ByStatus[item.Status] = item.Count
-		stats.Active = stats.ByStatus["active"]
 	}
+	stats.Active = stats.ByStatus["active"]
 
 	// Top 封禁 IP
 	var topIPs []TopIPStat
