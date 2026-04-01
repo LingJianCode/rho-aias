@@ -269,7 +269,7 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 }
 
 // UpsertActiveBan 插入或忽略：如果同一 IP+来源已存在 active 记录则跳过
-// 使用 ON CONFLICT DO NOTHING 避免重复写入，需要 idx_ip_source_status 唯一索引
+// 使用 ON CONFLICT DO NOTHING 避免重复写入，依赖 idx_ip_source_active 部分唯一索引
 func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration int) error {
 	now := time.Now()
 	record := &models.BanRecord{
@@ -283,7 +283,7 @@ func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration i
 	}
 
 	return s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "ip"}, {Name: "source"}, {Name: "status"}},
+		Columns:   []clause.Column{{Name: "ip"}, {Name: "source"}},
 		DoNothing: true,
 	}).Create(record).Error
 }

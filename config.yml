@@ -98,14 +98,14 @@ blocklog:
 waf:
   enabled: true                     # 是否启用 WAF 日志监控
   waf_log_path: /caddy-logs/waf_audit.log      # WAF 审计日志路径（Caddy + Coraza）
-  ban_duration: 3600                # 封禁时长（秒，默认1小时）
+  ban_duration: 60                # 封禁时长（秒，默认1小时）
   offset_state_file: ./data/waf_offset.json    # 偏移量持久化文件路径
 
 # Rate Limit 日志监控配置
 rate_limit:
   enabled: true                     # 是否启用 Rate Limit 日志监控
   log_path: /caddy-logs/rate_limit.log  # Rate Limit 日志路径
-  ban_duration: 3600                # 封禁时长（秒，默认1小时）
+  ban_duration: 60                # 封禁时长（秒，默认1小时）
   offset_state_file: ./data/ratelimit_offset.json    # 偏移量持久化文件路径
 
 # SSH 防爆破配置（参考 fail2ban 核心功能）
@@ -128,7 +128,7 @@ failguard:
     # - "10.0.0.0/8"
   max_retry: 5                      # 触发封禁的失败次数阈值
   find_time: 600                    # 滑动窗口时长（秒，默认10分钟）
-  ban_duration: 3600                # 封禁时长（秒，默认1小时）
+  ban_duration: 60                # 封禁时长（秒，默认1小时）
 
 # 异常流量检测系统配置
 # 检测流程：每个 check_interval 对每个 IP 依次执行：
