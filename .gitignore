@@ -19,3 +19,4 @@ __pycache__
 *.out
 caddy/.config
 caddy/data
+caddy/.local

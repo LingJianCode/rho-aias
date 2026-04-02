@@ -23,7 +23,7 @@ services:
     volumes:
       - ./caddy/config:/etc/caddy:ro
       - ./caddy/.config:/root/.config
-      - ./caddy/data:/root/.local/share/caddy
+      - ./caddy/.local:/root/.local
       - ./logs/caddy:/logs
 
   rho-aias:
