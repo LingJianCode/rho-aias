@@ -6,7 +6,7 @@
 docker run --rm \
   --name caddy \
   -p 8080:8080 \
-  -v $(pwd)/Caddyfile:/etc/caddy/Caddyfile \
+  -v $(pwd)/config:/etc/caddy \
   -v $(pwd)/logs:/logs \
   my-caddy:001
 ```
