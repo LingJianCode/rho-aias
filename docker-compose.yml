@@ -21,9 +21,9 @@ services:
       - /tmp
 
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy/config:/root/.config
-      - ./caddy/data:/root/.local/share/caddy
+      - ./caddy:/etc/caddy:ro
+      - ./caddy_run/.config:/root/.config
+      - ./caddy_run/data:/root/.local/share/caddy
       - ./logs/caddy:/logs
 
   rho-aias:

@@ -18,3 +18,5 @@ logs/
 __pycache__
 *.out
 caddy/config
+
+caddy_run
