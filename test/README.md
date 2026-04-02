@@ -17,50 +17,55 @@
 
 ```bash
 # 运行所有测试
-sudo ./test/run_tests.sh
+./test/run_tests.sh
 
 # 仅运行环境测试（验证 network namespace 功能，不需要编译 rho-aias）
-sudo ./test/run_tests.sh --env-only
+./test/run_tests.sh --env-only
 
 # 运行特定测试
-sudo ./test/run_tests.sh -t TestXDPIpBlocking.test_01_ipv4_exact_block
+./test/run_tests.sh -t TestXDPIpBlocking.test_01_ipv4_exact_block
 
 # 详细输出模式
-sudo ./test/run_tests.sh -v
+./test/run_tests.sh -v
 ```
 
 ### API Key 认证测试
 
 ```bash
 # 使用 API Key 认证运行测试（使用默认测试 Key）
-sudo ./test/run_tests.sh --use-api-key
+./test/run_tests.sh --use-api-key
 
 # 使用指定的 API Key
-sudo ./test/run_tests.sh --use-api-key --api-key sk_live_your-key-here
+./test/run_tests.sh --use-api-key --api-key sk_live_your-key-here
 
 # 使用环境变量中的 API Key
 export TEST_API_KEY="sk_live_your-key-here"
-sudo ./test/run_tests.sh --use-api-key
+./test/run_tests.sh --use-api-key
 
 # 运行特定的 API Key 认证测试
-sudo ./test/run_tests.sh --use-api-key -t TestAPIKeyAuth.test_01_api_key_auth
+./test/run_tests.sh --use-api-key -t TestAPIKeyAuth.test_01_api_key_auth
 ```
 
 ### DDoS 异常流量检测测试
 
 ```bash
 # 运行所有 DDoS 检测测试
-sudo ./test/run_tests.sh --ddos
+./test/run_tests.sh --ddos
 
 # 仅运行环境测试（验证 network namespace 功能）
-sudo ./test/run_tests.sh --ddos --env-only
+./test/run_tests.sh --ddos --env-only
 
 # 运行特定 DDoS 测试
-sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_01_tcp_syn_flood
-sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_02_udp_flood
-sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_03_icmp_flood
-sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_04_ack_flood
-sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_05_control_without_detection
+./test/run_tests.sh --ddos --test TestDDoSDetection.test_01_tcp_syn_flood
+./test/run_tests.sh --ddos --test TestDDoSDetection.test_02_udp_flood
+./test/run_tests.sh --ddos --test TestDDoSDetection.test_03_icmp_flood
+./test/run_tests.sh --ddos --test TestDDoSDetection.test_04_ack_flood
+./test/run_tests.sh --ddos --test TestDDoSDetection.test_05_control_without_detection
+```
+### 日志监控集成测试
+
+```bash
+./test/run_tests.sh --log-ban
 ```
 
 **注意事项：**
