@@ -51,7 +51,7 @@
                                 path_regexp .*
                         }
                         key {remote_host} # 关键：按客户端 IP (remote_host) 进行计数
-                        events 500 # 阈值：允许 50 次请求
+                        events 500 # 阈值：允许 500 次请求
                         window 10s # 时间窗口：在 10 秒内
                 }
 
