@@ -37,7 +37,7 @@ import (
 
 func main() {
 	// Parse command-line flags
-	configPath := flag.String("config", "config.yml", "Path to configuration file")
+	configPath := flag.String("config", "config/config.yml", "Path to configuration file")
 	flag.Parse()
 
 	// Create main context for managing goroutine lifecycles

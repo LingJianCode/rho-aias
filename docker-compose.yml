@@ -41,7 +41,7 @@ services:
       - CAP_NET_RAW
     network_mode: host
     volumes:
-      - ./config.yml:/app/config/config.yml:ro
+      - ./config:/app/config:ro
       # 必须要挂载目录，否则inotify无法监听文件变化
       - ./logs/rho-aias:/app/logs
       - ./data:/app/data
