@@ -21,9 +21,9 @@ services:
       - /tmp
 
     volumes:
-      - ./caddy:/etc/caddy:ro
-      - ./caddy_run/.config:/root/.config
-      - ./caddy_run/data:/root/.local/share/caddy
+      - ./caddy/config:/etc/caddy:ro
+      - ./caddy/.config:/root/.config
+      - ./caddy/data:/root/.local/share/caddy
       - ./logs/caddy:/logs
 
   rho-aias:
@@ -42,11 +42,11 @@ services:
     network_mode: host
     volumes:
       - ./config:/app/config:ro
-      # 必须要挂载目录，否则inotify无法监听文件变化
       - ./logs/rho-aias:/app/logs
       - ./data:/app/data
-      - ./logs/caddy:/caddy-logs:ro
       # 必须要挂载目录，否则inotify无法监听文件变化
+      # 挂载监听文件目录
+      - ./logs/caddy:/caddy-logs:ro
       - /var/log:/var/log:ro
     command: ["--config", "/app/config/config.yml"]
     restart: unless-stopped
