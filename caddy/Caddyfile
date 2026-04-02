@@ -69,23 +69,31 @@
                 Include @coraza.conf-recommended
                 Include @crs-setup.conf.example
                 Include @owasp_crs/*.conf
+                
                 SecDefaultAction "phase:3,log,auditlog,pass"
                 SecDefaultAction "phase:4,log,auditlog,pass"
                 SecDefaultAction "phase:5,log,auditlog,pass"
                 SecRuleEngine On
-                #SecDebugLog /logs/waf_debug.log
-                #SecDebugLogLevel 9
-                SecRule REQUEST_HEADERS:User-Agent "@rx (?i)(sqlmap|nmap|masscan|nessus|openvas|hydra|medusa|burp|python-requests|scrapy)" "id:1001,phase:1,deny,status:403,msg:'Blocked known scanner/bot User-Agent'"
-                SecRule REQUEST_URI "@rx (?i)(\.git|\.env|\.svn|\.htaccess|phpinfo|phpmyadmin|wp-config)" "id:1002,phase:1,deny,status:403,msg:'Sensitive path access blocked'"
-                SecRule REQUEST_URI "@streq /admin" "id:101,phase:1,t:lowercase,deny,status:403"
-                SecRule REQUEST_BODY "@rx maliciouspayload" "id:102,phase:2,t:lowercase,deny,status:403"
-                SecRule RESPONSE_STATUS "@rx 406" "id:103,phase:3,t:lowercase,deny,status:403"
-                SecResponseBodyAccess On
-                SecResponseBodyMimeType application/json
-                SecRule RESPONSE_BODY "@contains responsebodycode" "id:104,phase:4,t:lowercase,deny,status:403"
-                SecAuditEngine On
+
+                # --- 自定义规则 ---
+                # 1. 强化扫描器拦截 (增加一些现代常见扫描器关键字)
+                SecRule REQUEST_HEADERS:User-Agent "@rx (?i)(sqlmap|nmap|masscan|nessus|openvas|hydra|medusa|burp|python-requests|scrapy|dirbuster|gobuster)" \
+                "id:1001,phase:1,deny,status:403,msg:'Blocked known scanner/bot User-Agent'"
+
+                # 2. 敏感路径 (加上边界匹配)
+                SecRule REQUEST_URI "@rx (?i)(\.git|\.env|\.svn|\.htaccess|phpinfo|phpmyadmin|wp-config)" \
+                "id:1002,phase:1,deny,status:403,msg:'Sensitive path access blocked'"
+
+                # 3. 响应状态码掩盖/拦截(如果后端服务器尝试返回 406 Not Acceptable 状态码，WAF 会将其拦截，强制改为返回 403 Forbidden)
+                SecRule RESPONSE_STATUS "@rx 406" "id:103,phase:3,t:none,deny,status:403"
+
+                # --- 日志配置 ---
+                SecAuditEngine RelevantOnly
                 SecAuditLog /logs/waf_audit.log
                 SecAuditLogFormat json
+
+                #SecDebugLog /logs/waf_debug.log
+                #SecDebugLogLevel 9
                 `
         }
 
