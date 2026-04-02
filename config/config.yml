@@ -33,7 +33,7 @@ intel:
       url: http://localhost:8008/drop.txt
       format: spamhaus
 geo_blocking:
-  enabled: true 
+  enabled: false 
   auto_refresh_on_start: true  # 启动时自动刷新
   mode: whitelist  # whitelist 或 blacklist
   allowed_countries:
