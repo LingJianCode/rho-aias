@@ -15,7 +15,9 @@
 - **RESTful API**：完整的管理接口（JWT 认证 + RBAC 权限控制）
 - **持久化存储**：规则自动落盘，支持离线启动
 
-## 前置条件
+## 快速开始
+
+### 系统要求
 
 | 要求 | 说明 |
 |------|------|
@@ -26,71 +28,57 @@
 
 > ⚠️ 本项目依赖 eBPF XDP 技术，**仅支持 Linux 系统**，不支持 macOS / Windows。
 
-## 使用方法
+### WAF IP 封禁清理机制
 
-### 方式一：使用预构建镜像（推荐）
+WAF 模块通过监控 Caddy + Coraza WAF 日志和 Rate Limit 日志，自动触发 IP 封禁。封禁的完整生命周期如下：
 
-1. **克隆项目**
-
-```bash
-git clone
-cd rho-aias
+```
+日志触发 → banIP() 添加 XDP 封禁规则 → 封禁记录写入内存（带过期时间）
+                                                    ↓
+                                        cleanupExpiredBans() 每隔 5 分钟扫描
+                                                    ↓
+                                        过期 IP 移除 XDP 规则 + 清除内存记录
 ```
 
-2. **修改网卡名称**
+> ⚠️ **重要：清理间隔为固定 5 分钟**
 
-编辑 `config/config.yml`，将 `interface_name` 修改为你的实际网卡名称：
+`cleanupExpiredBans()` 使用硬编码的 **5 分钟清理间隔**。当封禁到期后，XDP 规则不会立即移除，而是等待下一个清理周期才执行移除。
 
-```yaml
-ebpf:
-  interface_name: ens33   # ← 改为实际网卡名，如 eth0、enp0s3 等
-```
+这意味着实际封禁时长 = `BanDuration` + 最多 5 分钟的清理延迟。
 
-3. **启动服务**
+**配置建议：**
+
+| BanDuration | 实际封禁时长范围 | 建议 |
+|-------------|------------------|------|
+| 30s | 30s ~ 5m30s | ❌ 不推荐，XDP 规则滞留过久 |
+| 60s | 60s ~ 6m | ⚠️ 清理延迟占比过大 |
+| 300s（5 分钟） | 5m ~ 10m | ✅ 可接受 |
+| 600s（10 分钟） | 10m ~ 15m | ✅ 推荐 |
+| 3600s（1 小时，默认） | 1h ~ 1h5m | ✅ 推荐 |
+
+**最佳实践：** 建议将 `ban_duration` 设置为 **300 秒（5 分钟）或更长**，使清理延迟在整体封禁时长中的占比合理。
+
+### 使用预构建镜像部署
+
+> 克隆代码后直接在项目目录下执行
 
 ```bash
+# 直接启动（拉取预构建镜像）
 docker compose up -d
+
+# 查看日志
+docker compose logs -f
 ```
 
-4. **验证**
+### 从源码构建部署
 
 ```bash
-# 查看 rho-aias 服务日志
-docker compose logs -f rho-aias
-
-# 访问 Web 服务测试（Caddy 默认监听 80 端口）
-curl localhost
-curl localhost/.svn    # 应返回 403（WAF 规则生效）
-```
-
-### 方式二：从源码构建
-
-```bash
-git clone
-cd rho-aias
-
-# 同样需要先修改 config/config.yml 中的网卡名称
-
+# 从源码构建并启动
 docker compose -f docker-compose-build-run.yml up -d --build
+
+# 查看日志
 docker compose -f docker-compose-build-run.yml logs -f
 ```
-
-## 配置说明
-
-主要配置文件为 [`config/config.yml`](config/config.yml)，常用项：
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `server.port` | API 服务端口 | 8081 |
-| `ebpf.interface_name` | 监听的网卡名称 | ens33 |
-| `intel.sources.*` | 威胁情报源开关及更新计划 | 已启用 |
-| `geo_blocking.enabled` | 地域封禁开关 | false |
-| `waf.enabled` | WAF 联动封禁开关 | true |
-| `failguard.enabled` | SSH 防爆破开关 | true |
-| `anomaly_detection.enabled` | 异常流量检测开关 | true |
-| `auth.api_keys` | API Key 认证配置 | 已预设 |
-
-详细配置说明见 `config/config.yml` 内联注释。
 
 ## 安全说明
 
