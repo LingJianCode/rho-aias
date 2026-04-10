@@ -347,6 +347,18 @@ static __always_inline int check_whitelist(struct packet_info *pi) {
 /* 检查数据包是否匹配地域封禁规则
  * @pi: 包含已解析数据包信息的结构体
  * 返回值: 1=通过, 0=阻断
+ *
+ * TCP 连接状态感知:
+ * - 只对纯 SYN 包（新建连接）做地域检查
+ * - 对已建立连接的响应包（SYN-ACK/ACK/PSH 等）直接放行
+ * - 这样本机主动向国外服务器发起的请求，其响应包不会被误拦截
+ *
+ * 原理:
+ * - 外部主动连入: 第一个包是纯 SYN → 做地域检查
+ * - 本机主动连出: 本机发 SYN(egress 不可见), 服务器回 SYN-ACK(含 ACK 位) → 放行
+ * - 后续数据包: 含 ACK 位 → 放行
+ *
+ * 注意: 此机制仅对 TCP 有效，UDP/ICMP 仍按原逻辑处理
  */
 static __always_inline int check_geo_blocking(struct packet_info *pi) {
     __u32 key = 0;
@@ -358,6 +370,16 @@ static __always_inline int check_geo_blocking(struct packet_info *pi) {
 
     // Only process IPv4 packets
     if (pi->eth_proto == ETH_P_IP) {
+        // TCP 连接状态感知: 非纯 SYN 包放行（已建立连接的响应包）
+        // 纯 SYN = SYN=1 && ACK=0: 新建连接请求，需要做地域检查
+        // SYN-ACK = SYN=1 && ACK=1: 服务器响应本机连接，放行
+        // ACK/PSH-ACK 等: 已建立连接的数据传输，放行
+        if (pi->ip_protocol == IPPROTO_TCP) {
+            if (!(pi->tcp_flags & TCP_FLAG_SYN) || (pi->tcp_flags & TCP_FLAG_ACK)) {
+                return 1;  // 非新建连接，放行
+            }
+        }
+
         // Check IPv4 against whitelist
         struct ipv4_trie_key v4_key = {
             .prefixlen = DEFAULT_IPV4_PREFIX,
