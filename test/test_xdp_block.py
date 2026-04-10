@@ -82,7 +82,7 @@ class RhoAiasProcess:
 
         # 创建临时配置目录
         os.makedirs(self.config_dir, exist_ok=True)
-        config_file = os.path.join(self.config_dir, "config.yml")
+        config_file = os.path.join(self.config_dir, "config/config.yml")
 
         # 创建日志目录
         os.makedirs(self.log_dir, exist_ok=True)

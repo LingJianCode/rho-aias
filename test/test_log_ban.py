@@ -175,7 +175,7 @@ class RhoAiasProcess:
         os.makedirs(self.rho_log_dir, exist_ok=True)
         os.makedirs(TEST_LOG_DIR, exist_ok=True)
 
-        config_file = os.path.join(self.config_dir, "config.yml")
+        config_file = os.path.join(self.config_dir, "config/config.yml")
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         self.log_path = os.path.join(self.rho_log_dir, f"rho-aias_logban_{timestamp}.log")
