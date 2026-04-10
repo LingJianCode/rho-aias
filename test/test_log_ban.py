@@ -175,7 +175,7 @@ class RhoAiasProcess:
         os.makedirs(self.rho_log_dir, exist_ok=True)
         os.makedirs(TEST_LOG_DIR, exist_ok=True)
 
-        config_file = os.path.join(self.config_dir, "config/config.yml")
+        config_file = os.path.join(self.config_dir, "config.yml")
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         self.log_path = os.path.join(self.rho_log_dir, f"rho-aias_logban_{timestamp}.log")
@@ -400,7 +400,7 @@ class LogBanTestBase(unittest.TestCase):
     def setUpClass(cls):
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-        cls.default_config_path = os.path.join(cls.project_root, "config.yml")
+        cls.default_config_path = os.path.join(cls.project_root, "config/config.yml")
         cls.api_port = 18081
         cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}")
 

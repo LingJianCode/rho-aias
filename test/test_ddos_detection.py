@@ -65,7 +65,7 @@ class RhoAiasProcess:
 
         # 创建临时配置目录
         os.makedirs(self.config_dir, exist_ok=True)
-        config_file = os.path.join(self.config_dir, "config/config.yml")
+        config_file = os.path.join(self.config_dir, "config.yml")
 
         # 创建日志目录
         os.makedirs(self.log_dir, exist_ok=True)
@@ -339,7 +339,7 @@ class TestDDoSDetection(unittest.TestCase):
 
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-        cls.default_config_path = os.path.join(cls.project_root, "config.yml")
+        cls.default_config_path = os.path.join(cls.project_root, "config/config.yml")
         cls.api_port = 18080
         cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}")
 
