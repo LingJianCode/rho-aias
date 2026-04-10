@@ -1,8 +1,11 @@
 package geoblocking
 
 import (
+	"encoding/gob"
 	"errors"
 	"time"
+
+	"rho-aias/internal/source"
 )
 
 // SourceID GeoIP 数据源标识符
@@ -51,16 +54,17 @@ type Status struct {
 	Sources          map[SourceID]SourceStatus // 各数据源状态
 }
 
-// SourceStatus 单个 GeoIP 数据源的状态
-type SourceStatus struct {
-	Enabled    bool      // 是否启用
-	LastUpdate time.Time // 最后更新时间
-	Success    bool      // 最后一次更新是否成功
-	RuleCount  int       // 该数据源的规则数量
-	Error      string    // 错误信息
-}
+// SourceStatus 单个 GeoIP 数据源的状态（复用公共类型）
+type SourceStatus = source.SourceStatus
 
 var ErrGeoIPCacheNotFound = errors.New("geoip cache not found")
+
+// 初始化 gob 编码器，注册自定义类型
+func init() {
+	gob.Register(SourceID(""))
+	gob.Register(GeoIPData{})
+	gob.Register(CacheData{})
+}
 
 // NewCacheData 创建新的缓存数据
 func NewCacheData() *CacheData {

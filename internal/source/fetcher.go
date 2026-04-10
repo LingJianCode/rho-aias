@@ -1,5 +1,5 @@
-// Package geoblocking 地域封禁模块
-package geoblocking
+// Package source 提供威胁情报和地域封禁等数据源模块的公共基础设施
+package source
 
 import (
 	"context"
@@ -9,15 +9,14 @@ import (
 	"time"
 )
 
-// Fetcher GeoIP 数据获取器
-// 负责从外部 URL 获取 GeoIP CSV 数据
+// Fetcher 通用的 HTTP 数据获取器
+// 负责从外部 URL 获取数据（被 ThreatIntel、GeoBlocking 等模块复用）
 type Fetcher struct {
 	client  *http.Client
 	timeout time.Duration
 }
 
-// NewFetcher 创建新的 GeoIP 数据获取器
-// timeout: HTTP 请求超时时间
+// NewFetcher 创建新的数据获取器
 func NewFetcher(timeout time.Duration) *Fetcher {
 	return &Fetcher{
 		client: &http.Client{
@@ -27,8 +26,7 @@ func NewFetcher(timeout time.Duration) *Fetcher {
 	}
 }
 
-// Fetch 从指定 URL 获取 GeoIP CSV 数据
-// 返回原始字节数据
+// Fetch 从指定 URL 获取数据，返回原始字节数据
 func (f *Fetcher) Fetch(url string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
 	defer cancel()
