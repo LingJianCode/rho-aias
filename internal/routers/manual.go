@@ -16,37 +16,26 @@ func RegisterManualRoutes(group *gin.RouterGroup, manualHandle *handles.ManualHa
 
 	blacklist := manual.Group("/blacklist")
 
-	// 如果没有启用认证，直接注册路由
-	if enforcer == nil || authService == nil || apiKeyService == nil {
-		blacklist.POST("/rules", manualHandle.AddRule)
-		blacklist.DELETE("/rules", manualHandle.DelRule)
-		blacklist.GET("/rules", manualHandle.ListManualRules)
-		return
-	}
+	// 添加黑名单规则 - 需要 firewall:write 权限
+	blacklist.POST("/rules",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+		manualHandle.AddRule,
+	)
 
-	// 启用认证，添加权限控制
-	{
-		// 添加黑名单规则 - 需要 firewall:write 权限
-		blacklist.POST("/rules",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
-			manualHandle.AddRule,
-		)
+	// 删除黑名单规则 - 需要 firewall:write 权限
+	blacklist.DELETE("/rules",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+		manualHandle.DelRule,
+	)
 
-		// 删除黑名单规则 - 需要 firewall:write 权限
-		blacklist.DELETE("/rules",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
-			manualHandle.DelRule,
-		)
-
-		// 查询黑名单规则列表 - 需要 firewall:read 权限
-		blacklist.GET("/rules",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
-			manualHandle.ListManualRules,
-		)
-	}
+	// 查询黑名单规则列表 - 需要 firewall:read 权限
+	blacklist.GET("/rules",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
+		manualHandle.ListManualRules,
+	)
 }
 
 // RegisterWhitelistRoutes 注册白名单管理路由
@@ -56,35 +45,24 @@ func RegisterWhitelistRoutes(group *gin.RouterGroup, whitelistHandle *handles.Wh
 
 	whitelist := manual.Group("/whitelist")
 
-	// 如果没有启用认证，直接注册路由
-	if enforcer == nil || authService == nil || apiKeyService == nil {
-		whitelist.POST("/rules", whitelistHandle.AddWhitelistRule)
-		whitelist.DELETE("/rules", whitelistHandle.DelWhitelistRule)
-		whitelist.GET("/rules", whitelistHandle.ListWhitelistRules)
-		return
-	}
+	// 添加白名单规则 - 需要 firewall:write 权限
+	whitelist.POST("/rules",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+		whitelistHandle.AddWhitelistRule,
+	)
 
-	// 启用认证，添加权限控制
-	{
-		// 添加白名单规则 - 需要 firewall:write 权限
-		whitelist.POST("/rules",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
-			whitelistHandle.AddWhitelistRule,
-		)
+	// 删除白名单规则 - 需要 firewall:write 权限
+	whitelist.DELETE("/rules",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+		whitelistHandle.DelWhitelistRule,
+	)
 
-		// 删除白名单规则 - 需要 firewall:write 权限
-		whitelist.DELETE("/rules",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
-			whitelistHandle.DelWhitelistRule,
-		)
-
-		// 查询白名单规则列表 - 需要 firewall:read 权限
-		whitelist.GET("/rules",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
-			whitelistHandle.ListWhitelistRules,
-		)
-	}
+	// 查询白名单规则列表 - 需要 firewall:read 权限
+	whitelist.GET("/rules",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
+		whitelistHandle.ListWhitelistRules,
+	)
 }

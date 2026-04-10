@@ -60,13 +60,11 @@ class RhoAiasProcess:
     """rho-aias 进程管理类"""
 
     def __init__(self, binary_path: str, default_config_path: str, interface: str,
-                 api_port: int = 18080, use_auth: bool = False,
-                 api_key: str = None):
+                 api_port: int = 18080, api_key: str = "sk_live_test-admin-key-1234567890abcdef"):
         self.binary_path = binary_path
         self.default_config_path = default_config_path
         self.interface = interface
         self.api_port = api_port
-        self.use_auth = use_auth
         self.api_key = api_key
         self.process: Optional[subprocess.Popen] = None
         self.config_dir = "/tmp/rho_test"
@@ -108,24 +106,20 @@ class RhoAiasProcess:
         config['geo_blocking']['enabled'] = True
         config['manual']['enabled'] = True  # 保留手动规则功能用于测试
 
-        # 配置认证
-        if self.use_auth:
-            config['auth']['enabled'] = True
-            config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
-            config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
+        # 配置认证（始终启用，使用 API Key）
+        config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
+        config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
 
-            # 如果提供了 API Key，配置到配置文件
-            if self.api_key:
-                config['auth']['api_keys'] = [
-                    {
-                        'name': 'Test Admin Key',
-                        'key': self.api_key,
-                        'permissions': ['*']
-                    }
-                ]
-                logger.info(f"API Key configured for testing")
-        else:
-            config['auth']['enabled'] = False
+        # 配置 API Key 到配置文件
+        if self.api_key:
+            config['auth']['api_keys'] = [
+                {
+                    'name': 'Test Admin Key',
+                    'key': self.api_key,
+                    'permissions': ['*']
+                }
+            ]
+            logger.info(f"API Key configured for testing")
 
         # 写入临时配置文件
         try:
@@ -285,7 +279,8 @@ class TestXDPIpBlocking(unittest.TestCase):
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
         cls.default_config_path = os.path.join(cls.project_root, "config.yml")
         cls.api_port = 18080
-        cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}")
+        cls.test_api_key = os.environ.get("TEST_API_KEY", "sk_live_test-admin-key-1234567890abcdef")
+        cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}", cls.test_api_key)
         
         # 检查二进制文件
         if not os.path.exists(cls.binary_path):
@@ -318,14 +313,15 @@ class TestXDPIpBlocking(unittest.TestCase):
         # 等待资源释放
         time.sleep(1)
     
-    def _start_rho_on_veth(self, veth_name: str, use_auth: bool = False, api_key: str = None) -> bool:
+    def _start_rho_on_veth(self, veth_name: str, api_key: str = None) -> bool:
         """在指定 veth 上启动 rho-aias"""
+        if api_key is None:
+            api_key = self.test_api_key
         self.rho_process = RhoAiasProcess(
             self.binary_path,
             self.default_config_path,
             veth_name,
             self.api_port,
-            use_auth,
             api_key
         )
         return self.rho_process.start()
@@ -541,7 +537,7 @@ class TestAPIKeyAuth(unittest.TestCase):
         time.sleep(1)
 
     def _start_rho_with_auth(self, veth_name: str, api_key: str = None) -> bool:
-        """启动 rho-aias 并启用认证"""
+        """启动 rho-aias（认证始终启用）"""
         if api_key is None:
             api_key = os.environ.get("TEST_API_KEY", "sk_live_test-admin-key-1234567890abcdef")
 
@@ -550,8 +546,7 @@ class TestAPIKeyAuth(unittest.TestCase):
             self.default_config_path,
             veth_name,
             self.api_port,
-            use_auth=True,
-            api_key=api_key
+            api_key
         )
         return self.rho_process.start()
 
@@ -619,26 +614,6 @@ class TestAPIKeyAuth(unittest.TestCase):
         success, resp = self.api_client.add_rule("10.0.1.4")
         self.assertTrue(success, f"Failed to add rule: {resp}")
         logger.info("API Key write permission OK")
-
-    def test_04_api_key_without_auth(self):
-        """测试不启用认证时 API Key 的行为"""
-        # 启动 rho-aias（不启用认证）
-        self.rho_process = RhoAiasProcess(
-            self.binary_path,
-            self.default_config_path,
-            "rho_akt_veth0",
-            self.api_port,
-            use_auth=False
-        )
-        self.assertTrue(self.rho_process.start(), "Failed to start rho-aias")
-
-        # 等待服务启动
-        time.sleep(2)
-
-        # 即使有 API Key，也应该能正常工作
-        success, resp = self.api_client.add_rule("10.0.1.5")
-        self.assertTrue(success, f"Failed to add rule: {resp}")
-        logger.info("API Key works without authentication enabled")
 
 
 class TestEnvironmentSetup(unittest.TestCase):

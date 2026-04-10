@@ -13,51 +13,38 @@ import (
 func RegisterBlockLogRoutes(group *gin.RouterGroup, blockLogHandle *handles.BlockLogHandle, enforcer *casbin.Enforcer, authService *services.AuthService, apiKeyService *services.APIKeyService) {
 	blocklog := group.Group("/blocklog")
 
-	// 如果没有启用认证，直接注册路由
-	if enforcer == nil || authService == nil || apiKeyService == nil {
-		blocklog.GET("/records", blockLogHandle.GetRecords)
-		blocklog.GET("/stats", blockLogHandle.GetStats)
-		blocklog.GET("/blocked-ips", blockLogHandle.GetBlockedIPs)
-		blocklog.GET("/blocked-countries", blockLogHandle.GetBlockedCountries)
-		blocklog.DELETE("/records", blockLogHandle.ClearRecords)
-		return
-	}
+	// 查看阻断记录 - 需要 blocklog:read 权限
+	blocklog.GET("/records",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		blockLogHandle.GetRecords,
+	)
 
-	// 启用认证，添加权限控制
-	{
-		// 查看阻断记录 - 需要 blocklog:read 权限
-		blocklog.GET("/records",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
-			blockLogHandle.GetRecords,
-		)
+	// 查看统计数据 - 需要 blocklog:read 权限
+	blocklog.GET("/stats",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		blockLogHandle.GetStats,
+	)
 
-		// 查看统计数据 - 需要 blocklog:read 权限
-		blocklog.GET("/stats",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
-			blockLogHandle.GetStats,
-		)
+	// 查看阻断 IP 列表 - 需要 blocklog:read 权限
+	blocklog.GET("/blocked-ips",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		blockLogHandle.GetBlockedIPs,
+	)
 
-		// 查看阻断 IP 列表 - 需要 blocklog:read 权限
-		blocklog.GET("/blocked-ips",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
-			blockLogHandle.GetBlockedIPs,
-		)
+	// 查看阻断国家列表 - 需要 blocklog:read 权限
+	blocklog.GET("/blocked-countries",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		blockLogHandle.GetBlockedCountries,
+	)
 
-		// 查看阻断国家列表 - 需要 blocklog:read 权限
-		blocklog.GET("/blocked-countries",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
-			blockLogHandle.GetBlockedCountries,
-		)
-
-		// 清除记录 - 需要 blocklog:clear 权限
-		blocklog.DELETE("/records",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "blocklog:clear", "clear"),
-			blockLogHandle.ClearRecords,
-		)
-	}
+	// 清除记录 - 需要 blocklog:clear 权限
+	blocklog.DELETE("/records",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "blocklog:clear", "clear"),
+		blockLogHandle.ClearRecords,
+	)
 }

@@ -152,13 +152,15 @@ class RhoAiasProcess:
 
     def __init__(self, binary_path: str, default_config_path: str, api_port: int = 18081,
                  ssh_log: str = SSH_LOG_PATH, waf_log: str = WAF_LOG_PATH,
-                 rate_limit_log: str = RATE_LIMIT_LOG_PATH):
+                 rate_limit_log: str = RATE_LIMIT_LOG_PATH,
+                 api_key: str = "sk_live_test-admin-key-1234567890abcdef"):
         self.binary_path = binary_path
         self.default_config_path = default_config_path
         self.api_port = api_port
         self.ssh_log = ssh_log
         self.waf_log = waf_log
         self.rate_limit_log = rate_limit_log
+        self.api_key = api_key
         self.process: Optional[subprocess.Popen] = None
         self.config_dir = "/tmp/rho_log_ban_test_cfg"
         self.rho_log_dir = "/tmp/rho_log_ban_test_rho_logs"
@@ -196,7 +198,16 @@ class RhoAiasProcess:
         config['intel']['enabled'] = False
         config['geo_blocking']['enabled'] = False
         config['anomaly_detection']['enabled'] = False
-        config['auth']['enabled'] = False
+        # 配置认证（使用 API Key）
+        config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
+        config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
+        config['auth']['api_keys'] = [
+            {
+                'name': 'Test Admin Key',
+                'key': self.api_key,
+                'permissions': ['*']
+            }
+        ]
 
         # 配置 WAF 日志监控
         config['waf']['enabled'] = True
@@ -296,8 +307,9 @@ class RhoAiasProcess:
 class APIClient:
     """rho-aias API 客户端"""
 
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, api_key: str = None):
         self.base_url = base_url
+        self.api_key = api_key
 
     def get_ban_records(self, ip: str = None, source: str = None,
                         status: str = "active", limit: int = 50) -> Tuple[bool, dict]:
@@ -337,6 +349,10 @@ class APIClient:
 
         url = f"{self.base_url}{path}"
         headers = {"Content-Type": "application/json"}
+
+        # 添加 API Key 认证
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
 
         try:
             if method == "GET":
@@ -402,7 +418,8 @@ class LogBanTestBase(unittest.TestCase):
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
         cls.default_config_path = os.path.join(cls.project_root, "config.yml")
         cls.api_port = 18081
-        cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}")
+        cls.test_api_key = os.environ.get("TEST_API_KEY", "sk_live_test-admin-key-1234567890abcdef")
+        cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}", cls.test_api_key)
 
         if not os.path.exists(cls.binary_path):
             raise unittest.SkipTest(f"Binary not found: {cls.binary_path}. Run 'make build' first.")

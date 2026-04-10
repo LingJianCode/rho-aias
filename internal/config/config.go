@@ -90,7 +90,6 @@ type ManualConfig struct {
 
 // AuthConfig 认证配置
 type AuthConfig struct {
-	Enabled         bool           `yaml:"enabled"`          // 是否启用认证
 	JWTSecret       string         `yaml:"jwt_secret"`       // JWT 密钥（建议从环境变量读取）
 	JWTIssuer       string         `yaml:"jwt_issuer"`       // JWT 签发者
 	TokenDuration   int            `yaml:"token_duration"`   // Token 有效期（分钟）

@@ -179,11 +179,11 @@ func main() {
 	blockLogHandle := handles.NewBlockLogHandle(blockLog)
 
 	// Initialize databases
-	// Auth database (for User, APIKey, AuditLog)
+	// Auth database (for User, APIKey, AuditLog) - mandatory
 	var authDB *database.Database
 	authDB, err = database.NewDatabase(cfg.Auth.DatabasePath, cfg.Log.Level == "debug")
 	if err != nil {
-		logger.Warnf("[Main] Failed to initialize auth database: %v", err)
+		logger.Fatalf("[Main] Failed to initialize auth database (authentication is mandatory): %v", err)
 	}
 
 	// Business database (for BanRecord, SourceStatusRecord)
@@ -194,10 +194,8 @@ func main() {
 	}
 
 	// Auto migrate auth tables
-	if authDB != nil {
-		if err := authDB.AutoMigrateAuth(); err != nil {
-			logger.Warnf("[Main] Failed to migrate auth database: %v", err)
-		}
+	if err := authDB.AutoMigrateAuth(); err != nil {
+		logger.Warnf("[Main] Failed to migrate auth database: %v", err)
 	}
 
 	// Auto migrate business tables
@@ -448,7 +446,7 @@ func main() {
 		}
 	}
 
-	// Initialize Authentication (if enabled)
+	// Initialize Authentication (mandatory)
 	var (
 		authService    *services.AuthService
 		userService    *services.UserService
@@ -461,68 +459,69 @@ func main() {
 		captchaStore   *captcha.MemoryStore
 		casbinEnforcer *casbin.Enforcer
 	)
-	if cfg.Auth.Enabled && authDB != nil {
-		defer authDB.Close()
-
-		// Initialize Casbin
-		casbinEnforcer, err = casbin.NewEnforcer(authDB.DB)
-		if err != nil {
-			logger.Fatalf("[Auth] Failed to initialize casbin: %v", err)
-		}
-
-		// Initialize default policies
-		if err := casbinEnforcer.InitDefaultPolicies(); err != nil {
-			logger.Warnf("[Auth] Failed to initialize default policies: %v", err)
-		}
-
-		// Initialize default admin
-		if err := authDB.InitDefaultUser(casbinEnforcer); err != nil {
-			logger.Warnf("[Auth] Failed to initialize default user: %v", err)
-		}
-
-		// Initialize API Keys from config
-		if err := authDB.InitAPIKeysFromConfig(casbinEnforcer, cfg.Auth.APIKeys); err != nil {
-			logger.Warnf("[Auth] Failed to initialize API keys from config: %v", err)
-		}
-
-		// Initialize services
-		jwtSecret := cfg.Auth.JWTSecret
-		if jwtSecret == "" {
-			jwtSecret = os.Getenv("JWT_SECRET")
-			if jwtSecret == "" {
-				jwtSecret = "default-secret-change-me" // 生产环境必须设置
-				logger.Warn("[Auth] Using default JWT secret, please set in config or env")
-			}
-		}
-
-		jwtService := jwt.NewJWTService(
-			jwtSecret,
-			time.Duration(cfg.Auth.TokenDuration)*time.Minute,
-			cfg.Auth.JWTIssuer,
-		)
-
-		authService = services.NewAuthService(authDB.DB, jwtService)
-		userService = services.NewUserService(authDB.DB)
-		apiKeyService = services.NewAPIKeyService(authDB.DB, casbinEnforcer)
-		auditService = services.NewAuditService(authDB.DB)
-
-		// Initialize captcha
-		captchaStore, err = captcha.NewMemoryStore()
-		if err != nil {
-			logger.Fatalf("Failed to initialize captcha store: %v", err)
-		}
-		captchaService := captcha.NewCaptchaService(
-			captchaStore,
-			time.Duration(cfg.Auth.CaptchaDuration)*time.Minute,
-		)
-
-		authHandle = handles.NewAuthHandle(authService, userService, captchaService)
-		apiKeyHandle = handles.NewAPIKeyHandle(apiKeyService, auditService)
-		userHandle = handles.NewUserHandle(userService, auditService, casbinEnforcer)
-		auditHandle = handles.NewAuditHandle(auditService)
-
-		logger.Info("[Main] Authentication module initialized")
+	if authDB == nil {
+		logger.Fatalf("[Main] Failed to initialize auth database, authentication is mandatory")
 	}
+	defer authDB.Close()
+
+	// Initialize Casbin
+	casbinEnforcer, err = casbin.NewEnforcer(authDB.DB)
+	if err != nil {
+		logger.Fatalf("[Auth] Failed to initialize casbin: %v", err)
+	}
+
+	// Initialize default policies
+	if err := casbinEnforcer.InitDefaultPolicies(); err != nil {
+		logger.Warnf("[Auth] Failed to initialize default policies: %v", err)
+	}
+
+	// Initialize default admin
+	if err := authDB.InitDefaultUser(casbinEnforcer); err != nil {
+		logger.Warnf("[Auth] Failed to initialize default user: %v", err)
+	}
+
+	// Initialize API Keys from config
+	if err := authDB.InitAPIKeysFromConfig(casbinEnforcer, cfg.Auth.APIKeys); err != nil {
+		logger.Warnf("[Auth] Failed to initialize API keys from config: %v", err)
+	}
+
+	// Initialize services
+	jwtSecret := cfg.Auth.JWTSecret
+	if jwtSecret == "" {
+		jwtSecret = os.Getenv("JWT_SECRET")
+		if jwtSecret == "" {
+			jwtSecret = "default-secret-change-me" // 生产环境必须设置
+			logger.Warn("[Auth] Using default JWT secret, please set in config or env")
+		}
+	}
+
+	jwtService := jwt.NewJWTService(
+		jwtSecret,
+		time.Duration(cfg.Auth.TokenDuration)*time.Minute,
+		cfg.Auth.JWTIssuer,
+	)
+
+	authService = services.NewAuthService(authDB.DB, jwtService)
+	userService = services.NewUserService(authDB.DB)
+	apiKeyService = services.NewAPIKeyService(authDB.DB, casbinEnforcer)
+	auditService = services.NewAuditService(authDB.DB)
+
+	// Initialize captcha
+	captchaStore, err = captcha.NewMemoryStore()
+	if err != nil {
+		logger.Fatalf("Failed to initialize captcha store: %v", err)
+	}
+	captchaService := captcha.NewCaptchaService(
+		captchaStore,
+		time.Duration(cfg.Auth.CaptchaDuration)*time.Minute,
+	)
+
+	authHandle = handles.NewAuthHandle(authService, userService, captchaService)
+	apiKeyHandle = handles.NewAPIKeyHandle(apiKeyService, auditService)
+	userHandle = handles.NewUserHandle(userService, auditService, casbinEnforcer)
+	auditHandle = handles.NewAuditHandle(auditService)
+
+	logger.Info("[Main] Authentication module initialized")
 
 	// Setup router and routes
 	// Set Gin mode based on log level
@@ -533,36 +532,23 @@ func main() {
 	r.Use(logger.GinLogger(), logger.GinRecovery())
 	api := r.Group("/api")
 
-	// Register Auth routes (if enabled)
-	if cfg.Auth.Enabled && authHandle != nil {
-		routers.RegisterAuthRoutes(api, authHandle, authService, apiKeyService, casbinEnforcer)
+	// Register Auth routes
+	routers.RegisterAuthRoutes(api, authHandle, authService, apiKeyService, casbinEnforcer)
+
+	// Build auth context
+	authEnforcer := casbinEnforcer
+	authSvc := authService
+	apiKeySvc := apiKeyService
+
+	// Register auth-only routes (API Key management, user management, audit)
+	if apiKeyHandle != nil {
+		routers.RegisterAPIKeyRoutes(api, apiKeyHandle, authEnforcer, authSvc, apiKeySvc)
 	}
-
-	// 认证未启用时给出安全警告
-	if !cfg.Auth.Enabled {
-		logger.Warn("[Security] Authentication is DISABLED - all APIs are publicly accessible without any protection!")
-		logger.Warn("[Security] Enable authentication by setting 'auth.enabled: true' in config.yml for production use")
+	if userHandle != nil {
+		routers.RegisterUserRoutes(api, userHandle, authEnforcer, authSvc, apiKeySvc)
 	}
-
-	// Build auth context: when auth is disabled, all fields are nil (safe for routers with built-in nil guards)
-	var authEnforcer *casbin.Enforcer
-	var authSvc *services.AuthService
-	var apiKeySvc *services.APIKeyService
-	if cfg.Auth.Enabled && authService != nil && apiKeyService != nil && casbinEnforcer != nil {
-		authEnforcer = casbinEnforcer
-		authSvc = authService
-		apiKeySvc = apiKeyService
-
-		// Register auth-only routes (no built-in nil guard, only call when auth is active)
-		if apiKeyHandle != nil {
-			routers.RegisterAPIKeyRoutes(api, apiKeyHandle, authEnforcer, authSvc, apiKeySvc)
-		}
-		if userHandle != nil {
-			routers.RegisterUserRoutes(api, userHandle, authEnforcer, authSvc, apiKeySvc)
-		}
-		if auditHandle != nil {
-			routers.RegisterAuditRoutes(api, auditHandle, authEnforcer, authSvc, apiKeySvc)
-		}
+	if auditHandle != nil {
+		routers.RegisterAuditRoutes(api, auditHandle, authEnforcer, authSvc, apiKeySvc)
 	}
 
 	// Register common routes (all have built-in nil guards for authEnforcer/authSvc/apiKeySvc)
