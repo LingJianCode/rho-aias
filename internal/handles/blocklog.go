@@ -112,6 +112,44 @@ func (h *BlockLogHandle) GetBlockedCountries(c *gin.Context) {
 	})
 }
 
+// GetHourlyTrend 获取丢弃计数小时趋势
+// GET /api/blocklog/hourly-trend?hours=24&by=source
+func (h *BlockLogHandle) GetHourlyTrend(c *gin.Context) {
+	hours := 24 // 默认查询最近 24 小时
+	if h := c.Query("hours"); h != "" {
+		if parsed, err := parseInt(h); err == nil && parsed > 0 && parsed <= 720 {
+			hours = parsed
+		}
+	}
+
+	trend := h.blockLog.GetHourlyTrend(hours)
+
+	response.OK(c, gin.H{
+		"hours":      hours,
+		"hourly_data": trend,
+	})
+}
+
+// GetDroppedSummary 获取丢弃概览
+// GET /api/blocklog/dropped-summary?hours=168
+func (h *BlockLogHandle) GetDroppedSummary(c *gin.Context) {
+	hours := 168 // 默认查询最近 7 天
+	if h := c.Query("hours"); h != "" {
+		if parsed, err := parseInt(h); err == nil && parsed > 0 && parsed <= 8760 { // 最长 1 年
+			hours = parsed
+		}
+	}
+
+	summary := h.blockLog.GetDroppedSummary(hours)
+
+	response.OK(c, gin.H{
+		"hours":   hours,
+		"total":   summary.Total,
+		"sources": summary.Sources,
+		"hourly":  summary.Hourly,
+	})
+}
+
 func parseInt(s string) (int, error) {
 	return strconv.Atoi(s)
 }
