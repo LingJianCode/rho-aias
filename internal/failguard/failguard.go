@@ -31,7 +31,7 @@ type Monitor struct {
 
 	// 失败计数器：IP → 失败时间戳列表（滑动窗口）
 	failures map[string][]time.Time
-	failMu   sync.Mutex
+	failMu   sync.RWMutex
 }
 
 // NewMonitor 创建 FailGuard 日志监控器
@@ -301,6 +301,9 @@ func (m *Monitor) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int
 
 // GetConfig 获取当前 FailGuard 配置（返回可动态化的字段）
 func (m *Monitor) GetConfig() map[string]interface{} {
+	m.failMu.RLock()
+	defer m.failMu.RUnlock()
+
 	return map[string]interface{}{
 		"enabled":      m.cfg.Enabled,
 		"max_retry":    m.cfg.MaxRetry,

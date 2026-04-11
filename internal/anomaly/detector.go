@@ -290,6 +290,13 @@ func (d *Detector) GetConfig() map[string]interface{} {
 	}
 }
 
+// GetRawConfig 获取当前原始结构体配置（避免 map 类型断言失败问题）
+func (d *Detector) GetRawConfig() AnomalyDetectionConfig {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.config
+}
+
 // GetStats 获取检测器统计信息
 func (d *Detector) GetStats() map[string]interface{} {
 	return map[string]interface{}{

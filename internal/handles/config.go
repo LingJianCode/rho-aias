@@ -107,7 +107,7 @@ func (h *ConfigHandle) GetAllConfig(c *gin.Context) {
 // GetModuleConfig 获取指定模块的动态配置
 func (h *ConfigHandle) GetModuleConfig(c *gin.Context) {
 	module := c.Param("module")
-	if !isValidModule(module) {
+	if !IsValidModule(module) {
 		response.BadRequest(c, "Invalid module name, supported: failguard, waf, rate_limit, anomaly_detection, geo_blocking, intel")
 		return
 	}
@@ -141,7 +141,7 @@ func (h *ConfigHandle) GetModuleConfig(c *gin.Context) {
 // UpdateModuleConfig 更新指定模块的动态配置
 func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 	module := c.Param("module")
-	if !isValidModule(module) {
+	if !IsValidModule(module) {
 		response.BadRequest(c, "Invalid module name, supported: failguard, waf, rate_limit, anomaly_detection, geo_blocking, intel")
 		return
 	}
@@ -369,21 +369,22 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
 
-	current := h.anomalyDetector.GetConfig()
+	// 获取当前原始结构体配置（而非 map，避免嵌套结构体类型断言失败）
+	rawCfg := h.anomalyDetector.GetRawConfig()
 
 	cfg := anomaly.AnomalyDetectionConfig{
-		Enabled:         boolValue(mapBool(current, "enabled", false), req.Enabled),
-		SampleRate:      mapInt(current, "sample_rate", 0),
-		CheckInterval:   mapInt(current, "check_interval", 0),
-		MinPackets:      intValue(mapInt(current, "min_packets", 0), req.MinPackets),
-		CleanupInterval: mapInt(current, "cleanup_interval", 0),
-		Baseline:        baselineValue(current["baseline"], req.Baseline),
-		Attacks:         attacksValue(current["attacks"], req.Attacks),
+		Enabled:         boolValue(rawCfg.Enabled, req.Enabled),
+		SampleRate:      rawCfg.SampleRate,
+		CheckInterval:   rawCfg.CheckInterval,
+		MinPackets:      intValue(rawCfg.MinPackets, req.MinPackets),
+		CleanupInterval: rawCfg.CleanupInterval,
+		Baseline:        baselineValue(rawCfg.Baseline, req.Baseline),
+		Attacks:         attacksValue(rawCfg.Attacks, req.Attacks),
 	}
 	if req.Ports != nil {
 		cfg.Ports = req.Ports
 	} else {
-		cfg.Ports = mapIntSlice(current, "ports")
+		cfg.Ports = rawCfg.Ports
 	}
 
 	h.anomalyDetector.UpdateConfig(cfg)
@@ -449,11 +450,17 @@ func (h *ConfigHandle) applyIntelConfig(raw json.RawMessage) error {
 	}
 
 	// 更新各情报源配置
+	currentIntel := h.intelMgr.GetConfig()
 	for sourceID, srcCfg := range req.Sources {
-		enabled := true
-		if srcCfg.Enabled != nil {
-			enabled = *srcCfg.Enabled
+		// 从运行时配置获取当前源的 enabled 状态作为默认值（避免意外启用已禁用的源）
+		currentSrcMap, _ := currentIntel["sources"].(map[string]interface{})
+		defaultEnabled := true
+		if srcMap, ok := currentSrcMap[sourceID]; ok {
+			if src, ok2 := srcMap.(map[string]interface{}); ok2 {
+				defaultEnabled = mapBool(src, "enabled", true)
+			}
 		}
+		enabled := boolValue(defaultEnabled, srcCfg.Enabled)
 		if err := h.intelMgr.UpdateSourceConfig(sourceID, enabled, srcCfg.Schedule, srcCfg.URL); err != nil {
 			logger.Warnf("[ConfigAPI] Failed to update intel source %s: %v", sourceID, err)
 		}
@@ -462,8 +469,8 @@ func (h *ConfigHandle) applyIntelConfig(raw json.RawMessage) error {
 	return nil
 }
 
-// isValidModule 检查模块名是否合法
-func isValidModule(module string) bool {
+// IsValidModule 检查模块名是否合法（导出供 DynamicConfigService 等外部调用）
+func IsValidModule(module string) bool {
 	switch module {
 	case ModuleFailGuard, ModuleWAF, ModuleRateLimit, ModuleAnomalyDetection, ModuleGeoBlocking, ModuleIntel:
 		return true
@@ -559,55 +566,18 @@ func mapStringSlice(m map[string]interface{}, key string) []string {
 	return nil
 }
 
-// mapIntSlice 从 map[string]interface{} 中安全读取 []int（处理 JSON round-trip 后的 []interface{} 情况）
-func mapIntSlice(m map[string]interface{}, key string) []int {
-	v, ok := m[key]
-	if !ok {
-		return nil
-	}
-	// 直接 []int 类型
-	if s, ok := v.([]int); ok {
-		return s
-	}
-	// JSON round-trip 后变成 []interface{}
-	if ifaceSlice, ok := v.([]interface{}); ok {
-		result := make([]int, 0, len(ifaceSlice))
-		for _, item := range ifaceSlice {
-			switch n := item.(type) {
-			case int:
-				result = append(result, n)
-			case float64:
-				result = append(result, int(n))
-			case json.Number:
-				i, err := n.Int64()
-				if err == nil {
-					result = append(result, int(i))
-				}
-			}
-		}
-		return result
-	}
-	return nil
-}
-
-// baselineValue 如果 ptr 不为 nil 则返回 *ptr，否则从当前配置还原
-func baselineValue(current interface{}, ptr *anomaly.BaselineConfig) anomaly.BaselineConfig {
+// baselineValue 如果 ptr 不为 nil 则返回 *ptr，否则从当前原始配置还原
+func baselineValue(current anomaly.BaselineConfig, ptr *anomaly.BaselineConfig) anomaly.BaselineConfig {
 	if ptr != nil {
 		return *ptr
 	}
-	if v, ok := current.(anomaly.BaselineConfig); ok {
-		return v
-	}
-	return anomaly.BaselineConfig{}
+	return current
 }
 
-// attacksValue 如果 ptr 不为 nil 则返回 *ptr，否则从当前配置还原
-func attacksValue(current interface{}, ptr *anomaly.AttacksConfig) anomaly.AttacksConfig {
+// attacksValue 如果 ptr 不为 nil 则返回 *ptr，否则从当前原始配置还原
+func attacksValue(current anomaly.AttacksConfig, ptr *anomaly.AttacksConfig) anomaly.AttacksConfig {
 	if ptr != nil {
 		return *ptr
 	}
-	if v, ok := current.(anomaly.AttacksConfig); ok {
-		return v
-	}
-	return anomaly.AttacksConfig{}
+	return current
 }
