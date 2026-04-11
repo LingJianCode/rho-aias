@@ -10,8 +10,9 @@ DDoS 检测功能集成测试
 - ACK Flood 检测
 
 运行示例:
-    python3 test_ddos_detection.py
-    python3 test_ddos_detection.py --test TestDDoSDetection.test_tcp_syn_flood
+    python3 test_ddos_detection.py  # API Key 认证已内置
+    TEST_API_KEY="sk_live_your-key-here" python3 test_ddos_detection.py  # 自定义 Key
+    python3 test_ddos_detection.py --test TestDDoSDetection.test_01_tcp_syn_flood
 """
 
 import json
@@ -45,12 +46,14 @@ class RhoAiasProcess:
     """rho-aias 进程管理类"""
 
     def __init__(self, binary_path: str, default_config_path: str, interface: str,
-                 api_port: int = 18080, enable_anomaly: bool = True):
+                 api_port: int = 18080, enable_anomaly: bool = True,
+                 api_key: str = "sk_live_test-admin-key-1234567890abcdef"):
         self.binary_path = binary_path
         self.default_config_path = default_config_path
         self.interface = interface
         self.api_port = api_port
         self.enable_anomaly = enable_anomaly
+        self.api_key = api_key
         self.process: Optional[subprocess.Popen] = None
         self.config_dir = "/tmp/rho_ddos_test"
         self.log_dir = "/tmp/rho_ddos_test_logs"
@@ -127,8 +130,16 @@ class RhoAiasProcess:
         config['anomaly_detection']['baseline']['max_age'] = 1800
         config['anomaly_detection']['baseline']['block_duration'] = 60  # 60秒封禁
 
-        # 禁用认证
-        config['auth']['enabled'] = False
+        # 配置认证（使用 API Key）
+        config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
+        config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
+        config['auth']['api_keys'] = [
+            {
+                'name': 'Test Admin Key',
+                'key': self.api_key,
+                'permissions': ['*']
+            }
+        ]
 
         # 写入临时配置文件
         try:
@@ -145,7 +156,7 @@ class RhoAiasProcess:
         try:
             # 打开日志文件
             self.log_file = open(self.log_path, 'w')
-            # 在配置文件所在目录运行程序，输出到日志文件，显式指定配置路径
+            # 使用 --config 参数指定临时配置文件的绝对路径
             self.process = subprocess.Popen(
                 [self.binary_path, "--config", config_file],
                 cwd=self.config_dir,
@@ -203,8 +214,9 @@ class RhoAiasProcess:
 class APIClient:
     """rho-aias API 客户端"""
 
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, api_key: str = None):
         self.base_url = base_url
+        self.api_key = api_key
 
     def get_rules(self, source: str = None) -> Tuple[bool, dict]:
         """获取规则列表"""
@@ -225,6 +237,10 @@ class APIClient:
 
         url = f"{self.base_url}{path}"
         headers = {"Content-Type": "application/json"}
+
+        # 添加 API Key 认证
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
 
         try:
             if method == "GET":
@@ -339,9 +355,10 @@ class TestDDoSDetection(unittest.TestCase):
 
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-        cls.default_config_path = os.path.join(cls.project_root, "config/config.yml")
+        cls.default_config_path = os.path.join(cls.project_root, "config", "config.yml")
         cls.api_port = 18080
-        cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}")
+        cls.test_api_key = os.environ.get("TEST_API_KEY", "sk_live_test-admin-key-1234567890abcdef")
+        cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}", cls.test_api_key)
 
         # 检查二进制文件
         if not os.path.exists(cls.binary_path):
@@ -553,13 +570,13 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 测试运行示例:
-  # 运行所有测试
+  # 运行所有测试（API Key 认证已内置）
   python3 %(prog)s
 
-  # 运行特定测试
-  python3 %(prog)s --test TestDDoSDetection.test_tcp_syn_flood
+  # 使用自定义 API Key
+  TEST_API_KEY="sk_live_your-key-here" python3 %(prog)s
 
-  # 只测试 SYN Flood
+  # 运行特定测试
   python3 %(prog)s --test TestDDoSDetection.test_01_tcp_syn_flood
         """
     )

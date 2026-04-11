@@ -13,13 +13,6 @@ import (
 func RegisterBanRecordRoutes(group *gin.RouterGroup, handle *handles.BanRecordHandle, enforcer *casbin.Enforcer, authService *services.AuthService, apiKeyService *services.APIKeyService) {
 	banRecords := group.Group("/ban-records")
 
-	if enforcer == nil || authService == nil || apiKeyService == nil {
-		banRecords.GET("", handle.GetBanRecords)
-		banRecords.GET("/stats", handle.GetBanStats)
-		banRecords.GET("/:id", handle.GetBanRecord)
-		return
-	}
-
 	// 查询封禁记录 - 需要 ban_record:read 权限
 	banRecords.GET("",
 		middleware.AuthMiddleware(authService, apiKeyService),

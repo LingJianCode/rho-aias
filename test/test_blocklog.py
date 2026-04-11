@@ -37,6 +37,9 @@ from typing import Optional, Tuple
 
 from netns import NetNS, VethPair, TestEnvironment
 
+# 默认 API Key（与 config.yml 中预置的 Master Admin Key 一致）
+DEFAULT_API_KEY = "797129746550e02f1bbbf3828534c83d"
+
 try:
     import yaml
 except ImportError:
@@ -54,7 +57,7 @@ class RhoAiasProcess:
     """rho-aias 进程管理类"""
 
     def __init__(self, binary_path: str, default_config_path: str, interface: str,
-                 api_port: int = 18080, use_auth: bool = False, api_key: str = None):
+                 api_port: int = 18080, use_auth: bool = True, api_key: str = DEFAULT_API_KEY):
         self.binary_path = binary_path
         self.default_config_path = default_config_path
         self.interface = interface
@@ -176,7 +179,7 @@ class RhoAiasProcess:
 class BlockLogAPIClient:
     """BlockLog API 客户端"""
 
-    def __init__(self, base_url: str, api_key: str = None):
+    def __init__(self, base_url: str, api_key: str = DEFAULT_API_KEY):
         self.base_url = base_url
         self.api_key = api_key
 
@@ -286,7 +289,8 @@ class TestBlockLog(unittest.TestCase):
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
         cls.default_config_path = os.path.join(cls.project_root, "config/config.yml")
         cls.api_port = 18080
-        cls.api_client = BlockLogAPIClient(f"http://127.0.0.1:{cls.api_port}")
+        cls.api_client = BlockLogAPIClient(f"http://127.0.0.1:{cls.api_port}",
+                                            api_key=DEFAULT_API_KEY)
 
         if not os.path.exists(cls.binary_path):
             raise unittest.SkipTest(f"Binary not found: {cls.binary_path}. Run 'make build' first.")
@@ -308,7 +312,7 @@ class TestBlockLog(unittest.TestCase):
         self.env.cleanup()
         time.sleep(1)
 
-    def _start_rho(self, veth_name: str, use_auth: bool = False, api_key: str = None) -> bool:
+    def _start_rho(self, veth_name: str, use_auth: bool = True, api_key: str = DEFAULT_API_KEY) -> bool:
         self.rho_process = RhoAiasProcess(
             self.binary_path,
             self.default_config_path,
