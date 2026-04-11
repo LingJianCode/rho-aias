@@ -3,17 +3,19 @@
 # eBPF XDP IP 阻断功能集成测试运行脚本
 #
 # 使用方法:
-#   ./run_tests.sh              # 运行所有测试（API Key 认证已内置）
-#   ./run_tests.sh --use-api-key # 使用 API Key 认证运行测试
-#   ./run_tests.sh --use-api-key --api-key sk_live_your-key-here # 使用指定 API Key
+#   ./run_tests.sh              # 运行所有测试（默认，失败即中断）
+#   ./run_tests.sh --ddos       # 仅运行 DDoS 检测测试
+#   ./run_tests.sh --log-ban    # 仅运行日志触发封禁测试（WAF/FailGuard/Rate Limit）
+#   ./run_tests.sh --blocklog   # 仅运行 BlockLog 阻断日志测试
+#   ./run_tests.sh -t TestXDPIpBlocking.test_01_ipv4_exact_block  # 运行特定用例（透传到对应脚本）
+#   ./run_tests.sh --api-key sk_live_your-key-here  # 使用指定 API Key
 #   ./run_tests.sh --env-only   # 仅运行环境测试（不需要编译 rho-aias）
-#   ./run_tests.sh -t TestXDPIpBlocking.test_01_ipv4_exact_block  # 运行特定测试
-#   ./run_tests.sh --ddos       # 运行 DDoS 检测测试
-#   ./run_tests.sh --ddos --test TestDDoSDetection.test_01_tcp_syn_flood  # 运行特定 DDoS 测试
-#   ./run_tests.sh --log-ban    # 运行日志触发封禁测试（WAF/FailGuard/Rate Limit）
-#   ./run_tests.sh --log-ban --test TestFailGuardBan  # 运行特定日志封禁测试
-#   ./run_tests.sh --blocklog   # 运行 BlockLog 阻断日志测试
-#   ./run_tests.sh --blocklog --test TestBlockLog.test_01_sampling_basic # 运行特定 BlockLog 测试
+#
+# 测试执行顺序:
+#   1. test_xdp_block.py     - XDP IP 阻断基础功能
+#   2. test_ddos_detection.py - DDoS 异常流量检测
+#   3. test_log_ban.py       - 日志触发封禁（WAF/FailGuard/Rate Limit）
+#   4. test_blocklog.py      - BlockLog 阻断日志记录
 #
 # 前置条件:
 #   1. Root 权限
@@ -108,116 +110,18 @@ cleanup() {
     log_info "清理完成"
 }
 
-# 运行 DDoS 检测测试（API Key 认证已内置）
-run_ddos_tests() {
-    local api_key=""
-    local other_args=()
-
-    # 解析参数
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --use-api-key)
-                shift  # 兼容参数，测试内部已默认使用 API Key
-                ;;
-            --api-key)
-                api_key="$2"
-                shift 2
-                ;;
-            *)
-                other_args+=("$1")
-                shift
-                ;;
-        esac
-    done
-
-    cd "$SCRIPT_DIR"
-
-    log_info "运行 DDoS 检测测试"
-
-    # 传递 API Key（通过环境变量）
-    if [ -n "$api_key" ]; then
-        export TEST_API_KEY="$api_key"
-        log_info "使用指定的 API Key"
-    fi
-
-    python3 test_ddos_detection.py "${other_args[@]}"
-
-    local exit_code=$?
-
-    if [ $exit_code -eq 0 ]; then
-        echo "========================================"
-        log_info "DDoS 测试完成"
-        return 0
-    else
-        echo "========================================"
-        log_error "DDoS 测试失败"
-        return 1
-    fi
-}
-
-# 运行 blocklog 测试
-run_blocklog_tests() {
-    local use_api_key=false
-    local api_key=""
-    local other_args=()
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --use-api-key)
-                use_api_key=true
-                shift
-                ;;
-            --api-key)
-                api_key="$2"
-                shift 2
-                ;;
-            *)
-                other_args+=("$1")
-                shift
-                ;;
-        esac
-    done
-
-    cd "$SCRIPT_DIR"
-
-    log_info "运行 BlockLog 阻断日志测试"
-
-    if [ "$use_api_key" = true ] && [ -n "$api_key" ]; then
-        python3 test_blocklog.py --use-api-key --api-key "$api_key" "${other_args[@]}"
-    elif [ "$use_api_key" = true ]; then
-        python3 test_blocklog.py --use-api-key "${other_args[@]}"
-    else
-        python3 test_blocklog.py "${other_args[@]}"
-    fi
-
-    local exit_code=$?
-
-    if [ $exit_code -eq 0 ]; then
-        echo "========================================"
-        log_info "BlockLog 测试完成"
-        return 0
-    else
-        echo "========================================"
-        log_error "BlockLog 测试失败"
-        return 1
-    fi
-}
-
-# 运行测试
-run_tests() {
-    local use_api_key=false
+# 运行指定单一类型测试
+run_single_test() {
     local api_key=""
     local run_ddos=false
     local run_log_ban=false
     local run_blocklog=false
     local other_args=()
 
-    # 解析参数
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --use-api-key)
-                use_api_key=true
-                shift
+                shift  # 兼容参数，测试内部已默认使用 API Key
                 ;;
             --api-key)
                 api_key="$2"
@@ -244,130 +148,151 @@ run_tests() {
 
     cd "$SCRIPT_DIR"
 
-    # Blocklog 测试
-    if [ "$run_blocklog" = true ]; then
-        log_info "运行 BlockLog 阻断日志测试"
-        if [ "$use_api_key" = true ] && [ -n "$api_key" ]; then
-            python3 test_blocklog.py --use-api-key --api-key "$api_key" "${other_args[@]}"
-        elif [ "$use_api_key" = true ]; then
-            python3 test_blocklog.py --use-api-key "${other_args[@]}"
-        else
-            python3 test_blocklog.py "${other_args[@]}"
-        fi
-        local exit_code=$?
-        if [ $exit_code -eq 0 ]; then
-            echo "========================================"
-            log_info "BlockLog 测试完成"
-            return 0
-        else
-            echo "========================================"
-            log_error "BlockLog 测试失败"
-            return 1
-        fi
+    if [ -n "$api_key" ]; then
+        export TEST_API_KEY="$api_key"
+        log_info "使用指定的 API Key"
     fi
 
-    # 如果运行 DDoS 测试
+    # DDoS 测试
     if [ "$run_ddos" = true ]; then
         log_info "运行 DDoS 检测测试"
-        if [ -n "$api_key" ]; then
-            export TEST_API_KEY="$api_key"
-            log_info "使用指定的 API Key"
-        fi
         python3 test_ddos_detection.py "${other_args[@]}"
-        local exit_code=$?
-        if [ $exit_code -eq 0 ]; then
-            echo "========================================"
-            log_info "DDoS 测试完成"
-            return 0
-        else
-            echo "========================================"
-            log_error "DDoS 测试失败"
-            return 1
-        fi
+        return $?
     fi
 
-    # 如果运行日志封禁测试（API Key 认证已内置）
+    # 日志封禁测试
     if [ "$run_log_ban" = true ]; then
         log_info "运行日志触发封禁测试（WAF/FailGuard/Rate Limit）"
-        if [ -n "$api_key" ]; then
-            export TEST_API_KEY="$api_key"
-            log_info "使用指定的 API Key"
-        fi
         python3 test_log_ban.py "${other_args[@]}"
-        local exit_code=$?
-        if [ $exit_code -eq 0 ]; then
-            echo "========================================"
-            log_info "日志封禁测试完成"
-            return 0
-        else
-            echo "========================================"
-            log_error "日志封禁测试失败"
-            return 1
-        fi
+        return $?
     fi
 
-    # 所有测试均已内置 API Key 认证（本分支要求接口必须验证）
+    # BlockLog 测试
+    if [ "$run_blocklog" = true ]; then
+        log_info "运行 BlockLog 阻断日志测试"
+        python3 test_blocklog.py "${other_args[@]}"
+        return $?
+    fi
+
+    log_error "未指定有效的测试类型"
+    return 1
+}
+
+# 运行所有测试（默认模式：依次执行，失败即中断）
+run_all_tests() {
+    local api_key=""
+    local other_args=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --api-key)
+                api_key="$2"
+                shift 2
+                ;;
+            *)
+                other_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    cd "$SCRIPT_DIR"
+
+    # 设置 API Key 环境变量（供各测试脚本使用）
     if [ -n "$api_key" ]; then
         export TEST_API_KEY="$api_key"
         log_info "使用指定的 API Key"
     elif [ -n "$TEST_API_KEY" ]; then
         log_info "使用环境变量 TEST_API_KEY"
     else
-        log_info "使用默认测试 API Key"
+        log_info "使用内置默认 API Key"
     fi
 
-    python3 test_xdp_block.py "${other_args[@]}"
+    local failed=0
 
-    local exit_code=$?
-
-    if [ $exit_code -eq 0 ]; then
-        echo "========================================"
-        log_info "测试完成"
-        return 0
-    else
-        echo "========================================"
-        log_error "测试失败"
+    # 1. XDP IP 阻断测试
+    echo ""
+    log_info "[1/4] 运行 XDP IP 阻断测试 (test_xdp_block.py)"
+    echo "----------------------------------------"
+    if ! python3 test_xdp_block.py "${other_args[@]}"; then
+        log_error "XDP IP 阻断测试失败，中止"
         return 1
     fi
+    log_info "[1/4] XDP IP 阻断测试通过"
+
+    # 2. DDoS 检测测试
+    echo ""
+    log_info "[2/4] 运行 DDoS 检测测试 (test_ddos_detection.py)"
+    echo "----------------------------------------"
+    if ! python3 test_ddos_detection.py "${other_args[@]}"; then
+        log_error "DDoS 检测测试失败，中止"
+        return 1
+    fi
+    log_info "[2/4] DDoS 检测测试通过"
+
+    # 3. 日志触发封禁测试
+    echo ""
+    log_info "[3/4] 运行日志触发封禁测试 (test_log_ban.py)"
+    echo "----------------------------------------"
+    if ! python3 test_log_ban.py "${other_args[@]}"; then
+        log_error "日志触发封禁测试失败，中止"
+        return 1
+    fi
+    log_info "[3/4] 日志触发封禁测试通过"
+
+    # 4. BlockLog 阻断日志测试
+    echo ""
+    log_info "[4/4] 运行 BlockLog 阻断日志测试 (test_blocklog.py)"
+    echo "----------------------------------------"
+    if ! python3 test_blocklog.py "${other_args[@]}"; then
+        log_error "BlockLog 阻断日志测试失败，中止"
+        return 1
+    fi
+    log_info "[4/4] BlockLog 阻断日志测试通过"
+
+    echo ""
+    echo "========================================"
+    log_info "全部 4 项测试通过"
+    echo "========================================"
+    return 0
 }
 
 # 主函数
 main() {
-    # 检测测试类型
-    local run_ddos=false
-    local run_log_ban=false
-    local run_blocklog=false
+    # 检测是否指定了单一测试类型
+    local run_all=true
     for arg in "$@"; do
-        if [ "$arg" = "--ddos" ]; then
-            run_ddos=true
-            break
-        fi
-        if [ "$arg" = "--log-ban" ]; then
-            run_log_ban=true
-            break
-        fi
-        if [ "$arg" = "--blocklog" ]; then
-            run_blocklog=true
+        if [ "$arg" = "--ddos" ] || [ "$arg" = "--log-ban" ] || [ "$arg" = "--blocklog" ]; then
+            run_all=false
             break
         fi
     done
 
-    if [ "$run_ddos" = true ]; then
+    if [ "$run_all" = true ]; then
         log_info "=========================================="
-        log_info "DDoS 检测功能集成测试"
-        log_info "=========================================="
-    elif [ "$run_log_ban" = true ]; then
-        log_info "=========================================="
-        log_info "日志触发封禁集成测试（WAF/FailGuard/Rate Limit）"
-        log_info "=========================================="
-    elif [ "$run_blocklog" = true ]; then
-        log_info "=========================================="
-        log_info "BlockLog 阻断日志集成测试"
+        log_info "全量集成测试（XDP / DDoS / LogBan / BlockLog）"
         log_info "=========================================="
     else
-        log_info "=========================================="
-        log_info "eBPF XDP IP 阻断功能集成测试"
-        log_info "=========================================="
+        for arg in "$@"; do
+            if [ "$arg" = "--ddos" ]; then
+                log_info "=========================================="
+                log_info "DDoS 检测功能集成测试"
+                log_info "=========================================="
+                break
+            fi
+            if [ "$arg" = "--log-ban" ]; then
+                log_info "=========================================="
+                log_info "日志触发封禁集成测试（WAF/FailGuard/Rate Limit）"
+                log_info "=========================================="
+                break
+            fi
+            if [ "$arg" = "--blocklog" ]; then
+                log_info "=========================================="
+                log_info "BlockLog 阻断日志集成测试"
+                log_info "=========================================="
+                break
+            fi
+        done
     fi
 
     # 环境检查
@@ -386,8 +311,12 @@ main() {
     # 清理之前可能的残留
     cleanup
 
-    # 运行测试
-    run_tests "$@"
+    # 运行测试：默认全量，指定则单测
+    if [ "$run_all" = true ]; then
+        run_all_tests "$@"
+    else
+        run_single_test "$@"
+    fi
 }
 
 main "$@"
