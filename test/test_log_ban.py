@@ -241,7 +241,7 @@ class RhoAiasProcess:
         try:
             self.log_file = open(self.log_path, 'w')
             self.process = subprocess.Popen(
-                [self.binary_path],
+                [self.binary_path, "--config", config_file],
                 cwd=self.config_dir,
                 stdout=self.log_file,
                 stderr=subprocess.STDOUT,

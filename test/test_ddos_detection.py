@@ -145,9 +145,9 @@ class RhoAiasProcess:
         try:
             # 打开日志文件
             self.log_file = open(self.log_path, 'w')
-            # 在配置文件所在目录运行程序，输出到日志文件
+            # 在配置文件所在目录运行程序，输出到日志文件，显式指定配置路径
             self.process = subprocess.Popen(
-                [self.binary_path],
+                [self.binary_path, "--config", config_file],
                 cwd=self.config_dir,
                 stdout=self.log_file,
                 stderr=subprocess.STDOUT,
