@@ -492,11 +492,7 @@ class TestAPIKeyAuth(unittest.TestCase):
 
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-<<<<<<< HEAD
         cls.default_config_path = os.path.join(cls.project_root, "config", "config.yml")
-=======
-        cls.default_config_path = os.path.join(cls.project_root, "config/config.yml")
->>>>>>> main
         cls.api_port = 18080
 
         # 检查二进制文件
