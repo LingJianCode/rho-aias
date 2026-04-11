@@ -3,8 +3,11 @@
 package threatintel
 
 import (
+	"encoding/gob"
 	"errors"
 	"time"
+
+	"rho-aias/internal/feed"
 )
 
 // SourceID 威胁情报源标识符
@@ -41,14 +44,8 @@ type Status struct {
 	Sources    map[SourceID]SourceStatus `json:"sources"`     // 各情报源的状态
 }
 
-// SourceStatus 单个威胁情报源的状态
-type SourceStatus struct {
-	Enabled    bool      `json:"enabled"`     // 是否启用该情报源
-	LastUpdate time.Time `json:"last_update"` // 最后更新时间
-	Success    bool      `json:"success"`     // 最后一次更新是否成功
-	RuleCount  int       `json:"rule_count"`  // 该情报源的规则数量
-	Error      string    `json:"error"`       // 错误信息（如果更新失败）
-}
+// SourceStatus 单个威胁情报源的状态（复用公共类型）
+type SourceStatus = feed.SourceStatus
 
 // NewIntelData 创建新的威胁情报数据
 func NewIntelData(source SourceID) *IntelData {
@@ -85,3 +82,10 @@ func (d *IntelData) TotalCount() int {
 }
 
 var ErrThreatIntelCacheNotFound = errors.New("threat intelligence cache not found")
+
+// 初始化 gob 编码器，注册自定义类型
+func init() {
+	gob.Register(SourceID(""))
+	gob.Register(IntelData{})
+	gob.Register(CacheData{})
+}
