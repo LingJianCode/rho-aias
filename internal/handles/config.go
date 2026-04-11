@@ -152,6 +152,9 @@ func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 		return
 	}
 
+	// 0. 记录更新前配置快照（用于日志 diff）
+	beforeRaw, _ := json.Marshal(h.getRuntimeConfig(module))
+
 	// 1. 调用模块 UpdateConfig（内存即时生效）
 	if err := h.applyConfig(module, raw); err != nil {
 		response.InternalError(c, "Failed to apply config: "+err.Error())
@@ -169,7 +172,9 @@ func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 		return
 	}
 
-	logger.Infof("[ConfigAPI] Module %s config updated and persisted", module)
+	// 3. 日志记录变更前后对比
+	afterRaw, _ := json.Marshal(value)
+	logger.Infof("[ConfigAPI] Module %s updated: before=%s after=%s (persisted)", module, string(beforeRaw), string(afterRaw))
 	response.OKMsg(c, fmt.Sprintf("Module %s config updated successfully", module))
 }
 

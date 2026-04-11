@@ -652,12 +652,14 @@ func main() {
 // loadDynamicConfigFromDB 从数据库加载动态配置覆盖 YAML 值
 // 只在启动时调用一次，之后运行时全走 API
 func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Config) {
+	loaded := make(map[string]string) // module -> "YAML default" or "DB override: {values}"
+
 	// FailGuard
 	type failGuardDynamic struct {
-		Enabled     bool `json:"enabled"`
-		MaxRetry    int  `json:"max_retry"`
-		FindTime    int  `json:"find_time"`
-		BanDuration int  `json:"ban_duration"`
+		Enabled     bool   `json:"enabled"`
+		MaxRetry    int    `json:"max_retry"`
+		FindTime    int    `json:"find_time"`
+		BanDuration int    `json:"ban_duration"`
 		Mode        string `json:"mode"`
 	}
 	var fg failGuardDynamic
@@ -677,6 +679,8 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		if fg.Mode != "" {
 			cfg.FailGuard.Mode = fg.Mode
 		}
+		loaded["failguard"] = fmt.Sprintf("enabled=%v, max_retry=%d, find_time=%d, ban_duration=%d, mode=%s",
+			fg.Enabled, fg.MaxRetry, fg.FindTime, fg.BanDuration, fg.Mode)
 	}
 
 	// WAF
@@ -692,6 +696,7 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		if wf.BanDuration > 0 {
 			cfg.WAF.BanDuration = wf.BanDuration
 		}
+		loaded["waf"] = fmt.Sprintf("enabled=%v, ban_duration=%d", wf.Enabled, wf.BanDuration)
 	}
 
 	// RateLimit
@@ -707,6 +712,7 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		if rl.BanDuration > 0 {
 			cfg.RateLimit.BanDuration = rl.BanDuration
 		}
+		loaded["rate_limit"] = fmt.Sprintf("enabled=%v, ban_duration=%d", rl.Enabled, rl.BanDuration)
 	}
 
 	// AnomalyDetection
@@ -765,6 +771,9 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 				},
 			}
 		}
+		portsStr := fmt.Sprintf("%v", ad.Ports)
+		loaded["anomaly_detection"] = fmt.Sprintf("enabled=%v, min_packets=%d, ports=%s",
+			ad.Enabled, ad.MinPackets, portsStr)
 	}
 
 	// GeoBlocking
@@ -784,6 +793,8 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		if geo.AllowedCountries != nil {
 			cfg.GeoBlocking.AllowedCountries = geo.AllowedCountries
 		}
+		loaded["geo_blocking"] = fmt.Sprintf("enabled=%v, mode=%s, countries=%v",
+			geo.Enabled, geo.Mode, geo.AllowedCountries)
 	}
 
 	// Intel
@@ -795,7 +806,17 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		logger.Warnf("[Main] Failed to load intel dynamic config from DB: %v", err)
 	} else if ok {
 		cfg.Intel.Enabled = intel.Enabled
+		loaded["intel"] = fmt.Sprintf("enabled=%v", intel.Enabled)
 	}
 
-	logger.Info("[Main] Dynamic config loaded from DB (DB values override YAML)")
+	// 输出每个模块的配置来源（便于排查"改了config.yml不生效"的问题）
+	modules := []string{"failguard", "waf", "rate_limit", "anomaly_detection", "geo_blocking", "intel"}
+	logger.Info("[Main] Dynamic config loaded (DB values override YAML):")
+	for _, mod := range modules {
+		if val, exists := loaded[mod]; exists {
+			logger.Infof("[Main] [DynamicConfig] %-20s → DB override       %s", mod, val)
+		} else {
+			logger.Infof("[Main] [DynamicConfig] %-20s → YAML default      (no DB record)", mod)
+		}
+	}
 }
