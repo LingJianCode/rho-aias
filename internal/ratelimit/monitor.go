@@ -122,6 +122,21 @@ func (m *Monitor) extractIP(line string) string {
 	return matches[0]
 }
 
+// UpdateConfig 热更新 RateLimit 动态配置
+func (m *Monitor) UpdateConfig(enabled bool, banDuration int) {
+	m.cfg.Enabled = enabled
+	m.cfg.BanDuration = banDuration
+	logger.Infof("[RateLimit] Config updated: enabled=%v, ban_duration=%d", enabled, banDuration)
+}
+
+// GetConfig 获取当前 RateLimit 配置（返回可动态化的字段）
+func (m *Monitor) GetConfig() map[string]interface{} {
+	return map[string]interface{}{
+		"enabled":      m.cfg.Enabled,
+		"ban_duration": m.cfg.BanDuration,
+	}
+}
+
 // GetBannedIPs 获取当前已封禁的 IP 列表
 func (m *Monitor) GetBannedIPs() []string {
 	return m.watcher.GetBannedIPs()

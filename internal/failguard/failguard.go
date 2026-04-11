@@ -282,6 +282,34 @@ func (m *Monitor) cleanupFailures() {
 	}
 }
 
+// UpdateConfig 热更新 FailGuard 动态配置
+func (m *Monitor) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int, mode string) {
+	m.failMu.Lock()
+	defer m.failMu.Unlock()
+
+	m.cfg.Enabled = enabled
+	m.cfg.MaxRetry = maxRetry
+	m.cfg.FindTime = findTime
+	m.cfg.BanDuration = banDuration
+	if mode != "" {
+		m.cfg.Mode = mode
+	}
+
+	logger.Infof("[FailGuard] Config updated: enabled=%v, max_retry=%d, find_time=%d, ban_duration=%d, mode=%s",
+		enabled, maxRetry, findTime, banDuration, mode)
+}
+
+// GetConfig 获取当前 FailGuard 配置（返回可动态化的字段）
+func (m *Monitor) GetConfig() map[string]interface{} {
+	return map[string]interface{}{
+		"enabled":      m.cfg.Enabled,
+		"max_retry":    m.cfg.MaxRetry,
+		"find_time":    m.cfg.FindTime,
+		"ban_duration": m.cfg.BanDuration,
+		"mode":         m.cfg.Mode,
+	}
+}
+
 // GetBannedIPs 获取当前已封禁的 IP 列表
 func (m *Monitor) GetBannedIPs() []string {
 	return m.watcher.GetBannedIPs()

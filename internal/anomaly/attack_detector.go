@@ -10,6 +10,11 @@ type AttackDetector struct {
 	config AttacksConfig
 }
 
+// UpdateConfig 热更新攻击检测配置
+func (d *AttackDetector) UpdateConfig(config AttacksConfig) {
+	d.config = config
+}
+
 // NewAttackDetector 创建新的攻击检测器
 func NewAttackDetector(config AttacksConfig) *AttackDetector {
 	// 设置默认值

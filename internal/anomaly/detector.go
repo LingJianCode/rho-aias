@@ -255,6 +255,41 @@ func (d *Detector) cleanupExpiredBans() {
 	}
 }
 
+// UpdateConfig 热更新异常检测动态配置
+func (d *Detector) UpdateConfig(cfg AnomalyDetectionConfig) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.config.Enabled = cfg.Enabled
+	d.config.MinPackets = cfg.MinPackets
+	d.config.Ports = cfg.Ports
+
+	// 更新 baseline 配置
+	d.config.Baseline = cfg.Baseline
+	d.baselineDetector.UpdateConfig(cfg.Baseline)
+
+	// 更新 attacks 配置
+	d.config.Attacks = cfg.Attacks
+	d.attackDetector.UpdateConfig(cfg.Attacks)
+
+	logger.Infof("[AnomalyDetection] Config updated: enabled=%v, min_packets=%d, ports=%v",
+		cfg.Enabled, cfg.MinPackets, cfg.Ports)
+}
+
+// GetConfig 获取当前异常检测配置（返回可动态化的字段）
+func (d *Detector) GetConfig() map[string]interface{} {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	return map[string]interface{}{
+		"enabled":         d.config.Enabled,
+		"min_packets":     d.config.MinPackets,
+		"ports":           d.config.Ports,
+		"baseline":        d.config.Baseline,
+		"attacks":         d.config.Attacks,
+	}
+}
+
 // GetStats 获取检测器统计信息
 func (d *Detector) GetStats() map[string]interface{} {
 	return map[string]interface{}{

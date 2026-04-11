@@ -11,6 +11,11 @@ type BaselineDetector struct {
 	config BaselineConfig
 }
 
+// UpdateConfig 热更新基线检测配置
+func (d *BaselineDetector) UpdateConfig(config BaselineConfig) {
+	d.config = config
+}
+
 // NewBaselineDetector 创建新的基线检测器
 func NewBaselineDetector(config BaselineConfig) *BaselineDetector {
 	// 设置默认值

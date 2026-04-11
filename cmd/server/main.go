@@ -212,6 +212,10 @@ func main() {
 		} else if count > 0 {
 			logger.Infof("[Main] Marked %d active ban records as auto_unblock (eBPF state lost on restart)", count)
 		}
+
+		// 加载 DB 中的动态配置覆盖 YAML 值
+		dynamicConfigService := services.NewDynamicConfigService(bizDB.DB)
+		loadDynamicConfigFromDB(dynamicConfigService, cfg)
 	}
 
 	// Initialize Intel Manager (if enabled)
@@ -583,6 +587,21 @@ func main() {
 		routers.RegisterBanRecordRoutes(api, banRecordHandle, authEnforcer, authSvc, apiKeySvc)
 	}
 
+	// Register unified config routes (dynamic config API)
+	if bizDB != nil {
+		dynamicConfigService := services.NewDynamicConfigService(bizDB.DB)
+		configHandle := handles.NewConfigHandle(
+			dynamicConfigService,
+			failguardMonitor,
+			wafMonitor,
+			rateLimitMonitor,
+			anomalyDetector,
+			geoMgr,
+			intelMgr,
+		)
+		routers.RegisterConfigRoutes(api, configHandle, authEnforcer, authSvc, apiKeySvc)
+	}
+
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: r,
@@ -627,4 +646,112 @@ func main() {
 
 	// Sync logger before exit
 	_ = logger.Sync()
+}
+
+// loadDynamicConfigFromDB 从数据库加载动态配置覆盖 YAML 值
+// 只在启动时调用一次，之后运行时全走 API
+func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Config) {
+	// FailGuard
+	type failGuardDynamic struct {
+		Enabled     bool `json:"enabled"`
+		MaxRetry    int  `json:"max_retry"`
+		FindTime    int  `json:"find_time"`
+		BanDuration int  `json:"ban_duration"`
+		Mode        string `json:"mode"`
+	}
+	var fg failGuardDynamic
+	if ok, _ := svc.LoadTo("failguard", &fg); ok {
+		cfg.FailGuard.Enabled = fg.Enabled
+		if fg.MaxRetry > 0 {
+			cfg.FailGuard.MaxRetry = fg.MaxRetry
+		}
+		if fg.FindTime > 0 {
+			cfg.FailGuard.FindTime = fg.FindTime
+		}
+		if fg.BanDuration > 0 {
+			cfg.FailGuard.BanDuration = fg.BanDuration
+		}
+		if fg.Mode != "" {
+			cfg.FailGuard.Mode = fg.Mode
+		}
+	}
+
+	// WAF
+	type wafDynamic struct {
+		Enabled     bool `json:"enabled"`
+		BanDuration int  `json:"ban_duration"`
+	}
+	var wf wafDynamic
+	if ok, _ := svc.LoadTo("waf", &wf); ok {
+		cfg.WAF.Enabled = wf.Enabled
+		if wf.BanDuration > 0 {
+			cfg.WAF.BanDuration = wf.BanDuration
+		}
+	}
+
+	// RateLimit
+	type rateLimitDynamic struct {
+		Enabled     bool `json:"enabled"`
+		BanDuration int  `json:"ban_duration"`
+	}
+	var rl rateLimitDynamic
+	if ok, _ := svc.LoadTo("rate_limit", &rl); ok {
+		cfg.RateLimit.Enabled = rl.Enabled
+		if rl.BanDuration > 0 {
+			cfg.RateLimit.BanDuration = rl.BanDuration
+		}
+	}
+
+	// AnomalyDetection
+	type anomalyDynamic struct {
+		Enabled    bool              `json:"enabled"`
+		MinPackets int               `json:"min_packets"`
+		Ports      []int             `json:"ports"`
+		Baseline   anomaly.BaselineConfig `json:"baseline"`
+		Attacks    anomaly.AttacksConfig  `json:"attacks"`
+	}
+	var ad anomalyDynamic
+	if ok, _ := svc.LoadTo("anomaly_detection", &ad); ok {
+		cfg.AnomalyDetection.Enabled = ad.Enabled
+		if ad.MinPackets > 0 {
+			cfg.AnomalyDetection.MinPackets = ad.MinPackets
+		}
+		if len(ad.Ports) > 0 {
+			cfg.AnomalyDetection.Ports = ad.Ports
+		}
+		if ad.Baseline.MinSampleCount > 0 {
+			cfg.AnomalyDetection.Baseline = ad.Baseline
+		}
+		if ad.Attacks.SynFlood.RatioThreshold > 0 {
+			cfg.AnomalyDetection.Attacks = ad.Attacks
+		}
+	}
+
+	// GeoBlocking
+	type geoDynamic struct {
+		Enabled          bool     `json:"enabled"`
+		Mode             string   `json:"mode"`
+		AllowedCountries []string `json:"allowed_countries"`
+	}
+	var geo geoDynamic
+	if ok, _ := svc.LoadTo("geo_blocking", &geo); ok {
+		cfg.GeoBlocking.Enabled = geo.Enabled
+		if geo.Mode != "" {
+			cfg.GeoBlocking.Mode = geo.Mode
+		}
+		if geo.AllowedCountries != nil {
+			cfg.GeoBlocking.AllowedCountries = geo.AllowedCountries
+		}
+	}
+
+	// Intel
+	type intelDynamic struct {
+		Enabled bool `json:"enabled"`
+	}
+	var intel intelDynamic
+	if ok, _ := svc.LoadTo("intel", &intel); ok {
+		cfg.Intel.Enabled = intel.Enabled
+	}
+
+	logger.Info("[Main] Dynamic config loaded from DB (DB values override YAML)")
 }

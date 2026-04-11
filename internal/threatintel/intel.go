@@ -368,6 +368,76 @@ func (m *Manager) TriggerUpdate() error {
 	return nil
 }
 
+// UpdateSourceConfig 热更新情报源配置（单个源的 enabled/schedule/url）
+func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule string, url string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	src, exists := m.config.Sources[sourceID]
+	if !exists {
+		return fmt.Errorf("source %s not found", sourceID)
+	}
+
+	src.Enabled = enabled
+	if schedule != "" {
+		src.Schedule = schedule
+	}
+	if url != "" {
+		src.URL = url
+	}
+	m.config.Sources[sourceID] = src
+
+	// 如果模块已启动，需要重新调度 Cron 任务
+	if m.cron != nil {
+		// 移除旧的 Cron 任务
+		if oldJobID, ok := m.jobIDs[SourceID(sourceID)]; ok {
+			m.cron.Remove(oldJobID)
+			delete(m.jobIDs, SourceID(sourceID))
+		}
+
+		// 如果启用且需要周期调度，注册新的 Cron 任务
+		if enabled && src.Periodic {
+			if err := m.scheduleSource(SourceID(sourceID), src); err != nil {
+				logger.Warnf("[ThreatIntel] Failed to reschedule %s: %v", sourceID, err)
+			}
+		}
+	}
+
+	logger.Infof("[ThreatIntel] Source config updated: %s, enabled=%v, schedule=%s", sourceID, enabled, schedule)
+	return nil
+}
+
+// UpdateConfig 热更新情报模块总开关
+func (m *Manager) UpdateConfig(enabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.config.Enabled = enabled
+	m.status.Enabled = enabled
+	logger.Infof("[ThreatIntel] Config updated: enabled=%v", enabled)
+}
+
+// GetConfig 获取当前情报模块配置（返回可动态化的字段）
+func (m *Manager) GetConfig() map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sources := make(map[string]interface{})
+	for id, src := range m.config.Sources {
+		sources[id] = map[string]interface{}{
+			"enabled":  src.Enabled,
+			"schedule": src.Schedule,
+			"url":      src.URL,
+			"format":   src.Format,
+		}
+	}
+
+	return map[string]interface{}{
+		"enabled": m.config.Enabled,
+		"sources": sources,
+	}
+}
+
 // Stop 停止威胁情报管理器
 func (m *Manager) Stop() {
 	logger.Info("[ThreatIntel] Stopping threat intelligence manager...")

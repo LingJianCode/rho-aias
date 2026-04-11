@@ -62,11 +62,10 @@ func (db *Database) AutoMigrateBusiness() error {
 	if err := db.DB.AutoMigrate(
 		&models.SourceStatusRecord{},
 		&models.BanRecord{},
+		&models.DynamicConfig{},
 	); err != nil {
 		return err
 	}
-
-
 
 	return nil
 }
