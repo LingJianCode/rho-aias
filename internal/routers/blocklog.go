@@ -47,4 +47,18 @@ func RegisterBlockLogRoutes(group *gin.RouterGroup, blockLogHandle *handles.Bloc
 		middleware.CasbinMiddleware(enforcer, "blocklog:clear", "clear"),
 		blockLogHandle.ClearRecords,
 	)
+
+	// 查看小时趋势 - 需要 blocklog:read 权限
+	blocklog.GET("/hourly-trend",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		blockLogHandle.GetHourlyTrend,
+	)
+
+	// 查看丢弃概览 - 需要 blocklog:read 权限
+	blocklog.GET("/dropped-summary",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		blockLogHandle.GetDroppedSummary,
+	)
 }
