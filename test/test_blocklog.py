@@ -95,8 +95,8 @@ class RhoAiasProcess:
         config['blocklog']['sample_rate'] = 1
 
         # 保留手动规则功能
-        config['intel']['enabled'] = True
-        config['geo_blocking']['enabled'] = True
+        config['intel']['enabled'] = False
+        config['geo_blocking']['enabled'] = False
         config['manual']['enabled'] = True
 
         # 认证配置
@@ -210,6 +210,16 @@ class BlockLogAPIClient:
                 return False, {"code": -1, "message": str(e)}
         except Exception as e:
             return False, {"code": -1, "message": str(e)}
+
+    def enable_event_reporting(self, sample_rate: int = 1) -> Tuple[bool, dict]:
+        """启用 eBPF 事件上报（ringbuf 输出）
+        
+        eBPF 内核程序的 event_config map 默认 enabled=0，
+        必须通过此 API 显式启用才能向 ringbuf 写入阻断事件。
+        sample_rate=1 表示每个丢弃包都上报（100% 采样）。
+        """
+        return self._request("POST", "/api/xdp/events/config",
+                             {"enabled": True, "sample_rate": sample_rate})
 
     def add_rule(self, value: str) -> Tuple[bool, dict]:
         """添加阻断规则"""
@@ -343,6 +353,10 @@ class TestBlockLog(unittest.TestCase):
         Returns:
             (blocked_successfully, records_list)
         """
+        # 确保 eBPF 事件上报已启用（ringbuf 输出）
+        success, resp = self.api_client.enable_event_reporting(sample_rate=1)
+        self.assertTrue(success, f"Failed to enable event reporting: {resp}")
+        
         self._add_rule_and_wait(target_ip, wait_sec=wait_before_ping)
         blocked, output = self._ping_and_expect_blocked(target_ip, count=ping_count)
         self.assertTrue(blocked, f"Block not effective for {target_ip}: {output}")
@@ -457,6 +471,10 @@ class TestBlockLog(unittest.TestCase):
         self.api_client.clear_records()
         time.sleep(1)
 
+        # 确保 eBPF 事件上报已启用（ringbuf 输出）
+        success, resp = self.api_client.enable_event_reporting(sample_rate=1)
+        self.assertTrue(success, f"Failed to enable event reporting: {resp}")
+
         # 封禁并多次触发（累积阻断计数）
         self._add_rule_and_wait("10.0.1.2")
         for i in range(5):
@@ -569,6 +587,10 @@ class TestBlockLog(unittest.TestCase):
 
         self.api_client.clear_records()
         time.sleep(1)
+
+        # 确保 eBPF 事件上报已启用（ringbuf 输出）
+        success, resp = self.api_client.enable_event_reporting(sample_rate=1)
+        self.assertTrue(success, f"Failed to enable event reporting: {resp}")
 
         # 在 veth1 (ns1 内) 上添加第二个 IP 地址
         # 这样两个 IP 都在同一子网且都经过 veth0/XDP
