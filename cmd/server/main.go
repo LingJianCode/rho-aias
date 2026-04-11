@@ -465,6 +465,7 @@ func main() {
 	)
 	if authDB == nil {
 		logger.Fatalf("[Main] Failed to initialize auth database, authentication is mandatory")
+		return
 	}
 	defer authDB.Close()
 

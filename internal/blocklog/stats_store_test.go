@@ -52,16 +52,20 @@ func TestRecord_MultipleSources(t *testing.T) {
 	hourKey := time.Now().Format("2006-01-02T15")
 
 	var ipsumCount int64
-	ss.db.QueryRow(
+	if err := ss.db.QueryRow(
 		`SELECT count FROM hourly_stats WHERE hour = ? AND rule_source = ?`,
 		hourKey, "ipsum",
-	).Scan(&ipsumCount)
+	).Scan(&ipsumCount); err != nil {
+		t.Fatalf("failed to query ipsum count: %v", err)
+	}
 
 	var spamhausCount int64
-	ss.db.QueryRow(
+	if err := ss.db.QueryRow(
 		`SELECT count FROM hourly_stats WHERE hour = ? AND rule_source = ?`,
 		hourKey, "spamhaus",
-	).Scan(&spamhausCount)
+	).Scan(&spamhausCount); err != nil {
+		t.Fatalf("failed to query spamhaus count: %v", err)
+	}
 
 	if ipsumCount != 2 {
 		t.Errorf("expected ipsum=2, got %d", ipsumCount)
@@ -129,10 +133,12 @@ func TestCleanup_OldData(t *testing.T) {
 
 	// 手动插入一条旧数据（30天前）
 	oldHour := time.Now().AddDate(0, 0, -30).Format("2006-01-02T15")
-	ss.db.Exec(
+	if _, err := ss.db.Exec(
 		`INSERT INTO hourly_stats (hour, rule_source, count) VALUES (?, ?, 100)`,
 		oldHour, "old_source",
-	)
+	); err != nil {
+		t.Fatalf("failed to insert old data: %v", err)
+	}
 
 	// 清理 7 天前的数据
 	if err := ss.Cleanup(7); err != nil {
@@ -156,7 +162,9 @@ func TestCleanup_OldData(t *testing.T) {
 	// 当前数据应保留
 	var currentCount int64
 	currentHourKey := time.Now().Format("2006-01-02T15")
-	ss.db.QueryRow(`SELECT COALESCE(SUM(count), 0) FROM hourly_stats WHERE hour = ?`, currentHourKey).Scan(&currentCount)
+	if err := ss.db.QueryRow(`SELECT COALESCE(SUM(count), 0) FROM hourly_stats WHERE hour = ?`, currentHourKey).Scan(&currentCount); err != nil {
+		t.Fatalf("failed to query current count: %v", err)
+	}
 	if currentCount == 0 {
 		t.Error("current data should be preserved after cleanup")
 	}
