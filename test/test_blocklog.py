@@ -253,7 +253,19 @@ class BlockLogAPIClient:
 
 
 class TestBlockLog(unittest.TestCase):
-    """BlockLog 阻断日志功能测试"""
+    """BlockLog 阻断日志功能测试
+
+    网络拓扑:
+        main namespace          ns1 (rho_bl_ns1)
+       ┌──────────────┐      ┌──────────────┐
+       │ rho_bl_veth0 │<────>│ rho_bl_veth1 │
+       │ 10.0.1.1/24  │      │ 10.0.1.2/24  │
+       └──────────────┘      └──────────────┘
+
+    XDP 绑定在 rho_bl_veth0 上。
+    触发阻断时，必须从主 namespace ping ns1 的 IP（10.0.1.2），
+    这样数据包才会经过 veth0 被 XDP 拦截。
+    """
 
     @classmethod
     def setUpClass(cls):
@@ -297,25 +309,53 @@ class TestBlockLog(unittest.TestCase):
         )
         return self.rho_process.start()
 
-    def _wait_for_records(self, expected_count: int, timeout: float = 5.0) -> Tuple[bool, list]:
-        """等待 blocklog 记录产生"""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            success, resp = self.api_client.get_records({"limit": 200})
-            if success:
-                records = resp.get("data", {}).get("records", [])
-                if len(records) >= expected_count:
-                    return True, records
-            time.sleep(0.5)
-        success, resp = self.api_client.get_records({"limit": 200})
-        records = resp.get("data", {}).get("records", []) if success else []
-        return len(records) >= expected_count, records
+    def _safe_records(self, resp: dict) -> list:
+        """安全提取 records 列表，处理 Go 可能返回 null 的场景"""
+        data = resp.get("data") or {}
+        records = data.get("records")
+        return records if isinstance(records, list) else []
 
-    def _trigger_block(self, target_ip: str, count: int = 3):
-        """触发阻断：从 ns1 发送 ping，触发 XDP 阻断"""
-        success, output = self.env.ping_from_ns(self.env.ns1, target_ip, count=count, timeout=2.0)
-        # 阻断成功意味着 ping 失败（目标不可达）
-        return not success, output
+    def _ping_and_expect_blocked(self, target_ip: str, count: int = 3, timeout: float = 2.0) -> Tuple[bool, str]:
+        """从主 namespace 发送 ping，期望被 XDP 阻断
+        
+        注意：必须使用 ping_from_main，因为主 namespace 是发包方，
+        数据包经过 veth0（绑定 XDP）到达目标 IP 时才会被拦截。
+        
+        Returns:
+            (is_blocked, output): is_blocked=True 表示 ping 失败（被正确阻断）
+        """
+        success, output = self.env.ping_from_main(target_ip, count=count, timeout=timeout)
+        blocked = not success  # ping 失败 = 阻断成功
+        return blocked, output
+
+    def _add_rule_and_wait(self, ip: str, wait_sec: float = 1.5):
+        """添加阻断规则并等待生效"""
+        success, resp = self.api_client.add_rule(ip)
+        self.assertTrue(success, f"Failed to add rule for {ip}: {resp}")
+        logger.info(f"Added block rule for {ip}")
+        time.sleep(wait_sec)
+
+    def _do_block_cycle(self, target_ip: str, ping_count: int = 3,
+                        wait_before_ping: float = 1.5,
+                        wait_after_block: float = 2.0) -> Tuple[bool, list]:
+        """执行完整的「添加规则 → 触发阻断 → 等待 → 查询记录」周期
+        
+        Returns:
+            (blocked_successfully, records_list)
+        """
+        self._add_rule_and_wait(target_ip, wait_sec=wait_before_ping)
+        blocked, output = self._ping_and_expect_blocked(target_ip, count=ping_count)
+        self.assertTrue(blocked, f"Block not effective for {target_ip}: {output}")
+        logger.info(f"Block triggered successfully for {target_ip}")
+        time.sleep(wait_after_block)
+
+        success, resp = self.api_client.get_records({"limit": 200})
+        self.assertTrue(success, f"Failed to get records: {resp}")
+        return blocked, self._safe_records(resp)
+
+    # ====================================================================
+    # 测试用例
+    # ====================================================================
 
     def test_01_sampling_basic(self):
         """测试阻断采样基本功能：封禁 IP → 发包 → API 查到记录"""
@@ -324,31 +364,14 @@ class TestBlockLog(unittest.TestCase):
             "Failed to start rho-aias"
         )
 
-        # 验证初始连通性
-        blocked, _ = self._trigger_block("10.0.1.2", count=2)
-        self.assertFalse(blocked, "Initial connectivity check failed")
+        # 验证初始连通性：未封禁时应能 ping 通
+        success, _ = self.env.ping_from_main("10.0.1.2", count=2)
+        self.assertTrue(success, "Initial connectivity check failed")
 
-        # 添加阻断规则
-        success, resp = self.api_client.add_rule("10.0.1.2")
-        self.assertTrue(success, f"Failed to add rule: {resp}")
-        logger.info("Added block rule for 10.0.1.2")
-
-        time.sleep(1)
-
-        # 触发阻断
-        blocked, output = self._trigger_block("10.0.1.2", count=4)
-        self.assertTrue(blocked, f"Block not effective: {output}")
-        logger.info("Block triggered successfully")
-
-        # 等待 ringbuf → callback → AddRecord 完成
-        time.sleep(2)
+        # 执行完整阻断周期
+        _, records = self._do_block_cycle("10.0.1.2", ping_count=4)
 
         # 验证 blocklog 有记录
-        success, resp = self.api_client.get_records()
-        self.assertTrue(success, f"Failed to get records: {resp}")
-
-        data = resp.get("data", {})
-        records = data.get("records", [])
         self.assertGreater(len(records), 0, "No blocklog records found after blocking")
         logger.info(f"Found {len(records)} blocklog record(s)")
 
@@ -362,15 +385,7 @@ class TestBlockLog(unittest.TestCase):
             "Failed to start rho-aias"
         )
 
-        # 添加并触发阻断
-        self.api_client.add_rule("10.0.1.2")
-        time.sleep(1)
-        self._trigger_block("10.0.1.2", count=3)
-        time.sleep(2)
-
-        success, resp = self.api_client.get_records()
-        self.assertTrue(success)
-        records = resp.get("data", {}).get("records", [])
+        _, records = self._do_block_cycle("10.0.1.2", ping_count=3)
 
         self.assertGreater(len(records), 0, "No records found")
 
@@ -384,15 +399,17 @@ class TestBlockLog(unittest.TestCase):
         # 验证字段值合理性
         self.assertEqual(record["src_ip"], "10.0.1.2", "src_ip mismatch")
         self.assertEqual(record["dst_ip"], "10.0.1.1", "dst_ip mismatch")
-        self.assertEqual(record["match_type"], "ip4_exact", "match_type should be ip4_exact for manual block")
-        self.assertEqual(record["rule_source"], "manual", "rule_source should be manual")
+        self.assertEqual(record["match_type"], "ip4_exact",
+                         "match_type should be ip4_exact for manual block")
+        self.assertEqual(record["rule_source"], "manual",
+                         "rule_source should be manual")
         self.assertGreater(record["packet_size"], 0, "packet_size should be positive")
         # countryCode 在 manual 阻断时为空字符串
         self.assertIn("country_code", record)
-        self.assertEqual(record["country_code"], "", "country_code should be empty for manual block")
+        self.assertEqual(record["country_code"], "",
+                         "country_code should be empty for manual block")
 
         logger.info("All record fields validated successfully")
-
         self.api_client.delete_rule("10.0.1.2")
 
     def test_03_stats_consistency(self):
@@ -406,36 +423,28 @@ class TestBlockLog(unittest.TestCase):
         self.api_client.clear_records()
         time.sleep(1)
 
-        # 添加并触发阻断
-        self.api_client.add_rule("10.0.1.2")
-        time.sleep(1)
-        self._trigger_block("10.0.1.2", count=3)
-        time.sleep(2)
+        # 执行阻断
+        _, records = self._do_block_cycle("10.0.1.2", ping_count=3)
 
-        # 获取 records 数量
-        success, resp = self.api_client.get_records({"limit": 200})
-        self.assertTrue(success)
-        records = resp.get("data", {}).get("records", [])
         records_count = len(records)
 
-        # 获取 stats
+        # 获取 stats 并验证一致性
         success, resp = self.api_client.get_stats()
-        self.assertTrue(success)
+        self.assertTrue(success, f"Failed to get stats: {resp}")
         stats = resp.get("data", {})
         total_blocked = stats.get("total_blocked", 0)
 
         logger.info(f"Records count: {records_count}, stats.total_blocked: {total_blocked}")
         self.assertEqual(records_count, total_blocked,
-                         f"stats.total_blocked ({total_blocked}) should match records count ({records_count})")
+                         f"stats.total_blocked ({total_blocked}) should match records ({records_count})")
 
         # 验证 by_rule_source 中 manual 类型数量
         by_source = stats.get("by_rule_source", {})
         manual_count = by_source.get("manual", 0)
         self.assertEqual(manual_count, records_count,
-                         f"by_rule_source.manual ({manual_count}) should match records count ({records_count})")
+                         f"by_rule_source.manual ({manual_count}) != records ({records_count})")
 
         logger.info("Stats consistency validated")
-
         self.api_client.delete_rule("10.0.1.2")
 
     def test_04_blocked_ips_aggregation(self):
@@ -448,34 +457,27 @@ class TestBlockLog(unittest.TestCase):
         self.api_client.clear_records()
         time.sleep(1)
 
-        # 封禁 10.0.1.2 并多次触发（累积阻断计数）
-        self.api_client.add_rule("10.0.1.2")
-        time.sleep(1)
-        # 发送 5 个 ping 包，全部被阻断
-        for _ in range(5):
-            self._trigger_block("10.0.1.2", count=1)
+        # 封禁并多次触发（累积阻断计数）
+        self._add_rule_and_wait("10.0.1.2")
+        for i in range(5):
+            blocked, _ = self._ping_and_expect_blocked("10.0.1.2", count=1)
+            self.assertTrue(blocked, f"Iteration {i+1}: Block not effective")
         time.sleep(2)
 
         # 获取 blocked-ips 聚合
         success, resp = self.api_client.get_blocked_ips(limit=10)
         self.assertTrue(success, f"Failed to get blocked-ips: {resp}")
 
-        data = resp.get("data", {})
-        top_ips = data.get("top_blocked_ips", [])
+        data = resp.get("data", {}) or {}
+        top_ips = data.get("top_blocked_ips") or []
         self.assertGreater(len(top_ips), 0, "No blocked IPs found")
 
         # 找到 10.0.1.2 的聚合记录
-        target_ip_record = None
-        for item in top_ips:
-            if item.get("ip") == "10.0.1.2":
-                target_ip_record = item
-                break
-
-        self.assertIsNotNone(target_ip_record, "10.0.1.2 not found in blocked-ips aggregation")
-        # 至少应有 1 次阻断（实际应该 >= 5，因为发了 5 次 ping）
-        self.assertGreaterEqual(target_ip_record.get("count", 0), 1,
-                                 "IP block count should be at least 1")
-        logger.info(f"IP aggregation validated: 10.0.1.2 count={target_ip_record.get('count')}")
+        target_record = next((item for item in top_ips if item.get("ip") == "10.0.1.2"), None)
+        self.assertIsNotNone(target_record, "10.0.1.2 not found in blocked-ips aggregation")
+        self.assertGreaterEqual(target_record.get("count", 0), 1,
+                                "IP block count >= 1 expected")
+        logger.info(f"IP aggregation validated: 10.0.1.2 count={target_record.get('count')}")
 
         self.api_client.delete_rule("10.0.1.2")
 
@@ -489,17 +491,13 @@ class TestBlockLog(unittest.TestCase):
         self.api_client.clear_records()
         time.sleep(1)
 
-        # 添加手动封禁规则并触发阻断
-        self.api_client.add_rule("10.0.1.2")
-        time.sleep(1)
-        self._trigger_block("10.0.1.2", count=3)
-        time.sleep(2)
+        self._do_block_cycle("10.0.1.2", ping_count=3)
 
         # 按 rule_source=manual 过滤
         success, resp = self.api_client.get_records({"rule_source": "manual", "limit": 100})
         self.assertTrue(success, f"Failed to filter by rule_source: {resp}")
 
-        records = resp.get("data", {}).get("records", [])
+        records = self._safe_records(resp)
         self.assertGreater(len(records), 0, "No records found with rule_source=manual")
 
         # 验证所有记录的 rule_source 都是 manual
@@ -512,8 +510,9 @@ class TestBlockLog(unittest.TestCase):
         # 验证过滤非法来源返回空
         success, resp = self.api_client.get_records({"rule_source": "nonexistent_source", "limit": 100})
         self.assertTrue(success)
-        records = resp.get("data", {}).get("records", [])
-        self.assertEqual(len(records), 0, "Filter with invalid source should return empty")
+        records_empty = self._safe_records(resp)
+        self.assertEqual(len(records_empty), 0,
+                         "Filter with invalid source should return empty")
 
         self.api_client.delete_rule("10.0.1.2")
 
@@ -524,16 +523,9 @@ class TestBlockLog(unittest.TestCase):
             "Failed to start rho-aias"
         )
 
-        # 触发初始阻断
-        self.api_client.add_rule("10.0.1.2")
-        time.sleep(1)
-        self._trigger_block("10.0.1.2", count=2)
-        time.sleep(2)
-
-        # 验证有记录
-        success, resp = self.api_client.get_records()
-        self.assertTrue(success)
-        initial_count = len(resp.get("data", {}).get("records", []))
+        # 触发初始阻断并验证有记录
+        _, records = self._do_block_cycle("10.0.1.2", ping_count=2)
+        initial_count = len(records)
         self.assertGreater(initial_count, 0, "Initial records should exist")
         logger.info(f"Initial records: {initial_count}")
 
@@ -546,30 +538,30 @@ class TestBlockLog(unittest.TestCase):
         time.sleep(1)
         success, resp = self.api_client.get_records()
         self.assertTrue(success)
-        after_clear_count = len(resp.get("data", {}).get("records", []))
-        self.assertEqual(after_clear_count, 0, "Records should be empty after clear")
+        after_clear = self._safe_records(resp)
+        self.assertEqual(len(after_clear), 0, "Records should be empty after clear")
 
-        # 删除旧规则，重新封禁
+        # 删除旧规则、重新封禁
         self.api_client.delete_rule("10.0.1.2")
         time.sleep(1)
-        self.api_client.add_rule("10.0.1.2")
-        time.sleep(1)
+        self._do_block_cycle("10.0.1.2", ping_count=3)
 
-        # 重新触发阻断
-        self._trigger_block("10.0.1.2", count=3)
-        time.sleep(2)
-
-        # 验证有新的记录
+        # 验证有新记录
         success, resp = self.api_client.get_records()
         self.assertTrue(success)
-        new_count = len(resp.get("data", {}).get("records", []))
+        new_records = self._safe_records(resp)
+        new_count = len(new_records)
         self.assertGreater(new_count, 0, "New records should appear after re-blocking")
         logger.info(f"New records after re-blocking: {new_count}")
 
         self.api_client.delete_rule("10.0.1.2")
 
     def test_07_multi_ip_records(self):
-        """测试多 IP 独立记录：同时封禁多个 IP，各自记录独立"""
+        """测试多 IP 独立记录：同时封禁同一子网多个 IP，各自记录独立
+
+        注意：XDP 只绑定在 veth0（10.0.1.x 子网），因此只能封禁该子网的 IP。
+        本用例通过在 veth0 同一 /24 子网内配置额外 IP 来模拟多 IP 场景。
+        """
         self.assertTrue(
             self._start_rho("rho_bl_veth0"),
             "Failed to start rho-aias"
@@ -578,22 +570,31 @@ class TestBlockLog(unittest.TestCase):
         self.api_client.clear_records()
         time.sleep(1)
 
-        # 同时封禁两个 IP（使用 ns1 和 ns2 分别发包）
-        self.api_client.add_rule("10.0.1.2")
-        self.api_client.add_rule("10.0.2.2")
+        # 在 veth1 (ns1 内) 上添加第二个 IP 地址
+        # 这样两个 IP 都在同一子网且都经过 veth0/XDP
+        extra_ip = "10.0.1.100"
+        cmd_add = f"ip netns exec {self.env.ns1.name} ip addr add {extra_ip}/24 dev rho_bl_veth1"
+        ret = subprocess.run(cmd_add, shell=True, capture_output=True)
+        if ret.returncode != 0:
+            self.skipTest(f"Cannot add extra IP {extra_ip} to veth1: {ret.stderr.decode()}")
+
+        # 同时封禁两个 IP
+        self._add_rule_and_wait("10.0.1.2")
+        self._add_rule_and_wait(extra_ip)
         time.sleep(1)
 
-        # 从 ns1 触发阻断 10.0.1.2
-        self._trigger_block("10.0.1.2", count=3)
-        # 从 ns2 触发阻断 10.0.2.2
-        success2, _ = self.env.ping_from_ns(self.env.ns2, "10.0.2.1", count=3, timeout=2.0)
-        self.assertFalse(success2, "10.0.2.2 should be blocked")
+        # 分别触发两个 IP 的阻断
+        blocked1, _ = self._ping_and_expect_blocked("10.0.1.2", count=3)
+        self.assertTrue(blocked1, "10.0.1.2 should be blocked")
+
+        blocked2, _ = self._ping_and_expect_blocked(extra_ip, count=3)
+        self.assertTrue(blocked2, f"{extra_ip} should be blocked")
         time.sleep(2)
 
         # 验证总记录数
         success, resp = self.api_client.get_records({"limit": 200})
         self.assertTrue(success)
-        all_records = resp.get("data", {}).get("records", [])
+        all_records = self._safe_records(resp)
         total_count = len(all_records)
 
         self.assertGreaterEqual(total_count, 2, "Should have records for both IPs")
@@ -602,19 +603,24 @@ class TestBlockLog(unittest.TestCase):
         # 验证各自 IP 有独立记录
         src_ips = set(r.get("src_ip") for r in all_records)
         self.assertIn("10.0.1.2", src_ips, "10.0.1.2 should have records")
-        self.assertIn("10.0.2.2", src_ips, "10.0.2.2 should have records")
+        self.assertIn(extra_ip, src_ips, f"{extra_ip} should have records")
 
         # 验证统计中 total_blocked 一致
         success, resp = self.api_client.get_stats()
         self.assertTrue(success)
-        total_blocked = resp.get("data", {}).get("total_blocked", 0)
+        total_blocked = (resp.get("data") or {}).get("total_blocked", 0)
         self.assertEqual(total_blocked, total_count,
-                         f"stats.total_blocked ({total_blocked}) should equal records count ({total_count})")
+                         f"stats.total_blocked ({total_blocked}) != records ({total_count})")
 
         logger.info(f"Multi-IP records validated: {src_ips}")
 
+        # 清理额外 IP
+        subprocess.run(
+            f"ip netns exec {self.env.ns1.name} ip addr del {extra_ip}/24 dev rho_bl_veth1",
+            shell=True, capture_output=True
+        )
         self.api_client.delete_rule("10.0.1.2")
-        self.api_client.delete_rule("10.0.2.2")
+        self.api_client.delete_rule(extra_ip)
 
     def test_08_sqlite_stats_persistence(self):
         """测试 SQLite 统计持久化：hourly-trend 和 dropped-summary"""
@@ -627,25 +633,20 @@ class TestBlockLog(unittest.TestCase):
         time.sleep(1)
 
         # 触发阻断，产生 SQLite 写入
-        self.api_client.add_rule("10.0.1.2")
-        time.sleep(1)
-        self._trigger_block("10.0.1.2", count=3)
-        time.sleep(3)
+        self._do_block_cycle("10.0.1.2", ping_count=3, wait_after_block=3)
 
         # 查询 hourly-trend（只查最近 1 小时）
         success, resp = self.api_client.get_hourly_trend(hours=1)
         self.assertTrue(success, f"Failed to get hourly-trend: {resp}")
 
-        hourly_data = resp.get("data", {}).get("hourly_data", {})
-        # 如果 SQLite 写入成功，hourly_data 应该有数据
-        # 如果 StatsStore 初始化失败，hourly_data 可能为空（不阻塞测试）
+        hourly_data = (resp.get("data") or {}).get("hourly_data")
         logger.info(f"hourly-trend data: {hourly_data}")
 
         # 查询 dropped-summary
         success, resp = self.api_client.get_dropped_summary(hours=24)
         self.assertTrue(success, f"Failed to get dropped-summary: {resp}")
 
-        summary = resp.get("data", {})
+        summary = resp.get("data") or {}
         logger.info(f"dropped-summary: total={summary.get('total')}, sources={summary.get('sources')}")
 
         # 验证响应结构
@@ -653,15 +654,12 @@ class TestBlockLog(unittest.TestCase):
         self.assertIn("sources", summary)
         self.assertIn("hourly", summary)
 
-        # 如果有统计数据，验证来源包含 manual
-        sources = summary.get("sources", {})
+        sources = summary.get("sources") or {}
         if sources:
-            # SQLite 持久化成功，数据有效
             self.assertIn("manual", sources,
                           "SQLite should have recorded manual source")
             logger.info("SQLite stats persistence validated")
         else:
-            # SQLite 可能未初始化（不阻塞，记录 warn）
             logger.warning("SQLite stats store may not be initialized (sources empty)")
 
         self.api_client.delete_rule("10.0.1.2")
