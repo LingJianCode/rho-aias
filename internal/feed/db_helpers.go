@@ -14,6 +14,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// SourceType 数据源类型常量
+const (
+	SourceTypeIntel      = "intel"       // 威胁情报源类型
+	SourceTypeGeoBlocking = "geo_blocking" // 地域封禁源类型
+)
+
 // RecordStatus 记录数据源更新状态到数据库
 func RecordStatus(db *gorm.DB, sourceType, sourceID, sourceName, status string, ruleCount int, errMsg string, duration int64) error {
 	if db == nil {

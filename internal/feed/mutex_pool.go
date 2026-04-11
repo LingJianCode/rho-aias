@@ -33,3 +33,12 @@ func (p *MutexPool[K]) Get(key K) *sync.Mutex {
 	}
 	return mu
 }
+
+// Remove 移除指定键的互斥锁（用于数据源动态删除场景，防止内存泄漏）
+// 注意：调用前需确保该锁未被持有，否则可能引发竞态
+func (p *MutexPool[K]) Remove(key K) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	delete(p.locks, key)
+}

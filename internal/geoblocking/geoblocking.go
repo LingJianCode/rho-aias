@@ -181,7 +181,7 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 	data, err := m.fetcher.Fetch(src.URL)
 	if err != nil {
 		duration := time.Since(startTime).Milliseconds()
-		_ = feed.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
+		_ = feed.RecordStatus(m.db, feed.SourceTypeGeoBlocking, string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[GeoBlocking] [%s] Fetched %d bytes", sourceID, len(data))
@@ -190,7 +190,7 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 	parsed, err := m.parser.Parse(data, src.Format, m.config.AllowedCountries, sourceID)
 	if err != nil {
 		duration := time.Since(startTime).Milliseconds()
-		_ = feed.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
+		_ = feed.RecordStatus(m.db, feed.SourceTypeGeoBlocking, string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[GeoBlocking] [%s] Parsed %d rules", sourceID, parsed.TotalCount())
@@ -204,7 +204,7 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 	}
 	if err := m.syncer.SyncToKernel(parsed, geoConfig); err != nil {
 		duration := time.Since(startTime).Milliseconds()
-		_ = feed.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
+		_ = feed.RecordStatus(m.db, feed.SourceTypeGeoBlocking, string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 
@@ -213,10 +213,10 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 
 	// 5. 记录成功状态 + 清理旧记录
 	duration := time.Since(startTime).Milliseconds()
-	if err := feed.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
+	if err := feed.RecordStatus(m.db, feed.SourceTypeGeoBlocking, string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
 		logger.Errorf("[GeoBlocking] [%s] Failed to record status to DB: %v", sourceID, err)
 	}
-	if err := feed.CleanOldRecords(m.db, "geo_blocking", string(sourceID)); err != nil {
+	if err := feed.CleanOldRecords(m.db, feed.SourceTypeGeoBlocking, string(sourceID)); err != nil {
 		logger.Errorf("[GeoBlocking] [%s] Failed to clean old records: %v", sourceID, err)
 	}
 

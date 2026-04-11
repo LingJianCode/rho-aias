@@ -69,8 +69,9 @@ func init() {
 // NewCacheData 创建新的缓存数据
 func NewCacheData() *CacheData {
 	return &CacheData{
-		Version: 1,
-		Sources: make(map[SourceID]GeoIPData),
+		Version:   1,
+		Timestamp: time.Now().Unix(),
+		Sources:   make(map[SourceID]GeoIPData),
 	}
 }
 
