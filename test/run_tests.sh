@@ -3,7 +3,7 @@
 # eBPF XDP IP 阻断功能集成测试运行脚本
 #
 # 使用方法:
-#   ./run_tests.sh              # 运行所有测试（不使用认证）
+#   ./run_tests.sh              # 运行所有测试（API Key 认证已内置）
 #   ./run_tests.sh --use-api-key # 使用 API Key 认证运行测试
 #   ./run_tests.sh --use-api-key --api-key sk_live_your-key-here # 使用指定 API Key
 #   ./run_tests.sh --env-only   # 仅运行环境测试（不需要编译 rho-aias）
@@ -106,9 +106,8 @@ cleanup() {
     log_info "清理完成"
 }
 
-# 运行 DDoS 检测测试
+# 运行 DDoS 检测测试（API Key 认证已内置）
 run_ddos_tests() {
-    local use_api_key=false
     local api_key=""
     local other_args=()
 
@@ -116,8 +115,7 @@ run_ddos_tests() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --use-api-key)
-                use_api_key=true
-                shift
+                shift  # 兼容参数，测试内部已默认使用 API Key
                 ;;
             --api-key)
                 api_key="$2"
@@ -133,6 +131,12 @@ run_ddos_tests() {
     cd "$SCRIPT_DIR"
 
     log_info "运行 DDoS 检测测试"
+
+    # 传递 API Key（通过环境变量）
+    if [ -n "$api_key" ]; then
+        export TEST_API_KEY="$api_key"
+        log_info "使用指定的 API Key"
+    fi
 
     python3 test_ddos_detection.py "${other_args[@]}"
 
@@ -185,9 +189,13 @@ run_tests() {
 
     cd "$SCRIPT_DIR"
 
-    # 如果运行 DDoS 测试
+    # 如果运行 DDoS 测试（API Key 认证已内置）
     if [ "$run_ddos" = true ]; then
         log_info "运行 DDoS 检测测试"
+        if [ -n "$api_key" ]; then
+            export TEST_API_KEY="$api_key"
+            log_info "使用指定的 API Key"
+        fi
         python3 test_ddos_detection.py "${other_args[@]}"
         local exit_code=$?
         if [ $exit_code -eq 0 ]; then
@@ -201,9 +209,13 @@ run_tests() {
         fi
     fi
 
-    # 如果运行日志封禁测试
+    # 如果运行日志封禁测试（API Key 认证已内置）
     if [ "$run_log_ban" = true ]; then
         log_info "运行日志触发封禁测试（WAF/FailGuard/Rate Limit）"
+        if [ -n "$api_key" ]; then
+            export TEST_API_KEY="$api_key"
+            log_info "使用指定的 API Key"
+        fi
         python3 test_log_ban.py "${other_args[@]}"
         local exit_code=$?
         if [ $exit_code -eq 0 ]; then
@@ -217,25 +229,17 @@ run_tests() {
         fi
     fi
 
-    # 如果使用 API Key 认证
-    if [ "$use_api_key" = true ]; then
-        log_info "启用 API Key 认证测试"
-
-        # 如果指定了 API Key，传递给 Python 脚本
-        if [ -n "$api_key" ]; then
-            log_info "使用指定的 API Key"
-            python3 test_xdp_block.py --use-api-key --api-key "$api_key" "${other_args[@]}"
-        elif [ -n "$TEST_API_KEY" ]; then
-            log_info "使用环境变量 TEST_API_KEY"
-            python3 test_xdp_block.py --use-api-key "${other_args[@]}"
-        else
-            log_info "使用默认测试 API Key"
-            python3 test_xdp_block.py --use-api-key "${other_args[@]}"
-        fi
+    # 所有测试均已内置 API Key 认证（本分支要求接口必须验证）
+    if [ -n "$api_key" ]; then
+        export TEST_API_KEY="$api_key"
+        log_info "使用指定的 API Key"
+    elif [ -n "$TEST_API_KEY" ]; then
+        log_info "使用环境变量 TEST_API_KEY"
     else
-        # 不使用 API Key 认证，只运行 TestXDPIpBlocking 测试
-        python3 test_xdp_block.py -t TestXDPIpBlocking "${other_args[@]}"
+        log_info "使用默认测试 API Key"
     fi
+
+    python3 test_xdp_block.py "${other_args[@]}"
 
     local exit_code=$?
 

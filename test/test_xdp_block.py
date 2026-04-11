@@ -16,18 +16,14 @@ eBPF XDP IP 阻断功能集成测试
 - API Key 认证功能
 
 运行示例:
-    # 基本测试（不使用认证）
+    # 基本测试（API Key 认证已内置）
     python3 test_xdp_block.py
 
-    # 使用 API Key 认证测试
-    python3 test_xdp_block.py --use-api-key --api-key sk_live_your-key-here
-
-    # 使用环境变量中的 API Key
-    export TEST_API_KEY="sk_live_your-key-here"
-    python3 test_xdp_block.py --use-api-key
+    # 使用自定义 API Key
+    TEST_API_KEY="sk_live_your-key-here" python3 test_xdp_block.py
 
     # 运行特定测试
-    python3 test_xdp_block.py --test TestAPIKeyAuth.test_01_api_key_auth
+    python3 test_xdp_block.py --test TestXDPIpBlocking.test_01_ipv4_exact_block
 """
 
 import json
@@ -277,7 +273,7 @@ class TestXDPIpBlocking(unittest.TestCase):
         
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-        cls.default_config_path = os.path.join(cls.project_root, "config.yml")
+        cls.default_config_path = os.path.join(cls.project_root, "config", "config.yml")
         cls.api_port = 18080
         cls.test_api_key = os.environ.get("TEST_API_KEY", "sk_live_test-admin-key-1234567890abcdef")
         cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}", cls.test_api_key)
@@ -496,7 +492,7 @@ class TestAPIKeyAuth(unittest.TestCase):
 
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-        cls.default_config_path = os.path.join(cls.project_root, "config.yml")
+        cls.default_config_path = os.path.join(cls.project_root, "config", "config.yml")
         cls.api_port = 18080
 
         # 检查二进制文件
@@ -683,21 +679,14 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 测试运行示例:
-  # 基本测试（不使用认证）
+  # 基本测试（API Key 认证已内置）
   python3 %(prog)s
 
-  # 使用 API Key 认证测试
-  python3 %(prog)s --use-api-key --api-key sk_live_your-key-here
-
-  # 使用环境变量中的 API Key
-  export TEST_API_KEY="sk_live_your-key-here"
-  python3 %(prog)s --use-api-key
+  # 使用自定义 API Key
+  TEST_API_KEY="sk_live_your-key-here" python3 %(prog)s
 
   # 运行特定测试
   python3 %(prog)s --test TestXDPIpBlocking.test_01_ipv4_exact_block
-
-  # 只测试 API Key 认证功能
-  python3 %(prog)s --test TestAPIKeyAuth
         """
     )
     parser.add_argument(
@@ -717,12 +706,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use-api-key",
         action="store_true",
-        help="Enable API Key authentication for tests"
+        help="兼容参数：API Key 认证已内置，此参数保留向后兼容"
     )
     parser.add_argument(
         "--api-key",
         type=str,
-        help="API Key to use for authentication (default: from TEST_API_KEY env var)"
+        help="自定义 API Key（默认使用 TEST_API_KEY 环境变量或内置默认值）"
     )
 
     args = parser.parse_args()
@@ -730,24 +719,17 @@ if __name__ == "__main__":
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # 设置环境变量用于 API Key
-    if args.use_api_key:
-        if args.api_key:
-            os.environ["TEST_API_KEY"] = args.api_key
-            logger.info(f"Using provided API Key: {args.api_key[:20]}...")
-        elif "TEST_API_KEY" in os.environ:
-            logger.info(f"Using API Key from environment: {os.environ['TEST_API_KEY'][:20]}...")
-        else:
-            # 使用默认测试 Key
-            default_key = "sk_live_test-admin-key-1234567890abcdef"
-            os.environ["TEST_API_KEY"] = default_key
-            logger.info(f"Using default test API Key (set TEST_API_KEY env var to override)")
+    # API Key 已内置到所有测试中，此处仅处理用户自定义 Key
+    if args.api_key:
+        os.environ["TEST_API_KEY"] = args.api_key
+        logger.info(f"Using provided API Key: {args.api_key[:20]}...")
+    elif "TEST_API_KEY" not in os.environ:
+        default_key = "sk_live_test-admin-key-1234567890abcdef"
+        os.environ["TEST_API_KEY"] = default_key
 
     if args.env_only:
         sys.exit(run_tests("TestEnvironmentSetup"))
     elif args.test:
         sys.exit(run_tests(args.test))
-    elif args.use_api_key:
-        sys.exit(run_tests("TestAPIKeyAuth"))
     else:
         sys.exit(run_tests())

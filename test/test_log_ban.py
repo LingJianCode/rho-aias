@@ -8,7 +8,8 @@ WAF / FailGuard / Rate Limit 日志触发封禁集成测试
 3. 通过 API 查询封禁记录，验证 IP 是否被封禁
 
 运行示例:
-    python3 test_log_ban.py
+    python3 test_log_ban.py  # API Key 认证已内置
+    TEST_API_KEY="sk_live_your-key-here" python3 test_log_ban.py  # 自定义 Key
     python3 test_log_ban.py --test TestFailGuardBan.test_ssh_fail_password
     python3 test_log_ban.py --test TestRateLimitBan
 """
@@ -416,7 +417,7 @@ class LogBanTestBase(unittest.TestCase):
     def setUpClass(cls):
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-        cls.default_config_path = os.path.join(cls.project_root, "config.yml")
+        cls.default_config_path = os.path.join(cls.project_root, "config", "config.yml")
         cls.api_port = 18081
         cls.test_api_key = os.environ.get("TEST_API_KEY", "sk_live_test-admin-key-1234567890abcdef")
         cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}", cls.test_api_key)
@@ -709,23 +710,17 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 测试运行示例:
-  # 运行所有日志封禁测试
+  # 运行所有日志封禁测试（API Key 认证已内置）
   python3 %(prog)s
+
+  # 使用自定义 API Key
+  TEST_API_KEY="sk_live_your-key-here" python3 %(prog)s
 
   # 只测试 FailGuard
   python3 %(prog)s --test TestFailGuardBan
 
   # 运行特定测试
   python3 %(prog)s --test TestFailGuardBan.test_ssh_fail_password
-
-  # 只测试 WAF
-  python3 %(prog)s --test TestWAFBan
-
-  # 只测试 Rate Limit
-  python3 %(prog)s --test TestRateLimitBan
-
-  # 混合场景测试
-  python3 %(prog)s --test TestMixedBan
         """
     )
     parser.add_argument(

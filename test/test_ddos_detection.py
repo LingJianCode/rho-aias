@@ -10,8 +10,9 @@ DDoS 检测功能集成测试
 - ACK Flood 检测
 
 运行示例:
-    python3 test_ddos_detection.py
-    python3 test_ddos_detection.py --test TestDDoSDetection.test_tcp_syn_flood
+    python3 test_ddos_detection.py  # API Key 认证已内置
+    TEST_API_KEY="sk_live_your-key-here" python3 test_ddos_detection.py  # 自定义 Key
+    python3 test_ddos_detection.py --test TestDDoSDetection.test_01_tcp_syn_flood
 """
 
 import json
@@ -354,7 +355,7 @@ class TestDDoSDetection(unittest.TestCase):
 
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-        cls.default_config_path = os.path.join(cls.project_root, "config.yml")
+        cls.default_config_path = os.path.join(cls.project_root, "config", "config.yml")
         cls.api_port = 18080
         cls.test_api_key = os.environ.get("TEST_API_KEY", "sk_live_test-admin-key-1234567890abcdef")
         cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}", cls.test_api_key)
@@ -569,13 +570,13 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 测试运行示例:
-  # 运行所有测试
+  # 运行所有测试（API Key 认证已内置）
   python3 %(prog)s
 
-  # 运行特定测试
-  python3 %(prog)s --test TestDDoSDetection.test_tcp_syn_flood
+  # 使用自定义 API Key
+  TEST_API_KEY="sk_live_your-key-here" python3 %(prog)s
 
-  # 只测试 SYN Flood
+  # 运行特定测试
   python3 %(prog)s --test TestDDoSDetection.test_01_tcp_syn_flood
         """
     )
