@@ -13,6 +13,7 @@ import (
 	"rho-aias/internal/waf"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 )
 
 // 支持动态配置的模块名常量
@@ -28,6 +29,7 @@ const (
 // ConfigHandle 统一配置 API 处理器
 type ConfigHandle struct {
 	configService *services.DynamicConfigService
+	validate      *validator.Validate
 
 	// 各模块实例（可选，nil 表示未初始化）
 	failguardMonitor *failguard.Monitor
@@ -63,6 +65,7 @@ func NewConfigHandle(
 ) *ConfigHandle {
 	return &ConfigHandle{
 		configService:    configService,
+		validate:         validator.New(),
 		failguardMonitor: failguardMonitor,
 		wafMonitor:       wafMonitor,
 		rateLimitMonitor: rateLimitMonitor,
@@ -155,7 +158,13 @@ func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 	// 0. 记录更新前配置快照（用于日志 diff）
 	beforeRaw, _ := json.Marshal(h.getRuntimeConfig(module))
 
-	// 1. 调用模块 UpdateConfig（内存即时生效）
+	// 1. 校验请求参数
+	if err := h.validateConfig(module, raw); err != nil {
+		response.BadRequest(c, "Invalid config: "+err.Error())
+		return
+	}
+
+	// 2. 调用模块 UpdateConfig（内存即时生效）
 	if err := h.applyConfig(module, raw); err != nil {
 		response.InternalError(c, "Failed to apply config: "+err.Error())
 		return
@@ -229,6 +238,73 @@ func (h *ConfigHandle) applyConfig(module string, raw json.RawMessage) error {
 	}
 }
 
+// validateConfig 校验请求参数（使用 validator 库做边界检查）
+func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error {
+	switch module {
+	case ModuleFailGuard:
+		var req failGuardConfigRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fmt.Errorf("invalid format: %w", err)
+		}
+		if err := h.validate.Struct(req); err != nil {
+			return err
+		}
+	case ModuleWAF:
+		var req wafConfigRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fmt.Errorf("invalid format: %w", err)
+		}
+		if err := h.validate.Struct(req); err != nil {
+			return err
+		}
+	case ModuleRateLimit:
+		var req rateLimitConfigRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fmt.Errorf("invalid format: %w", err)
+		}
+		if err := h.validate.Struct(req); err != nil {
+			return err
+		}
+	case ModuleAnomalyDetection:
+		var req anomalyDetectionConfigRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fmt.Errorf("invalid format: %w", err)
+		}
+		if err := h.validate.Struct(req); err != nil {
+			return err
+		}
+		// 嵌套结构体校验：baseline 和 attacks 的数值字段
+		if err := validateAnomalyNestedFields(req.Baseline, req.Attacks); err != nil {
+			return err
+		}
+	case ModuleGeoBlocking:
+		var req geoBlockingConfigRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fmt.Errorf("invalid format: %w", err)
+		}
+		if err := h.validate.Struct(req); err != nil {
+			return err
+		}
+	case ModuleIntel:
+		// Intel 配置校验较宽松（schedule/url 格式各异），仅做基本非空校验即可
+		var req intelConfigRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fmt.Errorf("invalid format: %w", err)
+		}
+		if err := h.validate.Struct(req); err != nil {
+			return err
+		}
+		for sourceID, srcCfg := range req.Sources {
+			if srcCfg.Schedule != "" && !isValidCronExpr(srcCfg.Schedule) {
+				return fmt.Errorf("source '%s': invalid cron schedule '%s'", sourceID, srcCfg.Schedule)
+			}
+		}
+	default:
+		return fmt.Errorf("unsupported module: %s", module)
+	}
+	return nil
+}
+
 // getMergedConfig 获取模块当前合并后的完整配置（用于持久化）
 func (h *ConfigHandle) getMergedConfig(module string) (interface{}, error) {
 	switch module {
@@ -269,11 +345,11 @@ func (h *ConfigHandle) getMergedConfig(module string) (interface{}, error) {
 
 // FailGuard 动态配置请求
 type failGuardConfigRequest struct {
-	Enabled     *bool  `json:"enabled"`
-	MaxRetry    *int   `json:"max_retry"`
-	FindTime    *int   `json:"find_time"`
-	BanDuration *int   `json:"ban_duration"`
-	Mode        string `json:"mode"`
+	Enabled     *bool  `json:"enabled" validate:"omitempty"`
+	MaxRetry    *int   `json:"max_retry" validate:"omitempty,gte=1,lte=1000"`
+	FindTime    *int   `json:"find_time" validate:"omitempty,gte=1,lte=86400"`
+	BanDuration *int   `json:"ban_duration" validate:"omitempty,gte=1,lte=31536000"`
+	Mode        string `json:"mode" validate:"omitempty,oneof=normal ddos aggressive"`
 }
 
 func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
@@ -304,8 +380,8 @@ func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
 
 // WAF 动态配置请求
 type wafConfigRequest struct {
-	Enabled     *bool `json:"enabled"`
-	BanDuration *int  `json:"ban_duration"`
+	Enabled     *bool `json:"enabled" validate:"omitempty"`
+	BanDuration *int  `json:"ban_duration" validate:"omitempty,gte=1,lte=31536000"`
 }
 
 func (h *ConfigHandle) applyWAFConfig(raw json.RawMessage) error {
@@ -328,8 +404,8 @@ func (h *ConfigHandle) applyWAFConfig(raw json.RawMessage) error {
 
 // RateLimit 动态配置请求
 type rateLimitConfigRequest struct {
-	Enabled     *bool `json:"enabled"`
-	BanDuration *int  `json:"ban_duration"`
+	Enabled     *bool `json:"enabled" validate:"omitempty"`
+	BanDuration *int  `json:"ban_duration" validate:"omitempty,gte=1,lte=31536000"`
 }
 
 func (h *ConfigHandle) applyRateLimitConfig(raw json.RawMessage) error {
@@ -352,11 +428,11 @@ func (h *ConfigHandle) applyRateLimitConfig(raw json.RawMessage) error {
 
 // AnomalyDetection 动态配置请求
 type anomalyDetectionConfigRequest struct {
-	Enabled    *bool                       `json:"enabled"`
-	MinPackets *int                        `json:"min_packets"`
-	Ports      []int                       `json:"ports"`
-	Baseline   *anomaly.BaselineConfig     `json:"baseline"`
-	Attacks    *anomaly.AttacksConfig      `json:"attacks"`
+	Enabled    *bool                       `json:"enabled" validate:"omitempty"`
+	MinPackets *int                        `json:"min_packets" validate:"omitempty,gte=1,lte=100000"`
+	Ports      []int                       `json:"ports" validate:"omitempty,dive,gte=1,lte=65535"`
+	Baseline   *anomaly.BaselineConfig     `json:"baseline" validate:"omitempty"`
+	Attacks    *anomaly.AttacksConfig      `json:"attacks" validate:"omitempty"`
 }
 
 func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
@@ -393,9 +469,9 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 
 // GeoBlocking 动态配置请求
 type geoBlockingConfigRequest struct {
-	Enabled          *bool    `json:"enabled"`
-	Mode             string   `json:"mode"`
-	AllowedCountries []string `json:"allowed_countries"`
+	Enabled          *bool    `json:"enabled" validate:"omitempty"`
+	Mode             string   `json:"mode" validate:"omitempty,oneof=allow deny"`
+	AllowedCountries []string `json:"allowed_countries" validate:"omitempty,dive,len=2"`
 }
 
 func (h *ConfigHandle) applyGeoBlockingConfig(raw json.RawMessage) error {
@@ -580,4 +656,65 @@ func attacksValue(current anomaly.AttacksConfig, ptr *anomaly.AttacksConfig) ano
 		return *ptr
 	}
 	return current
+}
+
+// validateAnomalyNestedFields 校验 anomaly 嵌套结构体中的数值字段
+func validateAnomalyNestedFields(baseline *anomaly.BaselineConfig, attacks *anomaly.AttacksConfig) error {
+	if baseline != nil {
+		if baseline.MinSampleCount < 1 || baseline.MinSampleCount > 1000000 {
+			return fmt.Errorf("baseline.min_sample_count: must be between 1 and 1000000, got %d", baseline.MinSampleCount)
+		}
+		if baseline.SigmaMultiplier < 1 || baseline.SigmaMultiplier > 10 {
+			return fmt.Errorf("baseline.sigma_multiplier: must be between 1 and 10, got %.1f", baseline.SigmaMultiplier)
+		}
+		if baseline.MinThreshold < 1 || baseline.MinThreshold > 10000000 {
+			return fmt.Errorf("baseline.min_threshold: must be between 1 and 10000000, got %d", baseline.MinThreshold)
+		}
+		if baseline.MaxAge < 60 || baseline.MaxAge > 86400*7 {
+			return fmt.Errorf("baseline.max_age: must be between 60s and 7 days, got %d", baseline.MaxAge)
+		}
+		if baseline.BlockDuration < 1 || baseline.BlockDuration > 31536000 {
+			return fmt.Errorf("baseline.block_duration: must be between 1s and 365 days, got %d", baseline.BlockDuration)
+		}
+	}
+	if attacks != nil {
+		attackConfigs := []struct {
+			name   string
+			config anomaly.AttackConfig
+		}{
+			{"syn_flood", attacks.SynFlood},
+			{"udp_flood", attacks.UdpFlood},
+			{"icmp_flood", attacks.IcmpFlood},
+			{"ack_flood", attacks.AckFlood},
+		}
+		for _, ac := range attackConfigs {
+			if ac.config.RatioThreshold < 0 || ac.config.RatioThreshold > 1 {
+				return fmt.Errorf("attacks.%s.ratio_threshold: must be between 0 and 1, got %.2f", ac.name, ac.config.RatioThreshold)
+			}
+			if ac.config.BlockDuration < 1 || ac.config.BlockDuration > 31536000 {
+				return fmt.Errorf("attacks.%s.block_duration: must be between 1s and 365 days, got %d", ac.name, ac.config.BlockDuration)
+			}
+			if ac.config.MinPackets < 0 || ac.config.MinPackets > 1000000 {
+				return fmt.Errorf("attacks.%s.min_packets: must be between 0 and 1000000, got %d", ac.name, ac.config.MinPackets)
+			}
+		}
+	}
+	return nil
+}
+
+// isValidCronExpr 做基本的 cron 表达式格式校验（5段或6段，每段为合法值）
+// 注意：不做完整的 cron 语义校验（如 "2月30日"），仅防止明显非法输入
+func isValidCronExpr(expr string) bool {
+	parts := []rune(expr)
+	// 至少5个段 (分 时 日 月 周)，最多6或7个段 (含秒和/或年)
+	if len(parts) < 5 || len(parts) > 20 {
+		return false
+	}
+	// 简单检查：不能包含空格以外的控制字符
+	for _, ch := range parts {
+		if ch <= 0x20 && ch != ' ' && ch != '\t' {
+			return false
+		}
+	}
+	return true
 }
