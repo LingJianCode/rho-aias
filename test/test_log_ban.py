@@ -252,8 +252,9 @@ class RhoAiasProcess:
 
         try:
             self.log_file = open(self.log_path, 'w')
+            # 使用 --config 参数指定临时配置文件的绝对路径
             self.process = subprocess.Popen(
-                [self.binary_path],
+                [self.binary_path, "--config", config_file],
                 cwd=self.config_dir,
                 stdout=self.log_file,
                 stderr=subprocess.STDOUT,
