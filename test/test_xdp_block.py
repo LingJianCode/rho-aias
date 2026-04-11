@@ -97,10 +97,16 @@ class RhoAiasProcess:
         config['server']['port'] = self.api_port
         config['ebpf']['interface_name'] = self.interface
 
-        # 禁用外部数据源（测试环境）
-        config['intel']['enabled'] = True
-        config['geo_blocking']['enabled'] = True
-        config['manual']['enabled'] = True  # 保留手动规则功能用于测试
+        # 禁用不必要功能
+        config['intel']['enabled'] = False
+        config['geo_blocking']['enabled'] = False
+        config['waf']['enabled'] = False
+        config['rate_limit']['enabled'] = False
+        config['failguard']['enabled'] = False
+        config['anomaly_detection']['enabled'] = False
+
+        # 保留手动规则功能用于测试
+        config['manual']['enabled'] = True
 
         # 配置认证（始终启用，使用 API Key）
         config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'

@@ -89,13 +89,19 @@ class RhoAiasProcess:
         config['server']['port'] = self.api_port
         config['ebpf']['interface_name'] = self.interface
 
-        # 禁用外部数据源（测试环境）
+        # 禁用不必要功能
         config['intel']['enabled'] = False
         config['geo_blocking']['enabled'] = False
-        config['manual']['enabled'] = True
         config['waf']['enabled'] = False
+        config['rate_limit']['enabled'] = False
+        config['failguard']['enabled'] = False
+
+        # 保留手动规则功能用于测试
+        config['manual']['enabled'] = True
 
         # 配置异常检测
+        # 注意：以下阈值显著低于生产默认值，目的是在少量测试流量下快速触发检测，
+        # 确保测试能在合理时间内完成。请勿将这些值用于生产环境。
         config['anomaly_detection']['enabled'] = self.enable_anomaly
         config['anomaly_detection']['sample_rate'] = 1  # 100% 采样用于测试
         config['anomaly_detection']['check_interval'] = 1  # 1秒检测一次
@@ -172,7 +178,7 @@ class RhoAiasProcess:
                 logger.error(f"Process exited unexpectedly. Check log: {self.log_path}")
                 return False
 
-            logger.info(f"rho-ariyas started (PID: {self.process.pid})")
+            logger.info(f"rho-aias started (PID: {self.process.pid})")
             return True
 
         except Exception as e:

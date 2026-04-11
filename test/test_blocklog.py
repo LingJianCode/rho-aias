@@ -37,8 +37,8 @@ from typing import Optional, Tuple
 
 from netns import NetNS, VethPair, TestEnvironment
 
-# 默认 API Key（与 config.yml 中预置的 Master Admin Key 一致）
-DEFAULT_API_KEY = "797129746550e02f1bbbf3828534c83d"
+# 默认 API Key（与其他测试脚本保持一致）
+DEFAULT_API_KEY = "sk_live_test-admin-key-1234567890abcdef"
 
 try:
     import yaml
@@ -97,14 +97,20 @@ class RhoAiasProcess:
         config['blocklog']['enabled'] = True
         config['blocklog']['sample_rate'] = 1
 
-        # 保留手动规则功能
+        # 禁用不必要功能
         config['intel']['enabled'] = False
         config['geo_blocking']['enabled'] = False
+        config['waf']['enabled'] = False
+        config['rate_limit']['enabled'] = False
+        config['failguard']['enabled'] = False
+        config['anomaly_detection']['enabled'] = False
+        
+        # 保留手动规则功能
         config['manual']['enabled'] = True
 
-        # 认证配置
+        # 认证配置（注意：Go AuthConfig 无 enabled 字段，认证始终初始化；
+        # use_auth 控制的是是否写入 jwt_secret 和 api_keys）
         if self.use_auth:
-            config['auth']['enabled'] = True
             config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
             config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
             if self.api_key:
@@ -112,7 +118,8 @@ class RhoAiasProcess:
                     {'name': 'Test Admin Key', 'key': self.api_key, 'permissions': ['*']}
                 ]
         else:
-            config['auth']['enabled'] = False
+            # 不启用认证：保留空 auth 段（Go 端会使用默认值）
+            pass
 
         try:
             with open(config_file, 'w') as f:
