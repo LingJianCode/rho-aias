@@ -169,3 +169,8 @@ func (m *Monitor) GetBanCount() int {
 func (m *Monitor) IsBanned(ip string) bool {
 	return m.watcher.IsBanned(ip)
 }
+
+// IsRunning 检查监控器是否正在运行
+func (m *Monitor) IsRunning() bool {
+	return m.cron != nil
+}

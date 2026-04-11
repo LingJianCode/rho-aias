@@ -33,6 +33,7 @@ type Detector struct {
 	mu        sync.RWMutex
 	running   bool
 	done      chan struct{}
+	stopped   bool // 标志位，用于安全 Stop（避免重复 close channel）
 
 	// 防止 runDetection 并发执行
 	detectionMu sync.Mutex
@@ -81,7 +82,7 @@ func NewDetector(config AnomalyDetectionConfig, blockCallback BlockCallback, unb
 	}
 }
 
-// Start 启动异常检测器
+// Start 启动异常检测器（支持 Restart：每次调用重置内部状态）
 func (d *Detector) Start() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -96,6 +97,10 @@ func (d *Detector) Start() error {
 	}
 
 	logger.Info("[AnomalyDetection] Starting anomaly detection system")
+
+	// 重置 done channel 和 stopped 标志（支持 Stop → Start 循环）
+	d.done = make(chan struct{})
+	d.stopped = false
 
 	// 启动统计收集器（使用 CleanupInterval 控制清理间隔）
 	d.collector.SetCleanupInterval(time.Duration(d.config.CleanupInterval) * time.Second)
@@ -132,7 +137,7 @@ func (d *Detector) Start() error {
 	return nil
 }
 
-// Stop 停止异常检测器
+// Stop 停止异常检测器（可安全多次调用）
 func (d *Detector) Stop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -143,7 +148,10 @@ func (d *Detector) Stop() {
 
 	logger.Info("[AnomalyDetection] Stopping anomaly detection system")
 
-	close(d.done)
+	if !d.stopped {
+		close(d.done)
+		d.stopped = true
+	}
 	d.collector.Stop()
 
 	// 停止 Cron 定时任务

@@ -3,8 +3,10 @@ package handles
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"rho-aias/internal/anomaly"
+	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/failguard"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/ratelimit"
@@ -26,18 +28,60 @@ const (
 	ModuleIntel            = "intel"
 )
 
+// AnomalyController 封装 eBPF 异常检测相关操作接口
+// 用于在动态启停时控制内核采样和事件监听
+type AnomalyController interface {
+	SetAnomalyConfig(enabled bool, sampleRate uint32) error
+	SetAnomalyPortFilter(enabled bool, ports []uint32) error
+	MonitorAnomalyEvents(callback ebpfs.AnomalyEventCallback)
+}
+
+// LifecycleManager 管理模块的统一优雅退出（支持动态启停后仍能正确清理资源）
+type LifecycleManager struct {
+	mu       sync.Mutex
+	stoppers []func()
+}
+
+// Register 注册 Stop 函数到退出管理器
+func (lm *LifecycleManager) Register(stopFn func()) {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	lm.stoppers = append(lm.stoppers, stopFn)
+}
+
+// ShutdownAll 按注册逆序停止所有模块
+func (lm *LifecycleManager) ShutdownAll() {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	for i := len(lm.stoppers) - 1; i >= 0; i-- {
+		lm.stoppers[i]()
+	}
+}
+
 // ConfigHandle 统一配置 API 处理器
 type ConfigHandle struct {
 	configService *services.DynamicConfigService
 	validate      *validator.Validate
 
-	// 各模块实例（可选，nil 表示未初始化）
+	// 各模块实例（始终非 nil，无条件创建）
 	failguardMonitor *failguard.Monitor
 	wafMonitor       *waf.Monitor
 	rateLimitMonitor *ratelimit.Monitor
 	anomalyDetector  *anomaly.Detector
 	geoBlockingMgr   GeoBlockingConfigUpdater
 	intelMgr         IntelConfigUpdater
+
+	// eBPF 异常检测控制器（用于动态启停时的管道管理）
+	anomalyController  AnomalyController
+
+	// Anomaly 回调闭包工厂（用于冷启动时重建事件监听 goroutine）
+	anomalyRecordPacketFn ebpfs.AnomalyEventCallback
+
+	// 生命周期管理器（统一退出，替代分散的 defer Stop）
+	lifecycle *LifecycleManager
+
+	// 保护启停操作的互斥锁（防止并发竞态）
+	mu sync.Mutex
 }
 
 // GeoBlockingConfigUpdater GeoBlocking 配置更新接口
@@ -63,19 +107,47 @@ func NewConfigHandle(
 	geoBlockingMgr GeoBlockingConfigUpdater,
 	intelMgr IntelConfigUpdater,
 ) *ConfigHandle {
-	return &ConfigHandle{
-		configService:    configService,
-		validate:         validator.New(),
-		failguardMonitor: failguardMonitor,
-		wafMonitor:       wafMonitor,
-		rateLimitMonitor: rateLimitMonitor,
-		anomalyDetector:  anomalyDetector,
-		geoBlockingMgr:   geoBlockingMgr,
-		intelMgr:         intelMgr,
+	lifecycle := &LifecycleManager{}
+
+	h := &ConfigHandle{
+		configService:      configService,
+		validate:           validator.New(),
+		failguardMonitor:   failguardMonitor,
+		wafMonitor:         wafMonitor,
+		rateLimitMonitor:   rateLimitMonitor,
+		anomalyDetector:    anomalyDetector,
+		geoBlockingMgr:     geoBlockingMgr,
+		intelMgr:           intelMgr,
+		lifecycle:          lifecycle,
 	}
+
+	// 注册所有模块的 Stop 到统一生命周期管理器
+	if failguardMonitor != nil {
+		lifecycle.Register(failguardMonitor.Stop)
+	}
+	if wafMonitor != nil {
+		lifecycle.Register(wafMonitor.Stop)
+	}
+	if rateLimitMonitor != nil {
+		lifecycle.Register(rateLimitMonitor.Stop)
+	}
+	if anomalyDetector != nil {
+		lifecycle.Register(anomalyDetector.Stop)
+	}
+
+	return h
 }
 
-// GetAllConfig 获取所有模块的动态配置概览
+// GetLifecycle 返回生命周期管理器（供 main.go 注册 defer ShutdownAll）
+func (h *ConfigHandle) GetLifecycle() *LifecycleManager {
+	return h.lifecycle
+}
+
+// SetAnomalyController 设置 eBPF 异常检测控制器（用于动态启停时管理内核管道）
+func (h *ConfigHandle) SetAnomalyController(controller AnomalyController, recordPacketFn ebpfs.AnomalyEventCallback) {
+	h.anomalyController = controller
+	h.anomalyRecordPacketFn = recordPacketFn
+}
 func (h *ConfigHandle) GetAllConfig(c *gin.Context) {
 	result := make(map[string]interface{})
 
@@ -191,21 +263,13 @@ func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 	switch module {
 	case ModuleFailGuard:
-		if h.failguardMonitor != nil {
-			return h.failguardMonitor.GetConfig()
-		}
+		return h.failguardMonitor.GetConfig()
 	case ModuleWAF:
-		if h.wafMonitor != nil {
-			return h.wafMonitor.GetConfig()
-		}
+		return h.wafMonitor.GetConfig()
 	case ModuleRateLimit:
-		if h.rateLimitMonitor != nil {
-			return h.rateLimitMonitor.GetConfig()
-		}
+		return h.rateLimitMonitor.GetConfig()
 	case ModuleAnomalyDetection:
-		if h.anomalyDetector != nil {
-			return h.anomalyDetector.GetConfig()
-		}
+		return h.anomalyDetector.GetConfig()
 	case ModuleGeoBlocking:
 		if h.geoBlockingMgr != nil {
 			return h.geoBlockingMgr.GetConfig()
@@ -309,24 +373,12 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 func (h *ConfigHandle) getMergedConfig(module string) (interface{}, error) {
 	switch module {
 	case ModuleFailGuard:
-		if h.failguardMonitor == nil {
-			return nil, fmt.Errorf("failguard module is not initialized")
-		}
 		return h.failguardMonitor.GetConfig(), nil
 	case ModuleWAF:
-		if h.wafMonitor == nil {
-			return nil, fmt.Errorf("waf module is not initialized")
-		}
 		return h.wafMonitor.GetConfig(), nil
 	case ModuleRateLimit:
-		if h.rateLimitMonitor == nil {
-			return nil, fmt.Errorf("rate_limit module is not initialized")
-		}
 		return h.rateLimitMonitor.GetConfig(), nil
 	case ModuleAnomalyDetection:
-		if h.anomalyDetector == nil {
-			return nil, fmt.Errorf("anomaly_detection module is not initialized")
-		}
 		return h.anomalyDetector.GetConfig(), nil
 	case ModuleGeoBlocking:
 		if h.geoBlockingMgr == nil {
@@ -353,17 +405,16 @@ type failGuardConfigRequest struct {
 }
 
 func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
-	if h.failguardMonitor == nil {
-		return fmt.Errorf("failguard module is not initialized")
-	}
-
 	var req failGuardConfigRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
 
-	// 获取当前配置作为默认值
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	current := h.failguardMonitor.GetConfig()
+	wasRunning := h.failguardMonitor.IsRunning()
 
 	enabled := boolValue(mapBool(current, "enabled", false), req.Enabled)
 	maxRetry := intValue(mapInt(current, "max_retry", 0), req.MaxRetry)
@@ -375,6 +426,17 @@ func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
 	}
 
 	h.failguardMonitor.UpdateConfig(enabled, maxRetry, findTime, banDuration, mode)
+
+	if !wasRunning && enabled {
+		if err := h.failguardMonitor.Start(); err != nil {
+			logger.Warnf("[ConfigAPI] FailGuard start failed: %v", err)
+		} else {
+			logger.Info("[ConfigAPI] FailGuard started")
+		}
+	} else if wasRunning && !enabled {
+		h.failguardMonitor.Stop()
+		logger.Info("[ConfigAPI] FailGuard stopped")
+	}
 	return nil
 }
 
@@ -385,20 +447,32 @@ type wafConfigRequest struct {
 }
 
 func (h *ConfigHandle) applyWAFConfig(raw json.RawMessage) error {
-	if h.wafMonitor == nil {
-		return fmt.Errorf("waf module is not initialized")
-	}
-
 	var req wafConfigRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
 
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	current := h.wafMonitor.GetConfig()
+	wasRunning := h.wafMonitor.IsRunning()
+
 	enabled := boolValue(mapBool(current, "enabled", false), req.Enabled)
 	banDuration := intValue(mapInt(current, "ban_duration", 0), req.BanDuration)
 
 	h.wafMonitor.UpdateConfig(enabled, banDuration)
+
+	if !wasRunning && enabled {
+		if err := h.wafMonitor.Start(); err != nil {
+			logger.Warnf("[ConfigAPI] WAF start failed: %v", err)
+		} else {
+			logger.Info("[ConfigAPI] WAF started")
+		}
+	} else if wasRunning && !enabled {
+		h.wafMonitor.Stop()
+		logger.Info("[ConfigAPI] WAF stopped")
+	}
 	return nil
 }
 
@@ -409,20 +483,32 @@ type rateLimitConfigRequest struct {
 }
 
 func (h *ConfigHandle) applyRateLimitConfig(raw json.RawMessage) error {
-	if h.rateLimitMonitor == nil {
-		return fmt.Errorf("rate_limit module is not initialized")
-	}
-
 	var req rateLimitConfigRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
 
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	current := h.rateLimitMonitor.GetConfig()
+	wasRunning := h.rateLimitMonitor.IsRunning()
+
 	enabled := boolValue(mapBool(current, "enabled", false), req.Enabled)
 	banDuration := intValue(mapInt(current, "ban_duration", 0), req.BanDuration)
 
 	h.rateLimitMonitor.UpdateConfig(enabled, banDuration)
+
+	if !wasRunning && enabled {
+		if err := h.rateLimitMonitor.Start(); err != nil {
+			logger.Warnf("[ConfigAPI] RateLimit start failed: %v", err)
+		} else {
+			logger.Info("[ConfigAPI] RateLimit started")
+		}
+	} else if wasRunning && !enabled {
+		h.rateLimitMonitor.Stop()
+		logger.Info("[ConfigAPI] RateLimit stopped")
+	}
 	return nil
 }
 
@@ -436,17 +522,16 @@ type anomalyDetectionConfigRequest struct {
 }
 
 func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
-	if h.anomalyDetector == nil {
-		return fmt.Errorf("anomaly_detection module is not initialized")
-	}
-
 	var req anomalyDetectionConfigRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
 
-	// 获取当前原始结构体配置（而非 map，避免嵌套结构体类型断言失败）
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	rawCfg := h.anomalyDetector.GetRawConfig()
+	wasRunning := h.anomalyDetector.IsRunning()
 
 	cfg := anomaly.AnomalyDetectionConfig{
 		Enabled:         boolValue(rawCfg.Enabled, req.Enabled),
@@ -464,6 +549,41 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 	}
 
 	h.anomalyDetector.UpdateConfig(cfg)
+
+	if !wasRunning && cfg.Enabled && h.anomalyController != nil {
+		// 冷启动：激活 eBPF 采样 + 端口过滤 + 事件监听管道
+		if err := h.anomalyController.SetAnomalyConfig(true, uint32(cfg.SampleRate)); err != nil {
+			logger.Warnf("[ConfigAPI] Failed to set eBPF anomaly config: %v", err)
+		}
+		ports := make([]uint32, len(cfg.Ports))
+		for i, p := range cfg.Ports {
+			ports[i] = uint32(p)
+		}
+		portFilterEnabled := len(ports) > 0
+		if err := h.anomalyController.SetAnomalyPortFilter(portFilterEnabled, ports); err != nil {
+			logger.Warnf("[ConfigAPI] Failed to set eBPF anomaly port filter: %v", err)
+		}
+		go h.anomalyController.MonitorAnomalyEvents(h.anomalyRecordPacketFn)
+		if err := h.anomalyDetector.Start(); err != nil {
+			logger.Warnf("[ConfigAPI] AnomalyDetection start failed: %v", err)
+		} else {
+			logger.Info("[ConfigAPI] AnomalyDetection started (eBPF pipeline activated)")
+		}
+	} else if wasRunning && !cfg.Enabled && h.anomalyController != nil {
+		// 停止：去激活 eBPF 采样
+		if err := h.anomalyController.SetAnomalyConfig(false, 0); err != nil {
+			logger.Warnf("[ConfigAPI] Failed to disable eBPF anomaly config: %v", err)
+		}
+		h.anomalyDetector.Stop()
+		logger.Info("[ConfigAPI] AnomalyDetection stopped (eBPF pipeline deactivated)")
+	} else if !wasRunning && cfg.Enabled && h.anomalyController == nil {
+		// 无 eBPF 控制器时仅尝试启动检测器（不完整，但比报错好）
+		if err := h.anomalyDetector.Start(); err != nil {
+			logger.Warnf("[ConfigAPI] AnomalyDetection start failed (no eBPF controller): %v", err)
+		} else {
+			logger.Warnf("[ConfigAPI] AnomalyDetection started without eBPF controller (data pipeline may be inactive)")
+		}
+	}
 	return nil
 }
 

@@ -49,8 +49,9 @@ type LogWatcher struct {
 
 	xdp          XDPRuleManager
 	banStore     BanRecordStore
-	ctx          context.Context
-	cancel       context.CancelFunc
+	parentCtx    context.Context // 父 context（进程级别，用于每次 Start 创建新的子 context）
+	ctx          context.Context // 当前子 context（每次 Start 重建）
+	cancel       context.CancelFunc // 当前 cancel 函数（每次 Start 重建）
 	watcher      *fsnotify.Watcher
 	filePos      map[string]int64
 	offsetStore  *OffsetStore
@@ -69,17 +70,17 @@ type LogWatcher struct {
 	// 可观测的事件回调（可选，由外部模块注入用于额外处理）
 	OnBan    func(ip string, record IPBanRecord)
 	OnUnban  func(ip string, record IPBanRecord)
+
+	started  bool // 追踪是否已启动（用于支持 Restart 语义）
 }
 
 // NewLogWatcher 创建通用日志监听器
 func NewLogWatcher(logTag, banSource string, xdp XDPRuleManager, ctx context.Context) *LogWatcher {
-	childCtx, cancel := context.WithCancel(ctx)
 	return &LogWatcher{
 		LogTag:       logTag,
 		BanSource:    banSource,
 		xdp:          xdp,
-		ctx:          childCtx,
-		cancel:       cancel,
+		parentCtx:    ctx,
 		filePos:      make(map[string]int64),
 		watchedFiles: make(map[string]struct{}),
 		bannedIPs:    make(map[string]IPBanRecord),
@@ -130,8 +131,13 @@ func (w *LogWatcher) WatchLogFile(filePath string) error {
 	return nil
 }
 
-// Start 初始化 fsnotify 并启动监控 goroutine
+// Start 初始化 fsnotify 并启动监控 goroutine（支持 Restart：每次调用创建新的子 context）
 func (w *LogWatcher) Start() error {
+	// 每次启动都创建全新的子 context（支持 Stop → Start 循环）
+	childCtx, cancel := context.WithCancel(w.parentCtx)
+	w.ctx = childCtx
+	w.cancel = cancel
+
 	// 加载持久化的偏移量
 	if w.offsetStore != nil {
 		w.offsetStore.Load()
@@ -152,13 +158,19 @@ func (w *LogWatcher) Start() error {
 		w.offsetStore.StartPeriodicSave(5 * time.Second)
 	}
 
+	w.started = true
 	return nil
 }
 
-// Stop 停止监控
+// Stop 停止监控（可安全多次调用，即使未 Start 也不会 panic）
 func (w *LogWatcher) Stop() {
+	if !w.started {
+		return
+	}
 	logger.Infof("[%s] Stopping log watcher...", w.LogTag)
-	w.cancel()
+	if w.cancel != nil {
+		w.cancel()
+	}
 
 	if w.watcher != nil {
 		w.watcher.Close()
@@ -168,6 +180,7 @@ func (w *LogWatcher) Stop() {
 		w.offsetStore.Save()
 	}
 	logger.Infof("[%s] Log watcher stopped", w.LogTag)
+	w.started = false
 }
 
 // isWatchedFile 检查文件路径是否是需要监听的目标文件

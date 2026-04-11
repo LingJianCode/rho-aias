@@ -18,6 +18,7 @@ type Collector struct {
 	maxAge     time.Duration       // 统计数据最大存活时间
 	cron       *cron.Cron
 	done       chan struct{}
+	stopped    bool // 标志位，用于安全 Stop（避免重复 close channel）
 }
 
 // NewCollector 创建新的统计收集器
@@ -38,8 +39,12 @@ func NewCollector(windowSize int, maxAge time.Duration) *Collector {
 	}
 }
 
-// Start 启动收集器
+// Start 启动收集器（支持 Restart：每次调用重置状态）
 func (c *Collector) Start() {
+	// 重置状态（支持 Stop → Start 循环）
+	c.stopped = false
+	c.done = make(chan struct{})
+
 	// 初始化 Cron 定时任务
 	c.cron = cron.New(cron.WithSeconds())
 
@@ -59,9 +64,13 @@ func (c *Collector) Start() {
 	c.cron.Start()
 }
 
-// Stop 停止收集器
+// Stop 停止收集器（可安全多次调用）
 func (c *Collector) Stop() {
+	if c.stopped {
+		return
+	}
 	close(c.done)
+	c.stopped = true
 	if c.cron != nil {
 		c.cron.Stop()
 	}
