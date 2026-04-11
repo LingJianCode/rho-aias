@@ -13,7 +13,8 @@ type AnomalyDetectionConfig struct {
 	CheckInterval   int            `yaml:"check_interval"`   // 检测间隔（秒）
 	MinPackets      int            `yaml:"min_packets"`      // 最小包数（少于此值不检测）
 	CleanupInterval int            `yaml:"cleanup_interval"` // 清理过期数据间隔（秒）
-	Baseline        BaselineConfig `yaml:"baseline"`        // 3σ 基线配置
+	Ports           []int          `yaml:"ports"`            // 需要检测的端口列表（同时应用于 TCP/UDP，为空则检测所有端口）
+	Baseline        BaselineConfig `yaml:"baseline"`         // 3σ 基线配置
 	Attacks         AttacksConfig  `yaml:"attacks"`         // 攻击类型配置
 }
 

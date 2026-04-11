@@ -704,11 +704,11 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 
 	// AnomalyDetection
 	type anomalyDynamic struct {
-		Enabled    bool              `json:"enabled"`
-		MinPackets int               `json:"min_packets"`
-		Ports      []int             `json:"ports"`
-		Baseline   anomaly.BaselineConfig `json:"baseline"`
-		Attacks    anomaly.AttacksConfig  `json:"attacks"`
+		Enabled    bool                  `json:"enabled"`
+		MinPackets int                   `json:"min_packets"`
+		Ports      []int                 `json:"ports"`
+		Baseline   config.BaselineConfig  `json:"baseline"`
+		Attacks    config.AttacksConfig   `json:"attacks"`
 	}
 	var ad anomalyDynamic
 	if ok, _ := svc.LoadTo("anomaly_detection", &ad); ok {
