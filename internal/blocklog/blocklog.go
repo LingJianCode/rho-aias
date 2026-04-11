@@ -23,10 +23,11 @@ type BlockRecord struct {
 
 // BlockLog 阻断日志管理器
 type BlockLog struct {
-	mu         sync.RWMutex
-	records    []BlockRecord
-	maxSize    int           // 最大记录数
-	asyncWriter *AsyncWriter // 异步文件写入器
+	mu          sync.RWMutex
+	records     []BlockRecord
+	maxSize     int
+	asyncWriter *AsyncWriter
+	statsStore  *StatsStore // 统计存储（可选）
 }
 
 // NewBlockLog 创建新的阻断日志管理器
@@ -47,6 +48,14 @@ func NewBlockLogWithPersistence(maxSize int, config Config) (*BlockLog, error) {
 		return nil, err
 	}
 	bl.asyncWriter = asyncWriter
+
+	// 初始化统计存储（SQLite，失败不阻塞启动）
+	statsStore, err := NewStatsStore(config.LogDir)
+	if err != nil {
+		logger.Warnf("[BlockLog] init stats store failed (non-fatal): %v", err)
+	} else {
+		bl.statsStore = statsStore
+	}
 
 	return bl, nil
 }
@@ -70,6 +79,11 @@ func (bl *BlockLog) AddRecord(record BlockRecord) {
 		if err := bl.asyncWriter.Write(record); err != nil {
 			logger.Warnf("async write failed: %v", err)
 		}
+	}
+
+	// 同步写入统计（热路径，失败仅 warn 不阻塞）
+	if bl.statsStore != nil {
+		bl.statsStore.Record(record.RuleSource)
 	}
 }
 
@@ -250,12 +264,31 @@ func (bl *BlockLog) Clear() {
 	bl.records = make([]BlockRecord, 0, bl.maxSize)
 }
 
-// Close 关闭阻断日志管理器（停止异步写入器）
+// Close 关闭阻断日志管理器（停止异步写入器、关闭统计存储）
 func (bl *BlockLog) Close() error {
+	if bl.statsStore != nil {
+		bl.statsStore.Close()
+	}
 	if bl.asyncWriter != nil {
 		return bl.asyncWriter.Stop()
 	}
 	return nil
+}
+
+// GetHourlyTrend 获取丢弃计数的小时趋势
+func (bl *BlockLog) GetHourlyTrend(hours int) []HourlyTrendItem {
+	if bl.statsStore == nil {
+		return nil
+	}
+	return bl.statsStore.GetHourlyTrend(hours)
+}
+
+// GetDroppedSummary 获取丢弃概览
+func (bl *BlockLog) GetDroppedSummary(hours int) DroppedSummary {
+	if bl.statsStore == nil {
+		return DroppedSummary{}
+	}
+	return bl.statsStore.GetDroppedSummary(hours)
 }
 
 // Flush 刷新缓冲区到磁盘
