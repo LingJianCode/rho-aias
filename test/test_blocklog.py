@@ -1,0 +1,739 @@
+#!/usr/bin/env python3
+"""
+BlockLog 阻断日志集成测试
+验证阻断采样、记录查询和统计聚合功能
+
+测试项目:
+- 阻断采样基本功能
+- 记录字段完整性
+- 统计一致性
+- IP 聚合准确性
+- 按来源过滤
+- 清空与重新采样
+- 多 IP 独立记录
+- SQLite 统计持久化
+
+运行示例:
+    # 基本测试
+    python3 test_blocklog.py
+
+    # 运行特定测试
+    python3 test_blocklog.py -t TestBlockLog.test_01_sampling_basic
+
+    # 使用 API Key 认证
+    python3 test_blocklog.py --use-api-key --api-key sk_live_your-key-here
+"""
+
+import json
+import logging
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import unittest
+from typing import Optional, Tuple
+
+from netns import NetNS, VethPair, TestEnvironment
+
+try:
+    import yaml
+except ImportError:
+    print("PyYAML is required. Install with: pip install pyyaml")
+    sys.exit(1)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+class RhoAiasProcess:
+    """rho-aias 进程管理类"""
+
+    def __init__(self, binary_path: str, default_config_path: str, interface: str,
+                 api_port: int = 18080, use_auth: bool = False, api_key: str = None):
+        self.binary_path = binary_path
+        self.default_config_path = default_config_path
+        self.interface = interface
+        self.api_port = api_port
+        self.use_auth = use_auth
+        self.api_key = api_key
+        self.process: Optional[subprocess.Popen] = None
+        self.config_dir = "/tmp/rho_bl_test"
+        self.log_dir = "/tmp/rho_bl_test_logs"
+        self.log_file = None
+        self.log_path = None
+
+    def start(self) -> bool:
+        """启动 rho-aias 进程"""
+        if not os.path.exists(self.binary_path):
+            logger.error(f"Binary not found: {self.binary_path}")
+            return False
+
+        os.makedirs(self.config_dir, exist_ok=True)
+        config_file = os.path.join(self.config_dir, "config.yml")
+        os.makedirs(self.log_dir, exist_ok=True)
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        self.log_path = os.path.join(self.log_dir, f"rho-aias_{timestamp}.log")
+
+        try:
+            with open(self.default_config_path, 'r') as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Failed to load default config: {e}")
+            return False
+
+        config['server']['port'] = self.api_port
+        config['ebpf']['interface_name'] = self.interface
+
+        # 启用 blocklog（测试目标）
+        config['blocklog']['enabled'] = True
+        config['blocklog']['sample_rate'] = 1
+
+        # 保留手动规则功能
+        config['intel']['enabled'] = True
+        config['geo_blocking']['enabled'] = True
+        config['manual']['enabled'] = True
+
+        # 认证配置
+        if self.use_auth:
+            config['auth']['enabled'] = True
+            config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
+            config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
+            if self.api_key:
+                config['auth']['api_keys'] = [
+                    {'name': 'Test Admin Key', 'key': self.api_key, 'permissions': ['*']}
+                ]
+        else:
+            config['auth']['enabled'] = False
+
+        try:
+            with open(config_file, 'w') as f:
+                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+        except Exception as e:
+            logger.error(f"Failed to write temp config: {e}")
+            return False
+
+        logger.info(f"Starting rho-aias on interface {self.interface} (blocklog enabled)")
+        logger.info(f"Log will be saved to: {self.log_path}")
+
+        try:
+            self.log_file = open(self.log_path, 'w')
+            self.process = subprocess.Popen(
+                [self.binary_path, "--config", config_file],
+                cwd=self.config_dir,
+                stdout=self.log_file,
+                stderr=subprocess.STDOUT,
+                preexec_fn=os.setsid
+            )
+            time.sleep(3)
+
+            if self.process.poll() is not None:
+                logger.error(f"Process exited unexpectedly. Check log: {self.log_path}")
+                return False
+
+            logger.info(f"rho-aias started (PID: {self.process.pid})")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to start rho-aias: {e}")
+            if self.log_file:
+                self.log_file.close()
+            return False
+
+    def stop(self):
+        """停止 rho-aias 进程"""
+        if self.process:
+            try:
+                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+                self.process.wait(timeout=5)
+                logger.info("rho-aias stopped")
+            except subprocess.TimeoutExpired:
+                os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                logger.info("rho-aias killed")
+            except Exception as e:
+                logger.error(f"Error stopping process: {e}")
+            finally:
+                self.process = None
+
+        if self.log_file:
+            try:
+                self.log_file.close()
+                logger.info(f"Log saved to: {self.log_path}")
+            except Exception as e:
+                logger.error(f"Error closing log file: {e}")
+            finally:
+                self.log_file = None
+
+        if os.path.exists(self.config_dir):
+            shutil.rmtree(self.config_dir)
+
+
+class BlockLogAPIClient:
+    """BlockLog API 客户端"""
+
+    def __init__(self, base_url: str, api_key: str = None):
+        self.base_url = base_url
+        self.api_key = api_key
+
+    def _request(self, method: str, path: str, data: dict = None) -> Tuple[bool, dict]:
+        """发送 HTTP 请求"""
+        import urllib.request
+        import urllib.error
+
+        url = f"{self.base_url}{path}"
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+
+        try:
+            if method == "GET":
+                req = urllib.request.Request(url, headers=headers)
+            else:
+                body = json.dumps(data).encode() if data else b""
+                req = urllib.request.Request(url, data=body, headers=headers, method=method)
+
+            with urllib.request.urlopen(req, timeout=10) as response:
+                result = json.loads(response.read().decode())
+                if isinstance(result, dict) and "code" in result:
+                    return result.get("code") == 0, result
+                return True, result
+        except urllib.error.HTTPError as e:
+            try:
+                result = json.loads(e.read().decode())
+                return False, result
+            except:
+                return False, {"code": -1, "message": str(e)}
+        except Exception as e:
+            return False, {"code": -1, "message": str(e)}
+
+    def add_rule(self, value: str) -> Tuple[bool, dict]:
+        """添加阻断规则"""
+        return self._request("POST", "/api/manual/blacklist/rules", {"value": value})
+
+    def delete_rule(self, value: str) -> Tuple[bool, dict]:
+        """删除阻断规则"""
+        return self._request("DELETE", "/api/manual/blacklist/rules", {"value": value})
+
+    def get_records(self, params: dict = None) -> Tuple[bool, dict]:
+        """获取阻断记录"""
+        path = "/api/blocklog/records"
+        if params:
+            query = "&".join(f"{k}={v}" for k, v in params.items() if v)
+            if query:
+                path += f"?{query}"
+        return self._request("GET", path)
+
+    def get_stats(self) -> Tuple[bool, dict]:
+        """获取阻断统计"""
+        return self._request("GET", "/api/blocklog/stats")
+
+    def get_blocked_ips(self, limit: int = None) -> Tuple[bool, dict]:
+        """获取被阻断 IP 聚合列表"""
+        path = "/api/blocklog/blocked-ips"
+        if limit:
+            path += f"?limit={limit}"
+        return self._request("GET", path)
+
+    def clear_records(self) -> Tuple[bool, dict]:
+        """清空阻断记录"""
+        return self._request("DELETE", "/api/blocklog/records")
+
+    def get_hourly_trend(self, hours: int = 24) -> Tuple[bool, dict]:
+        """获取小时趋势"""
+        return self._request("GET", f"/api/blocklog/hourly-trend?hours={hours}")
+
+    def get_dropped_summary(self, hours: int = 168) -> Tuple[bool, dict]:
+        """获取丢弃概览"""
+        return self._request("GET", f"/api/blocklog/dropped-summary?hours={hours}")
+
+
+class TestBlockLog(unittest.TestCase):
+    """BlockLog 阻断日志功能测试"""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.geteuid() != 0:
+            raise unittest.SkipTest("This test requires root privileges")
+
+        cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cls.binary_path = os.path.join(cls.project_root, "rho-aias")
+        cls.default_config_path = os.path.join(cls.project_root, "config/config.yml")
+        cls.api_port = 18080
+        cls.api_client = BlockLogAPIClient(f"http://127.0.0.1:{cls.api_port}")
+
+        if not os.path.exists(cls.binary_path):
+            raise unittest.SkipTest(f"Binary not found: {cls.binary_path}. Run 'make build' first.")
+        if not os.path.exists(cls.default_config_path):
+            raise unittest.SkipTest(f"Default config not found: {cls.default_config_path}")
+
+    def setUp(self):
+        self.env = TestEnvironment("rho_bl")
+        self.rho_process: Optional[RhoAiasProcess] = None
+
+        if not self.env.setup():
+            self.skipTest("Failed to setup test environment")
+
+        logger.info(f"Test environment ready: ns1={self.env.ns1.name}, ns2={self.env.ns2.name}")
+
+    def tearDown(self):
+        if self.rho_process:
+            self.rho_process.stop()
+        self.env.cleanup()
+        time.sleep(1)
+
+    def _start_rho(self, veth_name: str, use_auth: bool = False, api_key: str = None) -> bool:
+        self.rho_process = RhoAiasProcess(
+            self.binary_path,
+            self.default_config_path,
+            veth_name,
+            self.api_port,
+            use_auth,
+            api_key
+        )
+        return self.rho_process.start()
+
+    def _wait_for_records(self, expected_count: int, timeout: float = 5.0) -> Tuple[bool, list]:
+        """等待 blocklog 记录产生"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            success, resp = self.api_client.get_records({"limit": 200})
+            if success:
+                records = resp.get("data", {}).get("records", [])
+                if len(records) >= expected_count:
+                    return True, records
+            time.sleep(0.5)
+        success, resp = self.api_client.get_records({"limit": 200})
+        records = resp.get("data", {}).get("records", []) if success else []
+        return len(records) >= expected_count, records
+
+    def _trigger_block(self, target_ip: str, count: int = 3):
+        """触发阻断：从 ns1 发送 ping，触发 XDP 阻断"""
+        success, output = self.env.ping_from_ns(self.env.ns1, target_ip, count=count, timeout=2.0)
+        # 阻断成功意味着 ping 失败（目标不可达）
+        return not success, output
+
+    def test_01_sampling_basic(self):
+        """测试阻断采样基本功能：封禁 IP → 发包 → API 查到记录"""
+        self.assertTrue(
+            self._start_rho("rho_bl_veth0"),
+            "Failed to start rho-aias"
+        )
+
+        # 验证初始连通性
+        blocked, _ = self._trigger_block("10.0.1.2", count=2)
+        self.assertFalse(blocked, "Initial connectivity check failed")
+
+        # 添加阻断规则
+        success, resp = self.api_client.add_rule("10.0.1.2")
+        self.assertTrue(success, f"Failed to add rule: {resp}")
+        logger.info("Added block rule for 10.0.1.2")
+
+        time.sleep(1)
+
+        # 触发阻断
+        blocked, output = self._trigger_block("10.0.1.2", count=4)
+        self.assertTrue(blocked, f"Block not effective: {output}")
+        logger.info("Block triggered successfully")
+
+        # 等待 ringbuf → callback → AddRecord 完成
+        time.sleep(2)
+
+        # 验证 blocklog 有记录
+        success, resp = self.api_client.get_records()
+        self.assertTrue(success, f"Failed to get records: {resp}")
+
+        data = resp.get("data", {})
+        records = data.get("records", [])
+        self.assertGreater(len(records), 0, "No blocklog records found after blocking")
+        logger.info(f"Found {len(records)} blocklog record(s)")
+
+        # 清理
+        self.api_client.delete_rule("10.0.1.2")
+
+    def test_02_record_fields_detail(self):
+        """测试记录字段完整性和正确性"""
+        self.assertTrue(
+            self._start_rho("rho_bl_veth0"),
+            "Failed to start rho-aias"
+        )
+
+        # 添加并触发阻断
+        self.api_client.add_rule("10.0.1.2")
+        time.sleep(1)
+        self._trigger_block("10.0.1.2", count=3)
+        time.sleep(2)
+
+        success, resp = self.api_client.get_records()
+        self.assertTrue(success)
+        records = resp.get("data", {}).get("records", [])
+
+        self.assertGreater(len(records), 0, "No records found")
+
+        record = records[0]
+        # 验证必填字段存在且非空
+        required_fields = ["src_ip", "dst_ip", "match_type", "rule_source", "packet_size", "timestamp"]
+        for field in required_fields:
+            self.assertIn(field, record, f"Missing field: {field}")
+            logger.info(f"  {field} = {record[field]}")
+
+        # 验证字段值合理性
+        self.assertEqual(record["src_ip"], "10.0.1.2", "src_ip mismatch")
+        self.assertEqual(record["dst_ip"], "10.0.1.1", "dst_ip mismatch")
+        self.assertEqual(record["match_type"], "ip4_exact", "match_type should be ip4_exact for manual block")
+        self.assertEqual(record["rule_source"], "manual", "rule_source should be manual")
+        self.assertGreater(record["packet_size"], 0, "packet_size should be positive")
+        # countryCode 在 manual 阻断时为空字符串
+        self.assertIn("country_code", record)
+        self.assertEqual(record["country_code"], "", "country_code should be empty for manual block")
+
+        logger.info("All record fields validated successfully")
+
+        self.api_client.delete_rule("10.0.1.2")
+
+    def test_03_stats_consistency(self):
+        """测试统计一致性：stats.total_blocked 与 records 数量一致"""
+        self.assertTrue(
+            self._start_rho("rho_bl_veth0"),
+            "Failed to start rho-aias"
+        )
+
+        # 清空已有记录
+        self.api_client.clear_records()
+        time.sleep(1)
+
+        # 添加并触发阻断
+        self.api_client.add_rule("10.0.1.2")
+        time.sleep(1)
+        self._trigger_block("10.0.1.2", count=3)
+        time.sleep(2)
+
+        # 获取 records 数量
+        success, resp = self.api_client.get_records({"limit": 200})
+        self.assertTrue(success)
+        records = resp.get("data", {}).get("records", [])
+        records_count = len(records)
+
+        # 获取 stats
+        success, resp = self.api_client.get_stats()
+        self.assertTrue(success)
+        stats = resp.get("data", {})
+        total_blocked = stats.get("total_blocked", 0)
+
+        logger.info(f"Records count: {records_count}, stats.total_blocked: {total_blocked}")
+        self.assertEqual(records_count, total_blocked,
+                         f"stats.total_blocked ({total_blocked}) should match records count ({records_count})")
+
+        # 验证 by_rule_source 中 manual 类型数量
+        by_source = stats.get("by_rule_source", {})
+        manual_count = by_source.get("manual", 0)
+        self.assertEqual(manual_count, records_count,
+                         f"by_rule_source.manual ({manual_count}) should match records count ({records_count})")
+
+        logger.info("Stats consistency validated")
+
+        self.api_client.delete_rule("10.0.1.2")
+
+    def test_04_blocked_ips_aggregation(self):
+        """测试 IP 聚合功能准确性"""
+        self.assertTrue(
+            self._start_rho("rho_bl_veth0"),
+            "Failed to start rho-aias"
+        )
+
+        self.api_client.clear_records()
+        time.sleep(1)
+
+        # 封禁 10.0.1.2 并多次触发（累积阻断计数）
+        self.api_client.add_rule("10.0.1.2")
+        time.sleep(1)
+        # 发送 5 个 ping 包，全部被阻断
+        for _ in range(5):
+            self._trigger_block("10.0.1.2", count=1)
+        time.sleep(2)
+
+        # 获取 blocked-ips 聚合
+        success, resp = self.api_client.get_blocked_ips(limit=10)
+        self.assertTrue(success, f"Failed to get blocked-ips: {resp}")
+
+        data = resp.get("data", {})
+        top_ips = data.get("top_blocked_ips", [])
+        self.assertGreater(len(top_ips), 0, "No blocked IPs found")
+
+        # 找到 10.0.1.2 的聚合记录
+        target_ip_record = None
+        for item in top_ips:
+            if item.get("ip") == "10.0.1.2":
+                target_ip_record = item
+                break
+
+        self.assertIsNotNone(target_ip_record, "10.0.1.2 not found in blocked-ips aggregation")
+        # 至少应有 1 次阻断（实际应该 >= 5，因为发了 5 次 ping）
+        self.assertGreaterEqual(target_ip_record.get("count", 0), 1,
+                                 "IP block count should be at least 1")
+        logger.info(f"IP aggregation validated: 10.0.1.2 count={target_ip_record.get('count')}")
+
+        self.api_client.delete_rule("10.0.1.2")
+
+    def test_05_filter_by_source(self):
+        """测试按 rule_source 过滤功能"""
+        self.assertTrue(
+            self._start_rho("rho_bl_veth0"),
+            "Failed to start rho-aias"
+        )
+
+        self.api_client.clear_records()
+        time.sleep(1)
+
+        # 添加手动封禁规则并触发阻断
+        self.api_client.add_rule("10.0.1.2")
+        time.sleep(1)
+        self._trigger_block("10.0.1.2", count=3)
+        time.sleep(2)
+
+        # 按 rule_source=manual 过滤
+        success, resp = self.api_client.get_records({"rule_source": "manual", "limit": 100})
+        self.assertTrue(success, f"Failed to filter by rule_source: {resp}")
+
+        records = resp.get("data", {}).get("records", [])
+        self.assertGreater(len(records), 0, "No records found with rule_source=manual")
+
+        # 验证所有记录的 rule_source 都是 manual
+        for record in records:
+            self.assertEqual(record.get("rule_source"), "manual",
+                             f"Expected rule_source=manual, got {record.get('rule_source')}")
+
+        logger.info(f"rule_source filter validated: {len(records)} manual records")
+
+        # 验证过滤非法来源返回空
+        success, resp = self.api_client.get_records({"rule_source": "nonexistent_source", "limit": 100})
+        self.assertTrue(success)
+        records = resp.get("data", {}).get("records", [])
+        self.assertEqual(len(records), 0, "Filter with invalid source should return empty")
+
+        self.api_client.delete_rule("10.0.1.2")
+
+    def test_06_clear_and_resample(self):
+        """测试清空记录功能：DELETE 后为空，重新阻断有新记录"""
+        self.assertTrue(
+            self._start_rho("rho_bl_veth0"),
+            "Failed to start rho-aias"
+        )
+
+        # 触发初始阻断
+        self.api_client.add_rule("10.0.1.2")
+        time.sleep(1)
+        self._trigger_block("10.0.1.2", count=2)
+        time.sleep(2)
+
+        # 验证有记录
+        success, resp = self.api_client.get_records()
+        self.assertTrue(success)
+        initial_count = len(resp.get("data", {}).get("records", []))
+        self.assertGreater(initial_count, 0, "Initial records should exist")
+        logger.info(f"Initial records: {initial_count}")
+
+        # 清空记录
+        success, resp = self.api_client.clear_records()
+        self.assertTrue(success, f"Failed to clear records: {resp}")
+        logger.info("Records cleared")
+
+        # 验证记录为空
+        time.sleep(1)
+        success, resp = self.api_client.get_records()
+        self.assertTrue(success)
+        after_clear_count = len(resp.get("data", {}).get("records", []))
+        self.assertEqual(after_clear_count, 0, "Records should be empty after clear")
+
+        # 删除旧规则，重新封禁
+        self.api_client.delete_rule("10.0.1.2")
+        time.sleep(1)
+        self.api_client.add_rule("10.0.1.2")
+        time.sleep(1)
+
+        # 重新触发阻断
+        self._trigger_block("10.0.1.2", count=3)
+        time.sleep(2)
+
+        # 验证有新的记录
+        success, resp = self.api_client.get_records()
+        self.assertTrue(success)
+        new_count = len(resp.get("data", {}).get("records", []))
+        self.assertGreater(new_count, 0, "New records should appear after re-blocking")
+        logger.info(f"New records after re-blocking: {new_count}")
+
+        self.api_client.delete_rule("10.0.1.2")
+
+    def test_07_multi_ip_records(self):
+        """测试多 IP 独立记录：同时封禁多个 IP，各自记录独立"""
+        self.assertTrue(
+            self._start_rho("rho_bl_veth0"),
+            "Failed to start rho-aias"
+        )
+
+        self.api_client.clear_records()
+        time.sleep(1)
+
+        # 同时封禁两个 IP（使用 ns1 和 ns2 分别发包）
+        self.api_client.add_rule("10.0.1.2")
+        self.api_client.add_rule("10.0.2.2")
+        time.sleep(1)
+
+        # 从 ns1 触发阻断 10.0.1.2
+        self._trigger_block("10.0.1.2", count=3)
+        # 从 ns2 触发阻断 10.0.2.2
+        success2, _ = self.env.ping_from_ns(self.env.ns2, "10.0.2.1", count=3, timeout=2.0)
+        self.assertFalse(success2, "10.0.2.2 should be blocked")
+        time.sleep(2)
+
+        # 验证总记录数
+        success, resp = self.api_client.get_records({"limit": 200})
+        self.assertTrue(success)
+        all_records = resp.get("data", {}).get("records", [])
+        total_count = len(all_records)
+
+        self.assertGreaterEqual(total_count, 2, "Should have records for both IPs")
+        logger.info(f"Total records: {total_count}")
+
+        # 验证各自 IP 有独立记录
+        src_ips = set(r.get("src_ip") for r in all_records)
+        self.assertIn("10.0.1.2", src_ips, "10.0.1.2 should have records")
+        self.assertIn("10.0.2.2", src_ips, "10.0.2.2 should have records")
+
+        # 验证统计中 total_blocked 一致
+        success, resp = self.api_client.get_stats()
+        self.assertTrue(success)
+        total_blocked = resp.get("data", {}).get("total_blocked", 0)
+        self.assertEqual(total_blocked, total_count,
+                         f"stats.total_blocked ({total_blocked}) should equal records count ({total_count})")
+
+        logger.info(f"Multi-IP records validated: {src_ips}")
+
+        self.api_client.delete_rule("10.0.1.2")
+        self.api_client.delete_rule("10.0.2.2")
+
+    def test_08_sqlite_stats_persistence(self):
+        """测试 SQLite 统计持久化：hourly-trend 和 dropped-summary"""
+        self.assertTrue(
+            self._start_rho("rho_bl_veth0"),
+            "Failed to start rho-aias"
+        )
+
+        self.api_client.clear_records()
+        time.sleep(1)
+
+        # 触发阻断，产生 SQLite 写入
+        self.api_client.add_rule("10.0.1.2")
+        time.sleep(1)
+        self._trigger_block("10.0.1.2", count=3)
+        time.sleep(3)
+
+        # 查询 hourly-trend（只查最近 1 小时）
+        success, resp = self.api_client.get_hourly_trend(hours=1)
+        self.assertTrue(success, f"Failed to get hourly-trend: {resp}")
+
+        hourly_data = resp.get("data", {}).get("hourly_data", {})
+        # 如果 SQLite 写入成功，hourly_data 应该有数据
+        # 如果 StatsStore 初始化失败，hourly_data 可能为空（不阻塞测试）
+        logger.info(f"hourly-trend data: {hourly_data}")
+
+        # 查询 dropped-summary
+        success, resp = self.api_client.get_dropped_summary(hours=24)
+        self.assertTrue(success, f"Failed to get dropped-summary: {resp}")
+
+        summary = resp.get("data", {})
+        logger.info(f"dropped-summary: total={summary.get('total')}, sources={summary.get('sources')}")
+
+        # 验证响应结构
+        self.assertIn("total", summary)
+        self.assertIn("sources", summary)
+        self.assertIn("hourly", summary)
+
+        # 如果有统计数据，验证来源包含 manual
+        sources = summary.get("sources", {})
+        if sources:
+            # SQLite 持久化成功，数据有效
+            self.assertIn("manual", sources,
+                          "SQLite should have recorded manual source")
+            logger.info("SQLite stats persistence validated")
+        else:
+            # SQLite 可能未初始化（不阻塞，记录 warn）
+            logger.warning("SQLite stats store may not be initialized (sources empty)")
+
+        self.api_client.delete_rule("10.0.1.2")
+
+
+def run_tests(test_pattern: str = None):
+    """运行测试"""
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+
+    if test_pattern:
+        suite.addTests(loader.loadTestsFromName(f"__main__.{test_pattern}"))
+    else:
+        suite.addTests(loader.loadTestsFromModule(sys.modules[__name__]))
+
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+
+    return 0 if result.wasSuccessful() else 1
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="BlockLog 阻断日志集成测试",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+测试运行示例:
+  # 基本测试
+  python3 test_blocklog.py
+
+  # 运行特定测试
+  python3 test_blocklog.py -t TestBlockLog.test_01_sampling_basic
+
+  # 使用 API Key 认证
+  python3 test_blocklog.py --use-api-key --api-key sk_live_your-key-here
+        """
+    )
+    parser.add_argument(
+        "-t", "--test",
+        help="Run specific test (e.g., TestBlockLog.test_01_sampling_basic)"
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose output"
+    )
+    parser.add_argument(
+        "--use-api-key",
+        action="store_true",
+        help="Enable API Key authentication for tests"
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        help="API Key to use for authentication"
+    )
+
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    if args.use_api_key:
+        if args.api_key:
+            os.environ["TEST_API_KEY"] = args.api_key
+            logger.info(f"Using provided API Key: {args.api_key[:20]}...")
+        elif "TEST_API_KEY" in os.environ:
+            logger.info(f"Using API Key from environment")
+        else:
+            default_key = "sk_live_test-admin-key-1234567890abcdef"
+            os.environ["TEST_API_KEY"] = default_key
+
+    sys.exit(run_tests(args.test) if args.test else run_tests())

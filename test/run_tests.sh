@@ -12,6 +12,8 @@
 #   ./run_tests.sh --ddos --test TestDDoSDetection.test_01_tcp_syn_flood  # 运行特定 DDoS 测试
 #   ./run_tests.sh --log-ban    # 运行日志触发封禁测试（WAF/FailGuard/Rate Limit）
 #   ./run_tests.sh --log-ban --test TestFailGuardBan  # 运行特定日志封禁测试
+#   ./run_tests.sh --blocklog   # 运行 BlockLog 阻断日志测试
+#   ./run_tests.sh --blocklog --test TestBlockLog.test_01_sampling_basic # 运行特定 BlockLog 测试
 #
 # 前置条件:
 #   1. Root 权限
@@ -149,12 +151,61 @@ run_ddos_tests() {
     fi
 }
 
+# 运行 blocklog 测试
+run_blocklog_tests() {
+    local use_api_key=false
+    local api_key=""
+    local other_args=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --use-api-key)
+                use_api_key=true
+                shift
+                ;;
+            --api-key)
+                api_key="$2"
+                shift 2
+                ;;
+            *)
+                other_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    cd "$SCRIPT_DIR"
+
+    log_info "运行 BlockLog 阻断日志测试"
+
+    if [ "$use_api_key" = true ] && [ -n "$api_key" ]; then
+        python3 test_blocklog.py --use-api-key --api-key "$api_key" "${other_args[@]}"
+    elif [ "$use_api_key" = true ]; then
+        python3 test_blocklog.py --use-api-key "${other_args[@]}"
+    else
+        python3 test_blocklog.py "${other_args[@]}"
+    fi
+
+    local exit_code=$?
+
+    if [ $exit_code -eq 0 ]; then
+        echo "========================================"
+        log_info "BlockLog 测试完成"
+        return 0
+    else
+        echo "========================================"
+        log_error "BlockLog 测试失败"
+        return 1
+    fi
+}
+
 # 运行测试
 run_tests() {
     local use_api_key=false
     local api_key=""
     local run_ddos=false
     local run_log_ban=false
+    local run_blocklog=false
     local other_args=()
 
     # 解析参数
@@ -176,6 +227,10 @@ run_tests() {
                 run_log_ban=true
                 shift
                 ;;
+            --blocklog)
+                run_blocklog=true
+                shift
+                ;;
             *)
                 other_args+=("$1")
                 shift
@@ -184,6 +239,28 @@ run_tests() {
     done
 
     cd "$SCRIPT_DIR"
+
+    # Blocklog 测试
+    if [ "$run_blocklog" = true ]; then
+        log_info "运行 BlockLog 阻断日志测试"
+        if [ "$use_api_key" = true ] && [ -n "$api_key" ]; then
+            python3 test_blocklog.py --use-api-key --api-key "$api_key" "${other_args[@]}"
+        elif [ "$use_api_key" = true ]; then
+            python3 test_blocklog.py --use-api-key "${other_args[@]}"
+        else
+            python3 test_blocklog.py "${other_args[@]}"
+        fi
+        local exit_code=$?
+        if [ $exit_code -eq 0 ]; then
+            echo "========================================"
+            log_info "BlockLog 测试完成"
+            return 0
+        else
+            echo "========================================"
+            log_error "BlockLog 测试失败"
+            return 1
+        fi
+    fi
 
     # 如果运行 DDoS 测试
     if [ "$run_ddos" = true ]; then
@@ -252,9 +329,10 @@ run_tests() {
 
 # 主函数
 main() {
-    # 检测是否运行 DDoS 测试
+    # 检测测试类型
     local run_ddos=false
     local run_log_ban=false
+    local run_blocklog=false
     for arg in "$@"; do
         if [ "$arg" = "--ddos" ]; then
             run_ddos=true
@@ -262,6 +340,10 @@ main() {
         fi
         if [ "$arg" = "--log-ban" ]; then
             run_log_ban=true
+            break
+        fi
+        if [ "$arg" = "--blocklog" ]; then
+            run_blocklog=true
             break
         fi
     done
@@ -273,6 +355,10 @@ main() {
     elif [ "$run_log_ban" = true ]; then
         log_info "=========================================="
         log_info "日志触发封禁集成测试（WAF/FailGuard/Rate Limit）"
+        log_info "=========================================="
+    elif [ "$run_blocklog" = true ]; then
+        log_info "=========================================="
+        log_info "BlockLog 阻断日志集成测试"
         log_info "=========================================="
     else
         log_info "=========================================="
