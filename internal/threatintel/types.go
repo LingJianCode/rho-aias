@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"rho-aias/internal/source"
+	"rho-aias/internal/feed"
 )
 
 // SourceID 威胁情报源标识符
@@ -45,7 +45,7 @@ type Status struct {
 }
 
 // SourceStatus 单个威胁情报源的状态（复用公共类型）
-type SourceStatus = source.SourceStatus
+type SourceStatus = feed.SourceStatus
 
 // NewIntelData 创建新的威胁情报数据
 func NewIntelData(source SourceID) *IntelData {

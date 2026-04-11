@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"rho-aias/internal/source"
+	"rho-aias/internal/feed"
 )
 
 func TestNewCache(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 	if cache == nil {
 		t.Fatal("NewCache() returned nil")
 	}
@@ -20,7 +20,7 @@ func TestNewCache(t *testing.T) {
 
 func TestCache_SaveAndLoad(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 
 	data := NewCacheData()
 	geoData := NewGeoIPData(SourceMaxMind)
@@ -56,7 +56,7 @@ func TestCache_SaveAndLoad(t *testing.T) {
 
 func TestCache_Exists(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 
 	if cache.Exists() {
 		t.Error("Exists() should return false for non-existent cache")
@@ -73,7 +73,7 @@ func TestCache_Exists(t *testing.T) {
 
 func TestCache_Clear(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 
 	data := NewCacheData()
 	if err := cache.Save(*data); err != nil {
@@ -93,7 +93,7 @@ func TestCache_Clear(t *testing.T) {
 
 func TestCache_LoadNonExistent(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 
 	_, err := cache.Load()
 	if err == nil {
@@ -103,7 +103,7 @@ func TestCache_LoadNonExistent(t *testing.T) {
 
 func TestCache_GetModTime(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 
 	_, err := cache.GetModTime()
 	if err == nil {
@@ -127,7 +127,7 @@ func TestCache_GetModTime(t *testing.T) {
 
 func TestCache_FilePath(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 
 	data := NewCacheData()
 	if err := cache.Save(*data); err != nil {
@@ -142,7 +142,7 @@ func TestCache_FilePath(t *testing.T) {
 
 func TestCache_Overwrite(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 
 	data1 := NewCacheData()
 	geoData1 := NewGeoIPData(SourceMaxMind)
@@ -180,7 +180,7 @@ func TestCache_Overwrite(t *testing.T) {
 
 func TestCache_ConcurrentSave(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, 10)
@@ -221,7 +221,7 @@ func TestCache_ConcurrentSave(t *testing.T) {
 
 func TestCache_TmpFileCleanup(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 
 	tmpPath := filepath.Join(tempDir, "geoip_cache.bin.tmp")
 	if err := os.WriteFile(tmpPath, []byte("test"), 0644); err != nil {
@@ -252,7 +252,7 @@ func TestCache_TmpFileCleanup(t *testing.T) {
 
 func TestCache_NoDataLossOnInterruption(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "geoip_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "geoip_cache.bin")
 
 	data1 := NewCacheData()
 	geoData1 := NewGeoIPData(SourceMaxMind)

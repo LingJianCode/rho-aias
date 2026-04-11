@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"rho-aias/internal/source"
+	"rho-aias/internal/feed"
 )
 
 func TestNewCache(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "intel_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "intel_cache.bin")
 	if cache == nil {
 		t.Fatal("NewCache() returned nil")
 	}
@@ -19,7 +19,7 @@ func TestNewCache(t *testing.T) {
 
 func TestCache_SaveAndLoad(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "intel_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "intel_cache.bin")
 
 	data := NewCacheData()
 	intelData := NewIntelData(SourceIpsum)
@@ -60,7 +60,7 @@ func TestCache_SaveAndLoad(t *testing.T) {
 
 func TestCache_Exists(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "intel_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "intel_cache.bin")
 
 	if cache.Exists() {
 		t.Error("Exists() should return false for non-existent cache")
@@ -77,7 +77,7 @@ func TestCache_Exists(t *testing.T) {
 
 func TestCache_Clear(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "intel_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "intel_cache.bin")
 
 	data := NewCacheData()
 	if err := cache.Save(*data); err != nil {
@@ -97,7 +97,7 @@ func TestCache_Clear(t *testing.T) {
 
 func TestCache_LoadNonExistent(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "intel_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "intel_cache.bin")
 
 	_, err := cache.Load()
 	if err == nil {
@@ -107,7 +107,7 @@ func TestCache_LoadNonExistent(t *testing.T) {
 
 func TestCache_GetModTime(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "intel_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "intel_cache.bin")
 
 	_, err := cache.GetModTime()
 	if err == nil {
@@ -131,7 +131,7 @@ func TestCache_GetModTime(t *testing.T) {
 
 func TestCache_MultipleSources(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "intel_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "intel_cache.bin")
 
 	data := NewCacheData()
 
@@ -176,7 +176,7 @@ func TestCache_MultipleSources(t *testing.T) {
 
 func TestCache_FilePath(t *testing.T) {
 	tempDir := t.TempDir()
-	cache := source.NewCache[CacheData](tempDir, "intel_cache.bin")
+	cache := feed.NewCache[CacheData](tempDir, "intel_cache.bin")
 
 	data := NewCacheData()
 	if err := cache.Save(*data); err != nil {

@@ -9,7 +9,7 @@ import (
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
-	"rho-aias/internal/source"
+	"rho-aias/internal/feed"
 
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
@@ -19,9 +19,9 @@ import (
 type Manager struct {
 	config   *config.GeoBlockingConfig // GeoBlocking 配置
 	xdp      *ebpfs.Xdp                // XDP eBPF 程序接口
-	fetcher  *source.Fetcher           // 数据获取器（公共）
+	fetcher  *feed.Fetcher           // 数据获取器（公共）
 	parser   *Parser                   // 数据解析器
-	cache    *source.Cache[CacheData]  // 持久化缓存（公共泛型）
+	cache    *feed.Cache[CacheData]  // 持久化缓存（公共泛型）
 	syncer   *Syncer                   // 内核同步器
 	cron     *cron.Cron                // Cron 调度器
 	jobIDs   map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
@@ -34,7 +34,7 @@ type Manager struct {
 
 	// 数据库支持和并发控制（使用公共组件）
 	db            *gorm.DB                          // 数据库连接
-	sourceMutexes *source.MutexPool[SourceID]       // 互斥锁池（公共）
+	sourceMutexes *feed.MutexPool[SourceID]       // 互斥锁池（公共）
 }
 
 // NewManager 创建新的 GeoIP 管理器
@@ -42,14 +42,14 @@ func NewManager(cfg *config.GeoBlockingConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Man
 	return &Manager{
 		config:        cfg,
 		xdp:           xdp,
-		fetcher:       source.NewFetcher(30 * time.Second),
+		fetcher:       feed.NewFetcher(30 * time.Second),
 		parser:        NewParser(),
-		cache:         source.NewCache[CacheData](cfg.PersistenceDir, "geoip_cache.bin"),
+		cache:         feed.NewCache[CacheData](cfg.PersistenceDir, "geoip_cache.bin"),
 		syncer:        NewSyncer(xdp, cfg.BatchSize),
 		done:          make(chan struct{}),
 		sourceStatus:  make(map[SourceID]*SourceStatus),
 		db:            db,
-		sourceMutexes: source.NewMutexPool[SourceID](),
+		sourceMutexes: feed.NewMutexPool[SourceID](),
 		status: &Status{
 			Enabled:          cfg.Enabled,
 			Mode:             cfg.Mode,
@@ -181,7 +181,7 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 	data, err := m.fetcher.Fetch(src.URL)
 	if err != nil {
 		duration := time.Since(startTime).Milliseconds()
-		_ = source.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
+		_ = feed.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[GeoBlocking] [%s] Fetched %d bytes", sourceID, len(data))
@@ -190,7 +190,7 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 	parsed, err := m.parser.Parse(data, src.Format, m.config.AllowedCountries, sourceID)
 	if err != nil {
 		duration := time.Since(startTime).Milliseconds()
-		_ = source.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
+		_ = feed.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[GeoBlocking] [%s] Parsed %d rules", sourceID, parsed.TotalCount())
@@ -204,7 +204,7 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 	}
 	if err := m.syncer.SyncToKernel(parsed, geoConfig); err != nil {
 		duration := time.Since(startTime).Milliseconds()
-		_ = source.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
+		_ = feed.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 
@@ -213,10 +213,10 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 
 	// 5. 记录成功状态 + 清理旧记录
 	duration := time.Since(startTime).Milliseconds()
-	if err := source.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
+	if err := feed.RecordStatus(m.db, "geo_blocking", string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
 		logger.Errorf("[GeoBlocking] [%s] Failed to record status to DB: %v", sourceID, err)
 	}
-	if err := source.CleanOldRecords(m.db, "geo_blocking", string(sourceID)); err != nil {
+	if err := feed.CleanOldRecords(m.db, "geo_blocking", string(sourceID)); err != nil {
 		logger.Errorf("[GeoBlocking] [%s] Failed to clean old records: %v", sourceID, err)
 	}
 

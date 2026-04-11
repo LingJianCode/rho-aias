@@ -1,5 +1,9 @@
-// Package source 提供威胁情报和地域封禁等数据源模块的公共基础设施
-package source
+// Package feed 为威胁情报、地域封禁等数据馈送（Data Feed）模块提供公共基础设施，
+// 包括泛型持久化缓存（Cache）、HTTP 数据获取器（Fetcher）、
+// 并发互斥锁池（MutexPool）、数据源状态（SourceStatus）和数据库状态记录辅助函数。
+//
+// 各模块通过泛型参数 [T] 传入自己的数据类型，实现类型安全的复用。
+package feed
 
 import (
 	"context"

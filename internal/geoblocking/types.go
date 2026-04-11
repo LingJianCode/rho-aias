@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"rho-aias/internal/source"
+	"rho-aias/internal/feed"
 )
 
 // SourceID GeoIP 数据源标识符
@@ -55,7 +55,7 @@ type Status struct {
 }
 
 // SourceStatus 单个 GeoIP 数据源的状态（复用公共类型）
-type SourceStatus = source.SourceStatus
+type SourceStatus = feed.SourceStatus
 
 var ErrGeoIPCacheNotFound = errors.New("geoip cache not found")
 

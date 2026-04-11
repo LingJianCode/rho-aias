@@ -9,7 +9,7 @@ import (
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
-	"rho-aias/internal/source"
+	"rho-aias/internal/feed"
 
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
@@ -20,9 +20,9 @@ import (
 type Manager struct {
 	config  *config.IntelConfig       // 威胁情报配置
 	xdp     *ebpfs.Xdp                // XDP eBPF 程序接口
-	fetcher *source.Fetcher           // 数据获取器（公共）
+	fetcher *feed.Fetcher           // 数据获取器（公共）
 	parser  *Parser                   // 数据解析器
-	cache   *source.Cache[CacheData]  // 持久化缓存（公共泛型）
+	cache   *feed.Cache[CacheData]  // 持久化缓存（公共泛型）
 	syncer  *Syncer                   // 内核同步器
 	cron    *cron.Cron                // Cron 调度器
 	jobIDs  map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
@@ -36,7 +36,7 @@ type Manager struct {
 
 	// 数据库支持和并发控制（使用公共组件）
 	db            *gorm.DB                          // 数据库连接
-	sourceMutexes *source.MutexPool[SourceID]       // 互斥锁池（公共）
+	sourceMutexes *feed.MutexPool[SourceID]       // 互斥锁池（公共）
 
 	// 每个源的最新规则数据（用于 saveCache 按源分类保存）
 	sourceRules map[SourceID]*IntelData
@@ -47,14 +47,14 @@ func NewManager(cfg *config.IntelConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Manager {
 	return &Manager{
 		config:        cfg,
 		xdp:           xdp,
-		fetcher:       source.NewFetcher(30 * time.Second),
+		fetcher:       feed.NewFetcher(30 * time.Second),
 		parser:        NewParser(),
-		cache:         source.NewCache[CacheData](cfg.PersistenceDir, "intel_cache.bin"),
+		cache:         feed.NewCache[CacheData](cfg.PersistenceDir, "intel_cache.bin"),
 		syncer:        NewSyncer(xdp, cfg.BatchSize),
 		done:          make(chan struct{}),
 		sourceStatus:  make(map[SourceID]*SourceStatus),
 		db:            db,
-		sourceMutexes: source.NewMutexPool[SourceID](),
+		sourceMutexes: feed.NewMutexPool[SourceID](),
 		sourceRules:   make(map[SourceID]*IntelData),
 		status: &Status{
 			Enabled: cfg.Enabled,
@@ -176,7 +176,7 @@ func (m *Manager) updateSource(sourceID SourceID, src config.IntelSource) error 
 	data, err := m.fetcher.Fetch(src.URL)
 	if err != nil {
 		duration := time.Since(startTime).Milliseconds()
-		_ = source.RecordStatus(m.db, "intel", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
+		_ = feed.RecordStatus(m.db, "intel", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[ThreatIntel] [%s] Fetched %d bytes", sourceID, len(data))
@@ -185,7 +185,7 @@ func (m *Manager) updateSource(sourceID SourceID, src config.IntelSource) error 
 	parsed, err := m.parser.Parse(data, src.Format, sourceID)
 	if err != nil {
 		duration := time.Since(startTime).Milliseconds()
-		_ = source.RecordStatus(m.db, "intel", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
+		_ = feed.RecordStatus(m.db, "intel", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 	logger.Infof("[ThreatIntel] [%s] Parsed %d rules (exact: %d, cidr: %d)",
@@ -195,7 +195,7 @@ func (m *Manager) updateSource(sourceID SourceID, src config.IntelSource) error 
 	sourceMask := sourceIDToMask(sourceID)
 	if err := m.syncer.SyncToKernel(parsed, sourceMask); err != nil {
 		duration := time.Since(startTime).Milliseconds()
-		_ = source.RecordStatus(m.db, "intel", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
+		_ = feed.RecordStatus(m.db, "intel", string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
 
@@ -209,10 +209,10 @@ func (m *Manager) updateSource(sourceID SourceID, src config.IntelSource) error 
 
 	// 6. 记录成功状态 + 清理旧记录
 	duration := time.Since(startTime).Milliseconds()
-	if err := source.RecordStatus(m.db, "intel", string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
+	if err := feed.RecordStatus(m.db, "intel", string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
 		logger.Errorf("[ThreatIntel] [%s] Failed to record status to DB: %v", sourceID, err)
 	}
-	if err := source.CleanOldRecords(m.db, "intel", string(sourceID)); err != nil {
+	if err := feed.CleanOldRecords(m.db, "intel", string(sourceID)); err != nil {
 		logger.Errorf("[ThreatIntel] [%s] Failed to clean old records: %v", sourceID, err)
 	}
 
