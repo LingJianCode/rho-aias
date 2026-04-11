@@ -158,10 +158,10 @@ func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 		return
 	}
 
-	// 2. 持久化到 DB
-	var value interface{}
-	if err := json.Unmarshal(raw, &value); err != nil {
-		response.InternalError(c, "Failed to parse config for persistence: "+err.Error())
+	// 2. 持久化合并后的完整配置到 DB（而非原始请求值，确保重启后配置完整恢复）
+	value, err := h.getMergedConfig(module)
+	if err != nil {
+		response.InternalError(c, "Failed to get merged config for persistence: "+err.Error())
 		return
 	}
 	if err := h.configService.Set(module, value); err != nil {
@@ -224,6 +224,44 @@ func (h *ConfigHandle) applyConfig(module string, raw json.RawMessage) error {
 	}
 }
 
+// getMergedConfig 获取模块当前合并后的完整配置（用于持久化）
+func (h *ConfigHandle) getMergedConfig(module string) (interface{}, error) {
+	switch module {
+	case ModuleFailGuard:
+		if h.failguardMonitor == nil {
+			return nil, fmt.Errorf("failguard module is not initialized")
+		}
+		return h.failguardMonitor.GetConfig(), nil
+	case ModuleWAF:
+		if h.wafMonitor == nil {
+			return nil, fmt.Errorf("waf module is not initialized")
+		}
+		return h.wafMonitor.GetConfig(), nil
+	case ModuleRateLimit:
+		if h.rateLimitMonitor == nil {
+			return nil, fmt.Errorf("rate_limit module is not initialized")
+		}
+		return h.rateLimitMonitor.GetConfig(), nil
+	case ModuleAnomalyDetection:
+		if h.anomalyDetector == nil {
+			return nil, fmt.Errorf("anomaly_detection module is not initialized")
+		}
+		return h.anomalyDetector.GetConfig(), nil
+	case ModuleGeoBlocking:
+		if h.geoBlockingMgr == nil {
+			return nil, fmt.Errorf("geo_blocking module is not initialized")
+		}
+		return h.geoBlockingMgr.GetConfig(), nil
+	case ModuleIntel:
+		if h.intelMgr == nil {
+			return nil, fmt.Errorf("intel module is not initialized")
+		}
+		return h.intelMgr.GetConfig(), nil
+	default:
+		return nil, fmt.Errorf("unsupported module: %s", module)
+	}
+}
+
 // FailGuard 动态配置请求
 type failGuardConfigRequest struct {
 	Enabled     *bool  `json:"enabled"`
@@ -246,13 +284,13 @@ func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
 	// 获取当前配置作为默认值
 	current := h.failguardMonitor.GetConfig()
 
-	enabled := boolValue(current["enabled"].(bool), req.Enabled)
-	maxRetry := intValue(current["max_retry"].(int), req.MaxRetry)
-	findTime := intValue(current["find_time"].(int), req.FindTime)
-	banDuration := intValue(current["ban_duration"].(int), req.BanDuration)
+	enabled := boolValue(mapBool(current, "enabled", false), req.Enabled)
+	maxRetry := intValue(mapInt(current, "max_retry", 0), req.MaxRetry)
+	findTime := intValue(mapInt(current, "find_time", 0), req.FindTime)
+	banDuration := intValue(mapInt(current, "ban_duration", 0), req.BanDuration)
 	mode := req.Mode
 	if mode == "" {
-		mode = current["mode"].(string)
+		mode = mapString(current, "mode", "")
 	}
 
 	h.failguardMonitor.UpdateConfig(enabled, maxRetry, findTime, banDuration, mode)
@@ -276,8 +314,8 @@ func (h *ConfigHandle) applyWAFConfig(raw json.RawMessage) error {
 	}
 
 	current := h.wafMonitor.GetConfig()
-	enabled := boolValue(current["enabled"].(bool), req.Enabled)
-	banDuration := intValue(current["ban_duration"].(int), req.BanDuration)
+	enabled := boolValue(mapBool(current, "enabled", false), req.Enabled)
+	banDuration := intValue(mapInt(current, "ban_duration", 0), req.BanDuration)
 
 	h.wafMonitor.UpdateConfig(enabled, banDuration)
 	return nil
@@ -300,22 +338,47 @@ func (h *ConfigHandle) applyRateLimitConfig(raw json.RawMessage) error {
 	}
 
 	current := h.rateLimitMonitor.GetConfig()
-	enabled := boolValue(current["enabled"].(bool), req.Enabled)
-	banDuration := intValue(current["ban_duration"].(int), req.BanDuration)
+	enabled := boolValue(mapBool(current, "enabled", false), req.Enabled)
+	banDuration := intValue(mapInt(current, "ban_duration", 0), req.BanDuration)
 
 	h.rateLimitMonitor.UpdateConfig(enabled, banDuration)
 	return nil
 }
 
 // AnomalyDetection 动态配置请求
+type anomalyDetectionConfigRequest struct {
+	Enabled    *bool                       `json:"enabled"`
+	MinPackets *int                        `json:"min_packets"`
+	Ports      []int                       `json:"ports"`
+	Baseline   *anomaly.BaselineConfig     `json:"baseline"`
+	Attacks    *anomaly.AttacksConfig      `json:"attacks"`
+}
+
 func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 	if h.anomalyDetector == nil {
 		return fmt.Errorf("anomaly_detection module is not initialized")
 	}
 
-	var cfg anomaly.AnomalyDetectionConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	var req anomalyDetectionConfigRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
 		return fmt.Errorf("invalid config format: %w", err)
+	}
+
+	current := h.anomalyDetector.GetConfig()
+
+	cfg := anomaly.AnomalyDetectionConfig{
+		Enabled:         boolValue(mapBool(current, "enabled", false), req.Enabled),
+		SampleRate:      mapInt(current, "sample_rate", 0),
+		CheckInterval:   mapInt(current, "check_interval", 0),
+		MinPackets:      intValue(mapInt(current, "min_packets", 0), req.MinPackets),
+		CleanupInterval: mapInt(current, "cleanup_interval", 0),
+		Baseline:        baselineValue(current["baseline"], req.Baseline),
+		Attacks:         attacksValue(current["attacks"], req.Attacks),
+	}
+	if req.Ports != nil {
+		cfg.Ports = req.Ports
+	} else {
+		cfg.Ports = mapIntSlice(current, "ports")
 	}
 
 	h.anomalyDetector.UpdateConfig(cfg)
@@ -340,17 +403,14 @@ func (h *ConfigHandle) applyGeoBlockingConfig(raw json.RawMessage) error {
 	}
 
 	current := h.geoBlockingMgr.GetConfig()
-	enabled := boolValue(current["enabled"].(bool), req.Enabled)
+	enabled := boolValue(mapBool(current, "enabled", false), req.Enabled)
 	mode := req.Mode
 	if mode == "" {
-		mode = current["mode"].(string)
+		mode = mapString(current, "mode", "")
 	}
 	countries := req.AllowedCountries
 	if countries == nil {
-		countriesIface, _ := current["allowed_countries"].([]string)
-		if countriesIface != nil {
-			countries = countriesIface
-		}
+		countries = mapStringSlice(current, "allowed_countries")
 	}
 
 	return h.geoBlockingMgr.UpdateConfig(enabled, mode, countries)
@@ -421,4 +481,128 @@ func intValue(def int, ptr *int) int {
 		return *ptr
 	}
 	return def
+}
+
+// mapBool 从 map[string]interface{} 中安全读取 bool 值
+func mapBool(m map[string]interface{}, key string, fallback bool) bool {
+	v, ok := m[key]
+	if !ok {
+		return fallback
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return fallback
+	}
+	return b
+}
+
+// mapInt 从 map[string]interface{} 中安全读取 int 值
+func mapInt(m map[string]interface{}, key string, fallback int) int {
+	v, ok := m[key]
+	if !ok {
+		return fallback
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return fallback
+		}
+		return int(i)
+	default:
+		return fallback
+	}
+}
+
+// mapString 从 map[string]interface{} 中安全读取 string 值
+func mapString(m map[string]interface{}, key string, fallback string) string {
+	v, ok := m[key]
+	if !ok {
+		return fallback
+	}
+	s, ok := v.(string)
+	if !ok {
+		return fallback
+	}
+	return s
+}
+
+// mapStringSlice 从 map[string]interface{} 中安全读取 []string（处理 JSON round-trip 后的 []interface{} 情况）
+func mapStringSlice(m map[string]interface{}, key string) []string {
+	v, ok := m[key]
+	if !ok {
+		return nil
+	}
+	// 直接 []string 类型
+	if s, ok := v.([]string); ok {
+		return s
+	}
+	// JSON round-trip 后变成 []interface{}
+	if ifaceSlice, ok := v.([]interface{}); ok {
+		result := make([]string, 0, len(ifaceSlice))
+		for _, item := range ifaceSlice {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	return nil
+}
+
+// mapIntSlice 从 map[string]interface{} 中安全读取 []int（处理 JSON round-trip 后的 []interface{} 情况）
+func mapIntSlice(m map[string]interface{}, key string) []int {
+	v, ok := m[key]
+	if !ok {
+		return nil
+	}
+	// 直接 []int 类型
+	if s, ok := v.([]int); ok {
+		return s
+	}
+	// JSON round-trip 后变成 []interface{}
+	if ifaceSlice, ok := v.([]interface{}); ok {
+		result := make([]int, 0, len(ifaceSlice))
+		for _, item := range ifaceSlice {
+			switch n := item.(type) {
+			case int:
+				result = append(result, n)
+			case float64:
+				result = append(result, int(n))
+			case json.Number:
+				i, err := n.Int64()
+				if err == nil {
+					result = append(result, int(i))
+				}
+			}
+		}
+		return result
+	}
+	return nil
+}
+
+// baselineValue 如果 ptr 不为 nil 则返回 *ptr，否则从当前配置还原
+func baselineValue(current interface{}, ptr *anomaly.BaselineConfig) anomaly.BaselineConfig {
+	if ptr != nil {
+		return *ptr
+	}
+	if v, ok := current.(anomaly.BaselineConfig); ok {
+		return v
+	}
+	return anomaly.BaselineConfig{}
+}
+
+// attacksValue 如果 ptr 不为 nil 则返回 *ptr，否则从当前配置还原
+func attacksValue(current interface{}, ptr *anomaly.AttacksConfig) anomaly.AttacksConfig {
+	if ptr != nil {
+		return *ptr
+	}
+	if v, ok := current.(anomaly.AttacksConfig); ok {
+		return v
+	}
+	return anomaly.AttacksConfig{}
 }

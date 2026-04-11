@@ -21,11 +21,11 @@ import (
 
 // Config 日志配置
 type Config struct {
-	Level         string `yaml:"level"`          // 日志级别: debug/info/warn/error
-	Format        string `yaml:"format"`         // 输出格式: console/json
-	OutputDir     string `yaml:"output_dir"`     // 日志目录
-	MaxAgeDays    int    `yaml:"max_age_days"`   // 日志保留天数
-	RotationHours int    `yaml:"rotation_hours"` // 按小时分割
+	Level         string `yaml:"level" json:"level"`               // 日志级别: debug/info/warn/error
+	Format        string `yaml:"format" json:"format"`              // 输出格式: console/json
+	OutputDir     string `yaml:"output_dir" json:"output_dir"`      // 日志目录
+	MaxAgeDays    int    `yaml:"max_age_days" json:"max_age_days"`  // 日志保留天数
+	RotationHours int    `yaml:"rotation_hours" json:"rotation_hours"` // 按小时分割
 }
 
 // Logger 全局日志管理器

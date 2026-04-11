@@ -660,7 +660,9 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		Mode        string `json:"mode"`
 	}
 	var fg failGuardDynamic
-	if ok, _ := svc.LoadTo("failguard", &fg); ok {
+	if ok, err := svc.LoadTo("failguard", &fg); err != nil {
+		logger.Warnf("[Main] Failed to load failguard dynamic config from DB: %v", err)
+	} else if ok {
 		cfg.FailGuard.Enabled = fg.Enabled
 		if fg.MaxRetry > 0 {
 			cfg.FailGuard.MaxRetry = fg.MaxRetry
@@ -682,7 +684,9 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		BanDuration int  `json:"ban_duration"`
 	}
 	var wf wafDynamic
-	if ok, _ := svc.LoadTo("waf", &wf); ok {
+	if ok, err := svc.LoadTo("waf", &wf); err != nil {
+		logger.Warnf("[Main] Failed to load waf dynamic config from DB: %v", err)
+	} else if ok {
 		cfg.WAF.Enabled = wf.Enabled
 		if wf.BanDuration > 0 {
 			cfg.WAF.BanDuration = wf.BanDuration
@@ -695,7 +699,9 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		BanDuration int  `json:"ban_duration"`
 	}
 	var rl rateLimitDynamic
-	if ok, _ := svc.LoadTo("rate_limit", &rl); ok {
+	if ok, err := svc.LoadTo("rate_limit", &rl); err != nil {
+		logger.Warnf("[Main] Failed to load rate_limit dynamic config from DB: %v", err)
+	} else if ok {
 		cfg.RateLimit.Enabled = rl.Enabled
 		if rl.BanDuration > 0 {
 			cfg.RateLimit.BanDuration = rl.BanDuration
@@ -704,14 +710,16 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 
 	// AnomalyDetection
 	type anomalyDynamic struct {
-		Enabled    bool                  `json:"enabled"`
-		MinPackets int                   `json:"min_packets"`
-		Ports      []int                 `json:"ports"`
-		Baseline   config.BaselineConfig  `json:"baseline"`
-		Attacks    config.AttacksConfig   `json:"attacks"`
+		Enabled    bool                   `json:"enabled"`
+		MinPackets int                    `json:"min_packets"`
+		Ports      []int                  `json:"ports"`
+		Baseline   anomaly.BaselineConfig  `json:"baseline"`
+		Attacks    anomaly.AttacksConfig   `json:"attacks"`
 	}
 	var ad anomalyDynamic
-	if ok, _ := svc.LoadTo("anomaly_detection", &ad); ok {
+	if ok, err := svc.LoadTo("anomaly_detection", &ad); err != nil {
+		logger.Warnf("[Main] Failed to load anomaly_detection dynamic config from DB: %v", err)
+	} else if ok {
 		cfg.AnomalyDetection.Enabled = ad.Enabled
 		if ad.MinPackets > 0 {
 			cfg.AnomalyDetection.MinPackets = ad.MinPackets
@@ -720,10 +728,41 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 			cfg.AnomalyDetection.Ports = ad.Ports
 		}
 		if ad.Baseline.MinSampleCount > 0 {
-			cfg.AnomalyDetection.Baseline = ad.Baseline
+			cfg.AnomalyDetection.Baseline = config.BaselineConfig{
+				MinSampleCount:  ad.Baseline.MinSampleCount,
+				SigmaMultiplier: ad.Baseline.SigmaMultiplier,
+				MinThreshold:    ad.Baseline.MinThreshold,
+				MaxAge:          ad.Baseline.MaxAge,
+				BlockDuration:   ad.Baseline.BlockDuration,
+			}
 		}
 		if ad.Attacks.SynFlood.RatioThreshold > 0 {
-			cfg.AnomalyDetection.Attacks = ad.Attacks
+			cfg.AnomalyDetection.Attacks = config.AttacksConfig{
+				SynFlood: config.AttackConfig{
+					Enabled:        ad.Attacks.SynFlood.Enabled,
+					RatioThreshold: ad.Attacks.SynFlood.RatioThreshold,
+					BlockDuration:  ad.Attacks.SynFlood.BlockDuration,
+					MinPackets:     ad.Attacks.SynFlood.MinPackets,
+				},
+				UdpFlood: config.AttackConfig{
+					Enabled:        ad.Attacks.UdpFlood.Enabled,
+					RatioThreshold: ad.Attacks.UdpFlood.RatioThreshold,
+					BlockDuration:  ad.Attacks.UdpFlood.BlockDuration,
+					MinPackets:     ad.Attacks.UdpFlood.MinPackets,
+				},
+				IcmpFlood: config.AttackConfig{
+					Enabled:        ad.Attacks.IcmpFlood.Enabled,
+					RatioThreshold: ad.Attacks.IcmpFlood.RatioThreshold,
+					BlockDuration:  ad.Attacks.IcmpFlood.BlockDuration,
+					MinPackets:     ad.Attacks.IcmpFlood.MinPackets,
+				},
+				AckFlood: config.AttackConfig{
+					Enabled:        ad.Attacks.AckFlood.Enabled,
+					RatioThreshold: ad.Attacks.AckFlood.RatioThreshold,
+					BlockDuration:  ad.Attacks.AckFlood.BlockDuration,
+					MinPackets:     ad.Attacks.AckFlood.MinPackets,
+				},
+			}
 		}
 	}
 
@@ -734,7 +773,9 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		AllowedCountries []string `json:"allowed_countries"`
 	}
 	var geo geoDynamic
-	if ok, _ := svc.LoadTo("geo_blocking", &geo); ok {
+	if ok, err := svc.LoadTo("geo_blocking", &geo); err != nil {
+		logger.Warnf("[Main] Failed to load geo_blocking dynamic config from DB: %v", err)
+	} else if ok {
 		cfg.GeoBlocking.Enabled = geo.Enabled
 		if geo.Mode != "" {
 			cfg.GeoBlocking.Mode = geo.Mode
@@ -749,7 +790,9 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		Enabled bool `json:"enabled"`
 	}
 	var intel intelDynamic
-	if ok, _ := svc.LoadTo("intel", &intel); ok {
+	if ok, err := svc.LoadTo("intel", &intel); err != nil {
+		logger.Warnf("[Main] Failed to load intel dynamic config from DB: %v", err)
+	} else if ok {
 		cfg.Intel.Enabled = intel.Enabled
 	}
 

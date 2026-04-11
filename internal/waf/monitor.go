@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sync"
 
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
@@ -27,6 +28,8 @@ type LogEntry struct {
 
 // Monitor WAF 日志监控器
 type Monitor struct {
+	mu sync.RWMutex
+
 	cfg     *config.WAFConfig
 	watcher *watcher.LogWatcher
 	cron    *cron.Cron
@@ -133,6 +136,9 @@ func (m *Monitor) extractIP(line string) string {
 
 // UpdateConfig 热更新 WAF 动态配置
 func (m *Monitor) UpdateConfig(enabled bool, banDuration int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.cfg.Enabled = enabled
 	m.cfg.BanDuration = banDuration
 	logger.Infof("[WAF] Config updated: enabled=%v, ban_duration=%d", enabled, banDuration)
@@ -140,6 +146,9 @@ func (m *Monitor) UpdateConfig(enabled bool, banDuration int) {
 
 // GetConfig 获取当前 WAF 配置（返回可动态化的字段）
 func (m *Monitor) GetConfig() map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	return map[string]interface{}{
 		"enabled":      m.cfg.Enabled,
 		"ban_duration": m.cfg.BanDuration,
