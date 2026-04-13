@@ -14,7 +14,11 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <el-segmented v-model="activeModule" :options="moduleOptions" size="small" @change="(val) => switchModule(val as ConfigModuleName)" />
+          <el-radio-group v-model="activeModule" size="small" @change="(val) => switchModule(val as ConfigModuleName)">
+            <el-radio-button v-for="mod in modules" :key="mod.key" :value="mod.key">
+              {{ mod.label }}
+            </el-radio-button>
+          </el-radio-group>
         </div>
       </template>
 
@@ -214,7 +218,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getModuleConfig, updateModuleConfig } from '@/api/config'
 import type { ConfigModuleName } from '@/types/api'
@@ -401,11 +405,6 @@ function takeSnapshot(module: ConfigModuleName) {
       break
   }
 }
-
-// el-segmented 选项
-const moduleOptions = computed(() =>
-  modules.map(m => ({ label: m.label, value: m.key }))
-)
 
 const modules: { key: ConfigModuleName; label: string }[] = [
   { key: 'failguard', label: 'SSH 防爆破' },
