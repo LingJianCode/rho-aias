@@ -5,16 +5,16 @@
     </div>
 
     <el-row :gutter="12" class="stats-row">
-      <el-col :span="6">
+      <el-col :span="5">
         <StatsCard label="总封禁数" :value="stats.total" :icon="Lock" icon-color="#409eff" />
       </el-col>
-      <el-col :span="6">
+      <el-col :span="5">
         <StatsCard label="生效中" :value="stats.active" :icon="CircleCheck" icon-color="#67c23a" />
       </el-col>
-      <el-col :span="6">
+      <el-col :span="5">
         <StatsCard label="已过期" :value="stats.expired" :icon="CircleClose" icon-color="#909399" />
       </el-col>
-      <el-col :span="6">
+      <el-col :span="5">
         <StatsCard label="今日新增" :value="stats.today_count" :icon="TrendCharts" icon-color="#e6a23c" />
       </el-col>
     </el-row>

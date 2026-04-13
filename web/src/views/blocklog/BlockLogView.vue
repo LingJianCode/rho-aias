@@ -5,16 +5,16 @@
     </div>
 
     <el-row :gutter="12" class="stats-row">
-      <el-col :span="6">
+      <el-col :span="5">
         <StatsCard label="阻断总数" :value="stats.total_blocks" :icon="DataLine" icon-color="#409eff" />
       </el-col>
-      <el-col :span="6">
+      <el-col :span="5">
         <StatsCard label="阻断 IP 数" :value="stats.unique_ips" :icon="Monitor" icon-color="#67c23a" />
       </el-col>
-      <el-col :span="6">
+      <el-col :span="5">
         <StatsCard label="涉及国家" :value="stats.top_countries.length" :icon="Location" icon-color="#e6a23c" />
       </el-col>
-      <el-col :span="6">
+      <el-col :span="5">
         <StatsCard label="数据来源" :value="stats.top_sources.length" :icon="Connection" icon-color="#909399" />
       </el-col>
     </el-row>

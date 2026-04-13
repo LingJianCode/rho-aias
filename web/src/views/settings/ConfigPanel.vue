@@ -12,21 +12,12 @@
     </el-alert>
 
     <div class="config-layout">
-      <!-- 左侧模块导航 -->
-      <div class="module-nav">
-        <div
-          v-for="mod in modules"
-          :key="mod.key"
-          class="nav-item"
-          :class="{ active: activeModule === mod.key }"
-          @click="switchModule(mod.key)"
-        >
-          <el-icon><component :is="mod.icon" /></el-icon>
-          <span>{{ mod.label }}</span>
-        </div>
+      <!-- 顶部模块 Tab -->
+      <div class="module-tabs">
+        <el-segmented v-model="activeModule" :options="moduleOptions" block @change="(val) => switchModule(val as ConfigModuleName)" />
       </div>
 
-      <!-- 右侧表单 -->
+      <!-- 表单区域 -->
       <div class="form-area" v-loading="loading">
         <!-- FailGuard -->
         <template v-if="activeModule === 'failguard'">
@@ -222,9 +213,8 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Lock, Monitor, Warning, DataAnalysis, Location, Cpu } from '@element-plus/icons-vue'
 import { getModuleConfig, updateModuleConfig } from '@/api/config'
 import type { ConfigModuleName } from '@/types/api'
 
@@ -343,7 +333,7 @@ function computeDiff(module: ConfigModuleName, currentData: Record<string, unkno
           newFmt = modeLabels[String(newValue)] || newFmt
         }
 
-        const d = isDangerful(String(module), String(key), oldVal, newValue)
+        const d = isDangerous(String(module), String(key), oldVal, newValue)
         if (d) dangerous = true
 
         items.push({
@@ -411,13 +401,18 @@ function takeSnapshot(module: ConfigModuleName) {
   }
 }
 
-const modules: { key: ConfigModuleName; label: string; icon: string }[] = [
-  { key: 'failguard', label: 'SSH 防爆破', icon: 'Lock' },
-  { key: 'waf', label: 'WAF 监控', icon: 'Monitor' },
-  { key: 'rate_limit', label: '频率限制', icon: 'Warning' },
-  { key: 'anomaly_detection', label: '异常检测', icon: 'DataAnalysis' },
-  { key: 'geo_blocking', label: '地域封禁', icon: 'Location' },
-  { key: 'intel', label: '威胁情报', icon: 'Cpu' },
+// el-segmented 选项
+const moduleOptions = computed(() =>
+  modules.map(m => ({ label: m.label, value: m.key }))
+)
+
+const modules: { key: ConfigModuleName; label: string }[] = [
+  { key: 'failguard', label: 'SSH 防爆破' },
+  { key: 'waf', label: 'WAF 监控' },
+  { key: 'rate_limit', label: '频率限制' },
+  { key: 'anomaly_detection', label: '异常检测' },
+  { key: 'geo_blocking', label: '地域封禁' },
+  { key: 'intel', label: '威胁情报' },
 ]
 
 const failguard = reactive({ enabled: false, max_retry: 5, find_time: 600, ban_duration: 3600, mode: 'normal' as string })
@@ -516,35 +511,13 @@ onMounted(() => loadModuleConfig(activeModule.value))
 
 .config-layout {
   display: flex;
+  flex-direction: column;
   gap: 20px;
   min-height: 400px;
 }
 
-.module-nav {
-  width: 180px;
-  flex-shrink: 0;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  cursor: pointer;
-  border-radius: 6px;
-  transition: all 0.2s;
-  font-size: 14px;
-  color: var(--el-text-color-primary);
-
-  &:hover {
-    background-color: var(--el-fill-color-light);
-  }
-
-  &.active {
-    background-color: var(--el-color-primary-light-9);
-    color: var(--el-color-primary);
-    font-weight: 500;
-  }
+.module-tabs {
+  margin-bottom: 4px;
 }
 
 .form-area {
