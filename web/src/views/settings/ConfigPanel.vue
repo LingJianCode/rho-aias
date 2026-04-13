@@ -14,7 +14,7 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <el-radio-group v-model="activeModule" size="small" @change="(val) => switchModule(val as ConfigModuleName)">
+          <el-radio-group v-model="activeModule" @change="(val) => switchModule(val as ConfigModuleName)">
             <el-radio-button v-for="mod in modules" :key="mod.key" :value="mod.key">
               {{ mod.label }}
             </el-radio-button>
