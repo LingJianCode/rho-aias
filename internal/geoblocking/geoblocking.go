@@ -379,11 +379,13 @@ func (m *Manager) TriggerUpdate() error {
 	return nil
 }
 
-// UpdateConfig 更新 GeoIP 配置
-func (m *Manager) UpdateConfig(mode string, countries []string) error {
+// UpdateConfig 更新 GeoIP 配置（扩展支持 enabled 切换）
+func (m *Manager) UpdateConfig(enabled bool, mode string, countries []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.config.Enabled = enabled
+	m.status.Enabled = enabled
 	m.status.Mode = mode
 	m.status.AllowedCountries = countries
 	m.config.Mode = mode
@@ -393,9 +395,23 @@ func (m *Manager) UpdateConfig(mode string, countries []string) error {
 		return err
 	}
 
-	go m.updateAllSources()
+	if enabled {
+		go m.updateAllSources()
+	}
 
 	return nil
+}
+
+// GetConfig 获取当前 GeoBlocking 配置（返回可动态化的字段）
+func (m *Manager) GetConfig() map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return map[string]interface{}{
+		"enabled":           m.config.Enabled,
+		"mode":              m.config.Mode,
+		"allowed_countries": m.config.AllowedCountries,
+	}
 }
 
 // Stop 停止 GeoIP 管理器

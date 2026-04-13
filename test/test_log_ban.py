@@ -199,6 +199,7 @@ class RhoAiasProcess:
         config['intel']['enabled'] = False
         config['geo_blocking']['enabled'] = False
         config['anomaly_detection']['enabled'] = False
+        
         # 配置认证（使用 API Key）
         config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
         config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')

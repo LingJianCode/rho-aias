@@ -212,6 +212,10 @@ func main() {
 		} else if count > 0 {
 			logger.Infof("[Main] Marked %d active ban records as auto_unblock (eBPF state lost on restart)", count)
 		}
+
+		// 加载 DB 中的动态配置覆盖 YAML 值
+		dynamicConfigService := services.NewDynamicConfigService(bizDB.DB)
+		loadDynamicConfigFromDB(dynamicConfigService, cfg)
 	}
 
 	// Initialize Intel Manager (if enabled)
@@ -274,157 +278,148 @@ func main() {
 		}
 	}
 
-	// Initialize WAF Monitor (if enabled)
-	var wafMonitor *waf.Monitor
+	// Initialize WAF Monitor (always created, conditionally started)
+	wafMonitor := waf.NewMonitor(&cfg.WAF, xdp, ctx)
+	wafMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.WAF.OffsetStateFile))
+	wafMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
+	if bizDB != nil {
+		banRecordService := services.NewBanRecordService(bizDB.DB)
+		wafMonitor.SetBanRecordStore(banRecordService)
+	}
 	if cfg.WAF.Enabled {
-		wafMonitor = waf.NewMonitor(&cfg.WAF, xdp, ctx)
-		wafMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.WAF.OffsetStateFile))
-		wafMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-		if bizDB != nil {
-			banRecordService := services.NewBanRecordService(bizDB.DB)
-			wafMonitor.SetBanRecordStore(banRecordService)
-		}
 		if err := wafMonitor.Start(); err != nil {
 			logger.Warnf("[Main] WAF monitor start failed: %v", err)
 		} else {
 			logger.Info("[Main] WAF monitor module initialized")
-			defer wafMonitor.Stop()
 		}
 	}
 
-	// Initialize Rate Limit Monitor (if enabled)
-	var rateLimitMonitor *ratelimit.Monitor
+	// Initialize Rate Limit Monitor (always created, conditionally started)
+	rateLimitMonitor := ratelimit.NewMonitor(&cfg.RateLimit, xdp, ctx)
+	rateLimitMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.RateLimit.OffsetStateFile))
+	rateLimitMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
+	if bizDB != nil {
+		banRecordService := services.NewBanRecordService(bizDB.DB)
+		rateLimitMonitor.SetBanRecordStore(banRecordService)
+	}
 	if cfg.RateLimit.Enabled {
-		rateLimitMonitor = ratelimit.NewMonitor(&cfg.RateLimit, xdp, ctx)
-		rateLimitMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.RateLimit.OffsetStateFile))
-		rateLimitMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-		if bizDB != nil {
-			banRecordService := services.NewBanRecordService(bizDB.DB)
-			rateLimitMonitor.SetBanRecordStore(banRecordService)
-		}
 		if err := rateLimitMonitor.Start(); err != nil {
 			logger.Warnf("[Main] Rate Limit monitor start failed: %v", err)
 		} else {
 			logger.Info("[Main] Rate Limit monitor module initialized")
-			defer rateLimitMonitor.Stop()
 		}
 	}
 
-	// Initialize FailGuard (SSH anti-brute-force) Monitor (if enabled)
-	var failguardMonitor *failguard.Monitor
+	// Initialize FailGuard (SSH anti-brute-force) Monitor (always created, conditionally started)
+	failguardMonitor := failguard.NewMonitor(&cfg.FailGuard, xdp, ctx)
+	failguardMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.FailGuard.OffsetStateFile))
+	failguardMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
+	if bizDB != nil {
+		banRecordService := services.NewBanRecordService(bizDB.DB)
+		failguardMonitor.SetBanRecordStore(banRecordService)
+	}
 	if cfg.FailGuard.Enabled {
-		failguardMonitor = failguard.NewMonitor(&cfg.FailGuard, xdp, ctx)
-		failguardMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.FailGuard.OffsetStateFile))
-		failguardMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-		if bizDB != nil {
-			banRecordService := services.NewBanRecordService(bizDB.DB)
-			failguardMonitor.SetBanRecordStore(banRecordService)
-		}
 		if err := failguardMonitor.Start(); err != nil {
 			logger.Warnf("[Main] FailGuard monitor start failed: %v", err)
 		} else {
 			logger.Info("[Main] FailGuard module initialized")
-			defer failguardMonitor.Stop()
 		}
 	}
 
-	// Initialize Anomaly Detection (if enabled)
+	// Initialize Anomaly Detection (always created, conditionally started)
+	anomalyConfig := anomaly.AnomalyDetectionConfig{
+		Enabled:         cfg.AnomalyDetection.Enabled,
+		SampleRate:      cfg.AnomalyDetection.SampleRate,
+		CheckInterval:   cfg.AnomalyDetection.CheckInterval,
+		MinPackets:      cfg.AnomalyDetection.MinPackets,
+		CleanupInterval: cfg.AnomalyDetection.CleanupInterval,
+		Baseline: anomaly.BaselineConfig{
+			MinSampleCount:  cfg.AnomalyDetection.Baseline.MinSampleCount,
+			SigmaMultiplier: cfg.AnomalyDetection.Baseline.SigmaMultiplier,
+			MinThreshold:    cfg.AnomalyDetection.Baseline.MinThreshold,
+			MaxAge:          cfg.AnomalyDetection.Baseline.MaxAge,
+			BlockDuration:   cfg.AnomalyDetection.Baseline.BlockDuration,
+		},
+		Attacks: anomaly.AttacksConfig{
+			SynFlood: anomaly.AttackConfig{
+				Enabled:        cfg.AnomalyDetection.Attacks.SynFlood.Enabled,
+				RatioThreshold: cfg.AnomalyDetection.Attacks.SynFlood.RatioThreshold,
+				BlockDuration:  cfg.AnomalyDetection.Attacks.SynFlood.BlockDuration,
+				MinPackets:     cfg.AnomalyDetection.Attacks.SynFlood.MinPackets,
+			},
+			UdpFlood: anomaly.AttackConfig{
+				Enabled:        cfg.AnomalyDetection.Attacks.UdpFlood.Enabled,
+				RatioThreshold: cfg.AnomalyDetection.Attacks.UdpFlood.RatioThreshold,
+				BlockDuration:  cfg.AnomalyDetection.Attacks.UdpFlood.BlockDuration,
+				MinPackets:     cfg.AnomalyDetection.Attacks.UdpFlood.MinPackets,
+			},
+			IcmpFlood: anomaly.AttackConfig{
+				Enabled:        cfg.AnomalyDetection.Attacks.IcmpFlood.Enabled,
+				RatioThreshold: cfg.AnomalyDetection.Attacks.IcmpFlood.RatioThreshold,
+				BlockDuration:  cfg.AnomalyDetection.Attacks.IcmpFlood.BlockDuration,
+				MinPackets:     cfg.AnomalyDetection.Attacks.IcmpFlood.MinPackets,
+			},
+			AckFlood: anomaly.AttackConfig{
+				Enabled:        cfg.AnomalyDetection.Attacks.AckFlood.Enabled,
+				RatioThreshold: cfg.AnomalyDetection.Attacks.AckFlood.RatioThreshold,
+				BlockDuration:  cfg.AnomalyDetection.Attacks.AckFlood.BlockDuration,
+				MinPackets:     cfg.AnomalyDetection.Attacks.AckFlood.MinPackets,
+			},
+		},
+	}
+
+	blockCallback := func(ip string, duration int, reason string) error {
+		if whitelistChecker.IsWhitelisted(ip) {
+			logger.Infof("[AnomalyDetection] IP %s is whitelisted, skipping block", ip)
+			return nil
+		}
+		err := xdp.AddRuleWithSourceAndExpiry(ip, ebpfs.SourceMaskAnomaly, duration)
+		if err != nil {
+			logger.Errorf("[AnomalyDetection] Failed to block IP %s: %v", ip, err)
+			return err
+		}
+		if bizDB != nil {
+			banRecordService := services.NewBanRecordService(bizDB.DB)
+			if err := banRecordService.UpsertActiveBan(ip, models.BanSourceAnomaly, reason, duration); err != nil {
+				logger.Warnf("[AnomalyDetection] Failed to persist ban record for IP %s: %v", ip, err)
+			}
+		}
+		logger.Infof("[AnomalyDetection] Blocked IP %s for %ds, reason: %s", ip, duration, reason)
+		return nil
+	}
+
+	unblockCallback := func(ip string) error {
+		_, _, _, err := xdp.UpdateRuleSourceMask(ip, ebpfs.SourceMaskAnomaly)
+		if err != nil {
+			logger.Warnf("[AnomalyDetection] Failed to unblock IP %s: %v", ip, err)
+			return err
+		}
+		if bizDB != nil {
+			banRecordService := services.NewBanRecordService(bizDB.DB)
+			if err := banRecordService.MarkExpired(ip, models.BanSourceAnomaly); err != nil {
+				logger.Warnf("[AnomalyDetection] Failed to mark ban record expired for IP %s: %v", ip, err)
+			}
+		}
+		logger.Infof("[AnomalyDetection] Unblocked IP %s (ban expired)", ip)
+		return nil
+	}
+
+	// 先声明变量（recordPacketFn 需要引用它）
 	var anomalyDetector *anomaly.Detector
+
+	recordPacketFn := func(srcIP string, protocol uint8, tcpFlags uint8, pktSize uint32) {
+		anomalyDetector.RecordPacket(srcIP, protocol, tcpFlags, pktSize)
+	}
+
+	anomalyDetector = anomaly.NewDetector(anomalyConfig, blockCallback, unblockCallback)
+
 	if cfg.AnomalyDetection.Enabled {
-		// 创建异常检测配置
-		anomalyConfig := anomaly.AnomalyDetectionConfig{
-			Enabled:         cfg.AnomalyDetection.Enabled,
-			SampleRate:      cfg.AnomalyDetection.SampleRate,
-			CheckInterval:   cfg.AnomalyDetection.CheckInterval,
-			MinPackets:      cfg.AnomalyDetection.MinPackets,
-			CleanupInterval: cfg.AnomalyDetection.CleanupInterval,
-			Baseline: anomaly.BaselineConfig{
-				MinSampleCount:  cfg.AnomalyDetection.Baseline.MinSampleCount,
-				SigmaMultiplier: cfg.AnomalyDetection.Baseline.SigmaMultiplier,
-				MinThreshold:    cfg.AnomalyDetection.Baseline.MinThreshold,
-				MaxAge:          cfg.AnomalyDetection.Baseline.MaxAge,
-				BlockDuration:   cfg.AnomalyDetection.Baseline.BlockDuration,
-			},
-			Attacks: anomaly.AttacksConfig{
-				SynFlood: anomaly.AttackConfig{
-					Enabled:        cfg.AnomalyDetection.Attacks.SynFlood.Enabled,
-					RatioThreshold: cfg.AnomalyDetection.Attacks.SynFlood.RatioThreshold,
-					BlockDuration:  cfg.AnomalyDetection.Attacks.SynFlood.BlockDuration,
-					MinPackets:     cfg.AnomalyDetection.Attacks.SynFlood.MinPackets,
-				},
-				UdpFlood: anomaly.AttackConfig{
-					Enabled:        cfg.AnomalyDetection.Attacks.UdpFlood.Enabled,
-					RatioThreshold: cfg.AnomalyDetection.Attacks.UdpFlood.RatioThreshold,
-					BlockDuration:  cfg.AnomalyDetection.Attacks.UdpFlood.BlockDuration,
-					MinPackets:     cfg.AnomalyDetection.Attacks.UdpFlood.MinPackets,
-				},
-				IcmpFlood: anomaly.AttackConfig{
-					Enabled:        cfg.AnomalyDetection.Attacks.IcmpFlood.Enabled,
-					RatioThreshold: cfg.AnomalyDetection.Attacks.IcmpFlood.RatioThreshold,
-					BlockDuration:  cfg.AnomalyDetection.Attacks.IcmpFlood.BlockDuration,
-					MinPackets:     cfg.AnomalyDetection.Attacks.IcmpFlood.MinPackets,
-				},
-				AckFlood: anomaly.AttackConfig{
-					Enabled:        cfg.AnomalyDetection.Attacks.AckFlood.Enabled,
-					RatioThreshold: cfg.AnomalyDetection.Attacks.AckFlood.RatioThreshold,
-					BlockDuration:  cfg.AnomalyDetection.Attacks.AckFlood.BlockDuration,
-					MinPackets:     cfg.AnomalyDetection.Attacks.AckFlood.MinPackets,
-				},
-			},
-		}
-
-		// 创建封禁回调函数
-		blockCallback := func(ip string, duration int, reason string) error {
-			// 白名单检查：跳过白名单 IP
-			if whitelistChecker.IsWhitelisted(ip) {
-				logger.Infof("[AnomalyDetection] IP %s is whitelisted, skipping block", ip)
-				return nil
-			}
-
-			// 使用 Anomaly Detection 来源掩码
-			err := xdp.AddRuleWithSourceAndExpiry(ip, ebpfs.SourceMaskAnomaly, duration)
-			if err != nil {
-				logger.Errorf("[AnomalyDetection] Failed to block IP %s: %v", ip, err)
-				return err
-			}
-			// 持久化封禁记录到数据库
-			if bizDB != nil {
-				banRecordService := services.NewBanRecordService(bizDB.DB)
-				if err := banRecordService.UpsertActiveBan(ip, models.BanSourceAnomaly, reason, duration); err != nil {
-					logger.Warnf("[AnomalyDetection] Failed to persist ban record for IP %s: %v", ip, err)
-				}
-			}
-			logger.Infof("[AnomalyDetection] Blocked IP %s for %ds, reason: %s", ip, duration, reason)
-			return nil
-		}
-
-		// 创建解封回调函数
-		unblockCallback := func(ip string) error {
-			// 移除 Anomaly Detection 来源位，如果规则无其他来源则自动删除
-			_, _, _, err := xdp.UpdateRuleSourceMask(ip, ebpfs.SourceMaskAnomaly)
-			if err != nil {
-				logger.Warnf("[AnomalyDetection] Failed to unblock IP %s: %v", ip, err)
-				return err
-			}
-			// 更新数据库中的封禁状态为已过期
-			if bizDB != nil {
-				banRecordService := services.NewBanRecordService(bizDB.DB)
-				if err := banRecordService.MarkExpired(ip, models.BanSourceAnomaly); err != nil {
-					logger.Warnf("[AnomalyDetection] Failed to mark ban record expired for IP %s: %v", ip, err)
-				}
-			}
-			logger.Infof("[AnomalyDetection] Unblocked IP %s (ban expired)", ip)
-			return nil
-		}
-
-		anomalyDetector = anomaly.NewDetector(anomalyConfig, blockCallback, unblockCallback)
 		if err := anomalyDetector.Start(); err != nil {
 			logger.Warnf("[Main] Anomaly detector start failed: %v", err)
 		} else {
 			logger.Info("[Main] Anomaly detection module initialized")
-			defer anomalyDetector.Stop()
 
-			// 配置 eBPF 异常检测采样
+			// 配置 eBPF 异常检测采样（仅在初始启用时设置）
 			if err := xdp.SetAnomalyConfig(true, uint32(cfg.AnomalyDetection.SampleRate)); err != nil {
 				logger.Warnf("[Main] Failed to set anomaly config: %v", err)
 			}
@@ -440,9 +435,7 @@ func main() {
 			}
 
 			// 启动异常检测事件监听
-			go xdp.MonitorAnomalyEvents(func(srcIP string, protocol uint8, tcpFlags uint8, pktSize uint32) {
-				anomalyDetector.RecordPacket(srcIP, protocol, tcpFlags, pktSize)
-			})
+			go xdp.MonitorAnomalyEvents(recordPacketFn)
 		}
 	}
 
@@ -461,6 +454,7 @@ func main() {
 	)
 	if authDB == nil {
 		logger.Fatalf("[Main] Failed to initialize auth database, authentication is mandatory")
+		return
 	}
 	defer authDB.Close()
 
@@ -583,6 +577,25 @@ func main() {
 		routers.RegisterBanRecordRoutes(api, banRecordHandle, authEnforcer, authSvc, apiKeySvc)
 	}
 
+	// Register unified config routes (dynamic config API)
+	if bizDB != nil {
+		dynamicConfigService := services.NewDynamicConfigService(bizDB.DB)
+		configHandle := handles.NewConfigHandle(
+			dynamicConfigService,
+			failguardMonitor,
+			wafMonitor,
+			rateLimitMonitor,
+			anomalyDetector,
+			geoMgr,
+			intelMgr,
+		)
+		// 注入 eBPF 异常检测控制器（用于动态启停时管理内核管道）
+		configHandle.SetAnomalyController(xdp, recordPacketFn)
+		// 注册统一生命周期退出（替代分散的 defer Stop）
+		defer configHandle.GetLifecycle().ShutdownAll()
+		routers.RegisterConfigRoutes(api, configHandle, authEnforcer, authSvc, apiKeySvc)
+	}
+
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: r,
@@ -627,4 +640,176 @@ func main() {
 
 	// Sync logger before exit
 	_ = logger.Sync()
+}
+
+// loadDynamicConfigFromDB 从数据库加载动态配置覆盖 YAML 值
+// 只在启动时调用一次，之后运行时全走 API
+func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Config) {
+	loaded := make(map[string]string) // module -> "YAML default" or "DB override: {values}"
+
+	// FailGuard
+	type failGuardDynamic struct {
+		Enabled     bool   `json:"enabled"`
+		MaxRetry    int    `json:"max_retry"`
+		FindTime    int    `json:"find_time"`
+		BanDuration int    `json:"ban_duration"`
+		Mode        string `json:"mode"`
+	}
+	var fg failGuardDynamic
+	if ok, err := svc.LoadTo("failguard", &fg); err != nil {
+		logger.Warnf("[Main] Failed to load failguard dynamic config from DB: %v", err)
+	} else if ok {
+		cfg.FailGuard.Enabled = fg.Enabled
+		if fg.MaxRetry > 0 {
+			cfg.FailGuard.MaxRetry = fg.MaxRetry
+		}
+		if fg.FindTime > 0 {
+			cfg.FailGuard.FindTime = fg.FindTime
+		}
+		if fg.BanDuration > 0 {
+			cfg.FailGuard.BanDuration = fg.BanDuration
+		}
+		if fg.Mode != "" {
+			cfg.FailGuard.Mode = fg.Mode
+		}
+		loaded["failguard"] = fmt.Sprintf("enabled=%v, max_retry=%d, find_time=%d, ban_duration=%d, mode=%s",
+			fg.Enabled, fg.MaxRetry, fg.FindTime, fg.BanDuration, fg.Mode)
+	}
+
+	// WAF
+	type wafDynamic struct {
+		Enabled     bool `json:"enabled"`
+		BanDuration int  `json:"ban_duration"`
+	}
+	var wf wafDynamic
+	if ok, err := svc.LoadTo("waf", &wf); err != nil {
+		logger.Warnf("[Main] Failed to load waf dynamic config from DB: %v", err)
+	} else if ok {
+		cfg.WAF.Enabled = wf.Enabled
+		if wf.BanDuration > 0 {
+			cfg.WAF.BanDuration = wf.BanDuration
+		}
+		loaded["waf"] = fmt.Sprintf("enabled=%v, ban_duration=%d", wf.Enabled, wf.BanDuration)
+	}
+
+	// RateLimit
+	type rateLimitDynamic struct {
+		Enabled     bool `json:"enabled"`
+		BanDuration int  `json:"ban_duration"`
+	}
+	var rl rateLimitDynamic
+	if ok, err := svc.LoadTo("rate_limit", &rl); err != nil {
+		logger.Warnf("[Main] Failed to load rate_limit dynamic config from DB: %v", err)
+	} else if ok {
+		cfg.RateLimit.Enabled = rl.Enabled
+		if rl.BanDuration > 0 {
+			cfg.RateLimit.BanDuration = rl.BanDuration
+		}
+		loaded["rate_limit"] = fmt.Sprintf("enabled=%v, ban_duration=%d", rl.Enabled, rl.BanDuration)
+	}
+
+	// AnomalyDetection
+	type anomalyDynamic struct {
+		Enabled    bool                   `json:"enabled"`
+		MinPackets int                    `json:"min_packets"`
+		Ports      []int                  `json:"ports"`
+		Baseline   anomaly.BaselineConfig `json:"baseline"`
+		Attacks    anomaly.AttacksConfig  `json:"attacks"`
+	}
+	var ad anomalyDynamic
+	if ok, err := svc.LoadTo("anomaly_detection", &ad); err != nil {
+		logger.Warnf("[Main] Failed to load anomaly_detection dynamic config from DB: %v", err)
+	} else if ok {
+		cfg.AnomalyDetection.Enabled = ad.Enabled
+		if ad.MinPackets > 0 {
+			cfg.AnomalyDetection.MinPackets = ad.MinPackets
+		}
+		if len(ad.Ports) > 0 {
+			cfg.AnomalyDetection.Ports = ad.Ports
+		}
+		if ad.Baseline.MinSampleCount > 0 {
+			cfg.AnomalyDetection.Baseline = config.BaselineConfig{
+				MinSampleCount:  ad.Baseline.MinSampleCount,
+				SigmaMultiplier: ad.Baseline.SigmaMultiplier,
+				MinThreshold:    ad.Baseline.MinThreshold,
+				MaxAge:          ad.Baseline.MaxAge,
+				BlockDuration:   ad.Baseline.BlockDuration,
+			}
+		}
+		if ad.Attacks.SynFlood.RatioThreshold > 0 {
+			cfg.AnomalyDetection.Attacks = config.AttacksConfig{
+				SynFlood: config.AttackConfig{
+					Enabled:        ad.Attacks.SynFlood.Enabled,
+					RatioThreshold: ad.Attacks.SynFlood.RatioThreshold,
+					BlockDuration:  ad.Attacks.SynFlood.BlockDuration,
+					MinPackets:     ad.Attacks.SynFlood.MinPackets,
+				},
+				UdpFlood: config.AttackConfig{
+					Enabled:        ad.Attacks.UdpFlood.Enabled,
+					RatioThreshold: ad.Attacks.UdpFlood.RatioThreshold,
+					BlockDuration:  ad.Attacks.UdpFlood.BlockDuration,
+					MinPackets:     ad.Attacks.UdpFlood.MinPackets,
+				},
+				IcmpFlood: config.AttackConfig{
+					Enabled:        ad.Attacks.IcmpFlood.Enabled,
+					RatioThreshold: ad.Attacks.IcmpFlood.RatioThreshold,
+					BlockDuration:  ad.Attacks.IcmpFlood.BlockDuration,
+					MinPackets:     ad.Attacks.IcmpFlood.MinPackets,
+				},
+				AckFlood: config.AttackConfig{
+					Enabled:        ad.Attacks.AckFlood.Enabled,
+					RatioThreshold: ad.Attacks.AckFlood.RatioThreshold,
+					BlockDuration:  ad.Attacks.AckFlood.BlockDuration,
+					MinPackets:     ad.Attacks.AckFlood.MinPackets,
+				},
+			}
+		}
+		portsStr := fmt.Sprintf("%v", ad.Ports)
+		loaded["anomaly_detection"] = fmt.Sprintf("enabled=%v, min_packets=%d, ports=%s",
+			ad.Enabled, ad.MinPackets, portsStr)
+	}
+
+	// GeoBlocking
+	type geoDynamic struct {
+		Enabled          bool     `json:"enabled"`
+		Mode             string   `json:"mode"`
+		AllowedCountries []string `json:"allowed_countries"`
+	}
+	var geo geoDynamic
+	if ok, err := svc.LoadTo("geo_blocking", &geo); err != nil {
+		logger.Warnf("[Main] Failed to load geo_blocking dynamic config from DB: %v", err)
+	} else if ok {
+		cfg.GeoBlocking.Enabled = geo.Enabled
+		if geo.Mode != "" {
+			cfg.GeoBlocking.Mode = geo.Mode
+		}
+		if geo.AllowedCountries != nil {
+			cfg.GeoBlocking.AllowedCountries = geo.AllowedCountries
+		}
+		loaded["geo_blocking"] = fmt.Sprintf("enabled=%v, mode=%s, countries=%v",
+			geo.Enabled, geo.Mode, geo.AllowedCountries)
+	}
+
+	// Intel
+	type intelDynamic struct {
+		Enabled bool `json:"enabled"`
+	}
+	var intel intelDynamic
+	if ok, err := svc.LoadTo("intel", &intel); err != nil {
+		logger.Warnf("[Main] Failed to load intel dynamic config from DB: %v", err)
+	} else if ok {
+		cfg.Intel.Enabled = intel.Enabled
+		loaded["intel"] = fmt.Sprintf("enabled=%v", intel.Enabled)
+	}
+
+	// 输出每个模块的配置来源（便于排查"改了config.yml不生效"的问题）
+	modules := []string{"failguard", "waf", "rate_limit", "anomaly_detection", "geo_blocking", "intel"}
+	logger.Info("[Main] Dynamic config loaded (DB values override YAML):")
+	for _, mod := range modules {
+		if val, exists := loaded[mod]; exists {
+			logger.Infof("[Main] [DynamicConfig] %-20s → DB override       %s", mod, val)
+		} else {
+			logger.Infof("[Main] [DynamicConfig] %-20s → YAML default      (no DB record)", mod)
+		}
+	}
 }

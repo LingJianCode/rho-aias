@@ -135,9 +135,27 @@ func TestNewMonitor_CreatesChildContext(t *testing.T) {
 
 	monitor := NewMonitor(cfg, mockXDP, parentCtx)
 
+	// 新行为：child context 在 Start() 时才创建，构造时 Context() 返回 nil
+	if monitor.watcher.Context() != nil {
+		t.Fatal("child context should be nil before Start()")
+	}
+
+	// 创建临时日志文件用于 Start()
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test-waf.log")
+	if err := os.WriteFile(tmpFile, []byte("{}"), 0644); err != nil {
+		t.Fatalf("failed to create test log file: %v", err)
+	}
+	cfg.WAFLogPath = tmpFile
+
+	monitor.watcher.SetLineHandler(func(line string) (string, uint32, string, int, bool) { return "", 0, "", 0, false })
+	if err := monitor.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
 	childCtx := monitor.watcher.Context()
 	if childCtx == nil {
-		t.Fatal("child context should not be nil")
+		t.Fatal("child context should not be nil after Start")
 	}
 
 	parentCancel()
@@ -146,6 +164,8 @@ func TestNewMonitor_CreatesChildContext(t *testing.T) {
 	default:
 		t.Fatal("child context should be done after parent cancel")
 	}
+
+	monitor.Stop()
 }
 
 // ============================================

@@ -33,6 +33,7 @@ type Detector struct {
 	mu        sync.RWMutex
 	running   bool
 	done      chan struct{}
+	stopped   bool // 标志位，用于安全 Stop（避免重复 close channel）
 
 	// 防止 runDetection 并发执行
 	detectionMu sync.Mutex
@@ -81,7 +82,7 @@ func NewDetector(config AnomalyDetectionConfig, blockCallback BlockCallback, unb
 	}
 }
 
-// Start 启动异常检测器
+// Start 启动异常检测器（支持 Restart：每次调用重置内部状态）
 func (d *Detector) Start() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -96,6 +97,10 @@ func (d *Detector) Start() error {
 	}
 
 	logger.Info("[AnomalyDetection] Starting anomaly detection system")
+
+	// 重置 done channel 和 stopped 标志（支持 Stop → Start 循环）
+	d.done = make(chan struct{})
+	d.stopped = false
 
 	// 启动统计收集器（使用 CleanupInterval 控制清理间隔）
 	d.collector.SetCleanupInterval(time.Duration(d.config.CleanupInterval) * time.Second)
@@ -132,7 +137,7 @@ func (d *Detector) Start() error {
 	return nil
 }
 
-// Stop 停止异常检测器
+// Stop 停止异常检测器（可安全多次调用）
 func (d *Detector) Stop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -143,7 +148,10 @@ func (d *Detector) Stop() {
 
 	logger.Info("[AnomalyDetection] Stopping anomaly detection system")
 
-	close(d.done)
+	if !d.stopped {
+		close(d.done)
+		d.stopped = true
+	}
 	d.collector.Stop()
 
 	// 停止 Cron 定时任务
@@ -253,6 +261,48 @@ func (d *Detector) cleanupExpiredBans() {
 			delete(d.bannedIPs, ip)
 		}
 	}
+}
+
+// UpdateConfig 热更新异常检测动态配置
+func (d *Detector) UpdateConfig(cfg AnomalyDetectionConfig) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.config.Enabled = cfg.Enabled
+	d.config.MinPackets = cfg.MinPackets
+	d.config.Ports = cfg.Ports
+
+	// 更新 baseline 配置
+	d.config.Baseline = cfg.Baseline
+	d.baselineDetector.UpdateConfig(cfg.Baseline)
+
+	// 更新 attacks 配置
+	d.config.Attacks = cfg.Attacks
+	d.attackDetector.UpdateConfig(cfg.Attacks)
+
+	logger.Infof("[AnomalyDetection] Config updated: enabled=%v, min_packets=%d, ports=%v",
+		cfg.Enabled, cfg.MinPackets, cfg.Ports)
+}
+
+// GetConfig 获取当前异常检测配置（返回可动态化的字段）
+func (d *Detector) GetConfig() map[string]interface{} {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	return map[string]interface{}{
+		"enabled":         d.config.Enabled,
+		"min_packets":     d.config.MinPackets,
+		"ports":           d.config.Ports,
+		"baseline":        d.config.Baseline,
+		"attacks":         d.config.Attacks,
+	}
+}
+
+// GetRawConfig 获取当前原始结构体配置（避免 map 类型断言失败问题）
+func (d *Detector) GetRawConfig() AnomalyDetectionConfig {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.config
 }
 
 // GetStats 获取检测器统计信息

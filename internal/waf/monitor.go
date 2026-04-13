@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sync"
 
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
@@ -27,9 +28,12 @@ type LogEntry struct {
 
 // Monitor WAF 日志监控器
 type Monitor struct {
+	mu sync.RWMutex
+
 	cfg     *config.WAFConfig
 	watcher *watcher.LogWatcher
 	cron    *cron.Cron
+	running bool
 
 	// 日志解析正则表达式
 	ipRegex *regexp.Regexp
@@ -85,6 +89,7 @@ func (m *Monitor) Start() error {
 		return fmt.Errorf("failed to add cleanup cron job: %w", err)
 	}
 	m.cron.Start()
+	m.running = true
 
 	logger.Infof("[WAF] Monitor started, ban_duration=%d seconds, log_path=%s", m.cfg.BanDuration, logPath)
 	return nil
@@ -95,6 +100,7 @@ func (m *Monitor) Stop() {
 	if m.cron != nil {
 		m.cron.Stop()
 	}
+	m.running = false
 	m.watcher.Stop()
 	logger.Info("[WAF] Monitor stopped")
 }
@@ -131,6 +137,27 @@ func (m *Monitor) extractIP(line string) string {
 	return entry.Transaction.ClientIP
 }
 
+// UpdateConfig 热更新 WAF 动态配置
+func (m *Monitor) UpdateConfig(enabled bool, banDuration int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.cfg.Enabled = enabled
+	m.cfg.BanDuration = banDuration
+	logger.Infof("[WAF] Config updated: enabled=%v, ban_duration=%d", enabled, banDuration)
+}
+
+// GetConfig 获取当前 WAF 配置（返回可动态化的字段）
+func (m *Monitor) GetConfig() map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return map[string]interface{}{
+		"enabled":      m.cfg.Enabled,
+		"ban_duration": m.cfg.BanDuration,
+	}
+}
+
 // GetBannedIPs 获取当前已封禁的 IP 列表
 func (m *Monitor) GetBannedIPs() []string {
 	return m.watcher.GetBannedIPs()
@@ -144,4 +171,9 @@ func (m *Monitor) GetBanCount() int {
 // IsBanned 检查 IP 是否被封禁
 func (m *Monitor) IsBanned(ip string) bool {
 	return m.watcher.IsBanned(ip)
+}
+
+// IsRunning 检查监控器是否正在运行
+func (m *Monitor) IsRunning() bool {
+	return m.running
 }

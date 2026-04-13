@@ -8,38 +8,39 @@ import "time"
 
 // AnomalyDetectionConfig 异常检测配置
 type AnomalyDetectionConfig struct {
-	Enabled         bool           `yaml:"enabled"`          // 总开关
-	SampleRate      int            `yaml:"sample_rate"`      // 采样率 1/N（100 表示 1%）
-	CheckInterval   int            `yaml:"check_interval"`   // 检测间隔（秒）
-	MinPackets      int            `yaml:"min_packets"`      // 最小包数（少于此值不检测）
-	CleanupInterval int            `yaml:"cleanup_interval"` // 清理过期数据间隔（秒）
-	Baseline        BaselineConfig `yaml:"baseline"`        // 3σ 基线配置
-	Attacks         AttacksConfig  `yaml:"attacks"`         // 攻击类型配置
+	Enabled         bool           `yaml:"enabled" json:"enabled"`             // 总开关
+	SampleRate      int            `yaml:"sample_rate" json:"sample_rate"`    // 采样率 1/N（100 表示 1%）
+	CheckInterval   int            `yaml:"check_interval" json:"check_interval"` // 检测间隔（秒）
+	MinPackets      int            `yaml:"min_packets" json:"min_packets"`   // 最小包数（少于此值不检测）
+	CleanupInterval int            `yaml:"cleanup_interval" json:"cleanup_interval"` // 清理过期数据间隔（秒）
+	Ports           []int          `yaml:"ports" json:"ports"`               // 需要检测的端口列表（同时应用于 TCP/UDP，为空则检测所有端口）
+	Baseline        BaselineConfig `yaml:"baseline" json:"baseline"`         // 3σ 基线配置
+	Attacks         AttacksConfig  `yaml:"attacks" json:"attacks"`          // 攻击类型配置
 }
 
 // BaselineConfig 3σ 基线检测配置
 type BaselineConfig struct {
-	MinSampleCount  int     `yaml:"min_sample_count"`  // 最小样本数
-	SigmaMultiplier float64 `yaml:"sigma_multiplier"`  // σ 倍数
-	MinThreshold    int     `yaml:"min_threshold"`     // 最小 PPS 阈值
-	MaxAge          int     `yaml:"max_age"`           // 基线最大年龄（秒）
-	BlockDuration   int     `yaml:"block_duration"`    // 封禁时长（秒）
+	MinSampleCount  int     `yaml:"min_sample_count" json:"min_sample_count"` // 最小样本数
+	SigmaMultiplier float64 `yaml:"sigma_multiplier" json:"sigma_multiplier"` // σ 倍数
+	MinThreshold    int     `yaml:"min_threshold" json:"min_threshold"`      // 最小 PPS 阈值
+	MaxAge          int     `yaml:"max_age" json:"max_age"`                 // 基线最大年龄（秒）
+	BlockDuration   int     `yaml:"block_duration" json:"block_duration"`    // 封禁时长（秒）
 }
 
 // AttacksConfig 攻击类型配置
 type AttacksConfig struct {
-	SynFlood  AttackConfig `yaml:"syn_flood"`
-	UdpFlood  AttackConfig `yaml:"udp_flood"`
-	IcmpFlood AttackConfig `yaml:"icmp_flood"`
-	AckFlood  AttackConfig `yaml:"ack_flood"`
+	SynFlood  AttackConfig `yaml:"syn_flood" json:"syn_flood"`
+	UdpFlood  AttackConfig `yaml:"udp_flood" json:"udp_flood"`
+	IcmpFlood AttackConfig `yaml:"icmp_flood" json:"icmp_flood"`
+	AckFlood  AttackConfig `yaml:"ack_flood" json:"ack_flood"`
 }
 
 // AttackConfig 单个攻击类型配置
 type AttackConfig struct {
-	Enabled        bool    `yaml:"enabled"`
-	RatioThreshold float64 `yaml:"ratio_threshold"` // 协议占比阈值
-	BlockDuration  int     `yaml:"block_duration"`  // 封禁时长（秒）
-	MinPackets     int     `yaml:"min_packets"`     // 触发检测的最小包数（0 表示使用默认值）
+	Enabled        bool    `yaml:"enabled" json:"enabled"`                     // 是否启用
+	RatioThreshold float64 `yaml:"ratio_threshold" json:"ratio_threshold"`     // 协议占比阈值
+	BlockDuration  int     `yaml:"block_duration" json:"block_duration"`       // 封禁时长（秒）
+	MinPackets     int     `yaml:"min_packets" json:"min_packets"`            // 触发检测的最小包数（0 表示使用默认值）
 }
 
 // ============================================

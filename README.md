@@ -85,3 +85,33 @@ docker compose -f docker-compose-build-run.yml logs -f
 - **rho-aias** 容器使用最小权限能力（`CAP_BPF`、`CAP_PERFMON`、`CAP_NET_ADMIN`、`CAP_NET_RAW`），不使用 privileged 模式
 - **caddy** 容器仅保留 `NET_BIND_SERVICE` 能力，启用 `no-new-privileges`
 - 两个容器均使用 `network_mode: host` 以支持 XDP 驱动层拦截
+
+## 动态配置
+
+系统支持运行时通过 API 热更新以下 6 个模块的核心参数，无需重启服务：
+
+| 模块 | 配置项 | 说明 |
+|------|--------|------|
+| `failguard` | `enabled`, `max_retry`, `find_time`, `ban_duration`, `mode` | SSH 防爆破 |
+| `waf` | `enabled`, `ban_duration` | WAF 日志监控 |
+| `rate_limit` | `enabled`, `ban_duration` | 频率限制联动 |
+| `anomaly_detection` | `enabled`, `min_packets`, `ports`, `baseline`, `attacks` | 异常流量检测 |
+| `geo_blocking` | `enabled`, `mode`, `allowed_countries` | 地域封禁 |
+| `intel` | `enabled`, `sources.{name}` | 威胁情报 |
+
+> ⚠️ **重要：动态配置优先级高于 `config.yml`**
+>
+> 动态配置通过 API 写入后会持久化到数据库（SQLite）。**每次启动时系统会自动从数据库加载动态配置，覆盖 `config.yml` 中对应的字段值。**
+>
+> 这意味着：
+> - 如果通过 API 修改过某模块配置，后续直接编辑 `config.yml` 的对应字段**不会生效**
+> - 如需恢复使用 `config.yml` 的值，需通过 API 删除该模块的动态配置或清空数据库
+> - 未通过 API 修改过的模块/字段，始终以 `config.yml` 为准
+
+### 配置优先级链
+
+```
+config.yml (默认值) → 数据库持久化值 (API 设置) → 运行时内存 (热更新)
+                         ↑                              ↑
+                    服务启动时覆盖                   API 实时生效（同时回写 DB）
+```

@@ -23,6 +23,7 @@ type Monitor struct {
 	cfg     *config.FailGuardConfig
 	watcher *watcher.LogWatcher
 	cron    *cron.Cron
+	running bool
 
 	// FailGuard 特有的字段
 	failRegex   []*regexp.Regexp
@@ -31,7 +32,7 @@ type Monitor struct {
 
 	// 失败计数器：IP → 失败时间戳列表（滑动窗口）
 	failures map[string][]time.Time
-	failMu   sync.Mutex
+	failMu   sync.RWMutex
 }
 
 // NewMonitor 创建 FailGuard 日志监控器
@@ -140,6 +141,7 @@ func (m *Monitor) Start() error {
 
 	// 启动定时任务
 	m.cron.Start()
+	m.running = true
 
 	logger.Infof("[FailGuard] Monitor started, mode=%s, log=%s, max_retry=%d, find_time=%ds, ban_duration=%ds",
 		m.cfg.Mode, m.cfg.LogPath, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
@@ -152,6 +154,7 @@ func (m *Monitor) Stop() {
 	if m.cron != nil {
 		m.cron.Stop()
 	}
+	m.running = false
 	m.watcher.Stop()
 	logger.Info("[FailGuard] Monitor stopped")
 }
@@ -282,6 +285,37 @@ func (m *Monitor) cleanupFailures() {
 	}
 }
 
+// UpdateConfig 热更新 FailGuard 动态配置
+func (m *Monitor) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int, mode string) {
+	m.failMu.Lock()
+	defer m.failMu.Unlock()
+
+	m.cfg.Enabled = enabled
+	m.cfg.MaxRetry = maxRetry
+	m.cfg.FindTime = findTime
+	m.cfg.BanDuration = banDuration
+	if mode != "" {
+		m.cfg.Mode = mode
+	}
+
+	logger.Infof("[FailGuard] Config updated: enabled=%v, max_retry=%d, find_time=%d, ban_duration=%d, mode=%s",
+		enabled, maxRetry, findTime, banDuration, mode)
+}
+
+// GetConfig 获取当前 FailGuard 配置（返回可动态化的字段）
+func (m *Monitor) GetConfig() map[string]interface{} {
+	m.failMu.RLock()
+	defer m.failMu.RUnlock()
+
+	return map[string]interface{}{
+		"enabled":      m.cfg.Enabled,
+		"max_retry":    m.cfg.MaxRetry,
+		"find_time":    m.cfg.FindTime,
+		"ban_duration": m.cfg.BanDuration,
+		"mode":         m.cfg.Mode,
+	}
+}
+
 // GetBannedIPs 获取当前已封禁的 IP 列表
 func (m *Monitor) GetBannedIPs() []string {
 	return m.watcher.GetBannedIPs()
@@ -295,4 +329,9 @@ func (m *Monitor) GetBanCount() int {
 // IsBanned 检查 IP 是否被封禁
 func (m *Monitor) IsBanned(ip string) bool {
 	return m.watcher.IsBanned(ip)
+}
+
+// IsRunning 检查监控器是否正在运行
+func (m *Monitor) IsRunning() bool {
+	return m.running
 }
