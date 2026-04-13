@@ -11,11 +11,12 @@
       {{ saveMessage || '修改配置后即时生效，无需重启服务。各模块参数说明请参考文档。' }}
     </el-alert>
 
-    <div class="config-layout">
-      <!-- 顶部模块 Tab -->
-      <div class="module-tabs">
-        <el-segmented v-model="activeModule" :options="moduleOptions" block @change="(val) => switchModule(val as ConfigModuleName)" />
-      </div>
+    <el-card>
+      <template #header>
+        <div class="card-header">
+          <el-segmented v-model="activeModule" :options="moduleOptions" size="small" @change="(val) => switchModule(val as ConfigModuleName)" />
+        </div>
+      </template>
 
       <!-- 表单区域 -->
       <div class="form-area" v-loading="loading">
@@ -175,7 +176,7 @@
           </el-form>
         </template>
       </div>
-    </div>
+    </el-card>
 
     <!-- 变更确认对话框 -->
     <el-dialog
@@ -509,22 +510,12 @@ onMounted(() => loadModuleConfig(activeModule.value))
   h2 { margin: 0; }
 }
 
-.config-layout {
+.card-header {
   display: flex;
-  flex-direction: column;
-  gap: 20px;
-  min-height: 400px;
-}
-
-.module-tabs {
-  margin-bottom: 4px;
+  align-items: center;
 }
 
 .form-area {
-  flex: 1;
-  padding: 16px 20px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
   min-height: 300px;
 
   h3 {
