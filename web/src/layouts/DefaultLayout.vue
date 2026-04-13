@@ -24,30 +24,22 @@
           <el-menu-item index="/firewall/blacklist">黑名单</el-menu-item>
           <el-menu-item index="/firewall/whitelist">白名单</el-menu-item>
         </el-sub-menu>
-        <el-menu-item index="/blocklog">
-          <el-icon><Document /></el-icon>
-          <template #title>阻断日志</template>
-        </el-menu-item>
-        <el-menu-item index="/ban-records">
-          <el-icon><Lock /></el-icon>
-          <template #title>封禁记录</template>
-        </el-menu-item>
-        <el-menu-item index="/sources">
-          <el-icon><Connection /></el-icon>
-          <template #title>威胁情报数据源</template>
-        </el-menu-item>
-        <el-menu-item index="/geoblocking">
-          <el-icon><Location /></el-icon>
-          <template #title>地域封禁</template>
-        </el-menu-item>
-        <el-sub-menu index="settings">
+        <el-sub-menu index="logs">
           <template #title>
-            <el-icon><Setting /></el-icon>
-            <span>设置</span>
+            <el-icon><Document /></el-icon>
+            <span>日志</span>
           </template>
-          <el-menu-item index="/settings/users" v-if="authStore.isAdmin">用户管理</el-menu-item>
-          <el-menu-item index="/settings/api-keys">API Key</el-menu-item>
+          <el-menu-item index="/logs/blocklog">阻断日志</el-menu-item>
+          <el-menu-item index="/logs/ban-records">封禁记录</el-menu-item>
         </el-sub-menu>
+        <el-menu-item index="/security">
+          <el-icon><Monitor /></el-icon>
+          <template #title>安全态势</template>
+        </el-menu-item>
+        <el-menu-item index="/settings" v-if="authStore.isAdmin || true">
+          <el-icon><Setting /></el-icon>
+          <template #title>系统设置</template>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -92,8 +84,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import {
-  Odometer, Aim, Document, Lock, Connection,
-  Warning, Location, Setting, Fold, Expand, Moon, Sunny
+  Odometer, Aim, Document, Monitor, Setting,
+  Fold, Expand, Moon, Sunny
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
