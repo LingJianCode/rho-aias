@@ -218,18 +218,19 @@ func main() {
 		loadDynamicConfigFromDB(dynamicConfigService, cfg)
 	}
 
-	// Initialize Intel Manager (if enabled)
+	// Initialize Intel Manager (always created, conditionally started)
 	var intelMgr *threatintel.Manager
 	var dbConn *gorm.DB
 	if bizDB != nil {
 		dbConn = bizDB.DB
 	}
+	intelMgr = threatintel.NewManager(&cfg.Intel, xdp, dbConn)
 	if cfg.Intel.Enabled {
-		intelMgr = threatintel.NewManager(&cfg.Intel, xdp, dbConn)
 		if err := intelMgr.Start(); err != nil {
 			logger.Warnf("[Main] Intel manager start failed: %v", err)
+		} else {
+			logger.Info("[Main] Intelligence module initialized")
 		}
-		logger.Info("[Main] Intelligence module initialized")
 		defer intelMgr.Stop()
 
 		// 启动时自动触发更新（如果配置启用）
@@ -250,14 +251,14 @@ func main() {
 		}
 	}
 
-	// Initialize Geo-Blocking Manager (if enabled)
-	var geoMgr *geoblocking.Manager
+	// Initialize Geo-Blocking Manager (always created, conditionally started)
+	geoMgr := geoblocking.NewManager(&cfg.GeoBlocking, xdp, dbConn)
 	if cfg.GeoBlocking.Enabled {
-		geoMgr = geoblocking.NewManager(&cfg.GeoBlocking, xdp, dbConn)
 		if err := geoMgr.Start(); err != nil {
 			logger.Warnf("[Main] Geo-blocking manager start failed: %v", err)
+		} else {
+			logger.Info("[Main] Geo-blocking module initialized")
 		}
-		logger.Info("[Main] Geo-blocking module initialized")
 		defer geoMgr.Stop()
 
 		// 启动时自动触发更新（如果配置启用）
@@ -561,12 +562,12 @@ func main() {
 		routers.RegisterSourceRoutes(api, sourceHandle, authEnforcer, authSvc, apiKeySvc)
 	}
 
-	if cfg.Intel.Enabled && intelMgr != nil {
+	if intelMgr != nil {
 		intelHandle := handles.NewIntelHandle(intelMgr)
 		routers.RegisterIntelRoutes(api, intelHandle, authEnforcer, authSvc, apiKeySvc)
 	}
 
-	if cfg.GeoBlocking.Enabled && geoMgr != nil {
+	if geoMgr != nil {
 		geoHandle := handles.NewGeoBlockingHandle(geoMgr)
 		routers.RegisterGeoBlockingRoutes(api, geoHandle, authEnforcer, authSvc, apiKeySvc)
 	}
