@@ -13,19 +13,10 @@ import (
 func RegisterRuleRoutes(group *gin.RouterGroup, ruleQueryHandle *handles.RuleQueryHandle, enforcer *casbin.Enforcer, authService *services.AuthService, apiKeyService *services.APIKeyService) {
 	rules := group.Group("/rules")
 
-	// 如果没有启用认证，直接注册路由
-	if enforcer == nil || authService == nil || apiKeyService == nil {
-		rules.GET("", ruleQueryHandle.GetRules)
-		return
-	}
-
-	// 启用认证，添加权限控制
-	{
-		// 查询规则 - 需要 firewall:read 权限
-		rules.GET("",
-			middleware.AuthMiddleware(authService, apiKeyService),
-			middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
-			ruleQueryHandle.GetRules,
-		)
-	}
+	// 查询规则 - 需要 firewall:read 权限
+	rules.GET("",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
+		ruleQueryHandle.GetRules,
+	)
 }

@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/oschwald/maxminddb-golang"
@@ -206,14 +207,76 @@ func (p *Parser) isCountryAllowed(country string, allowed []string) bool {
 	return false
 }
 
-// rangeToCIDR 将 IP 范围转换为 CIDR 格式
-// 简化实现：对于小范围返回 /32，大范围返回更宽的前缀
+// rangeToCIDR 将 IP 范围 (startIP, endIP) 转换为一个或多个 CIDR
+// 使用标准的 IP 范围到 CIDR 转换算法
 func (p *Parser) rangeToCIDR(startIP, endIP string) (string, error) {
-	// 简化实现：直接返回 startIP/32
-	// 实际生产环境应该实现完整的 IP 范围到 CIDR 转换算法
-	parts := strings.Split(startIP, ".")
-	if len(parts) != 4 {
-		return "", fmt.Errorf("invalid IP format")
+	start := net.ParseIP(startIP).To4()
+	end := net.ParseIP(endIP).To4()
+	if start == nil || end == nil {
+		return "", fmt.Errorf("invalid IP format: %s - %s", startIP, endIP)
 	}
-	return startIP + "/32", nil
+
+	startInt := ipToUint32(start)
+	endInt := ipToUint32(end)
+
+	if startInt > endInt {
+		return "", fmt.Errorf("invalid IP range: start %s > end %s", startIP, endIP)
+	}
+
+	var cidrs []string
+	for startInt <= endInt {
+		// 计算当前起始地址能表示的最大子网前缀长度
+		maxBits := maxLeadingZeros32(startInt) + 1
+		// 剩余范围可容纳的最大前缀长度
+		rangeBits := 32 - floorLog2(endInt-startInt+1)
+		if rangeBits > 32 {
+			rangeBits = 32
+		}
+		prefixLen := maxBits
+		if rangeBits < prefixLen {
+			prefixLen = rangeBits
+		}
+
+		cidrs = append(cidrs, fmt.Sprintf("%s/%d", start.String(), prefixLen))
+
+		// 推进到下一个子网
+		hostBits := uint32(32 - prefixLen)
+		if hostBits >= 32 {
+			break
+		}
+		step := uint32(1) << hostBits
+		startInt += step
+	}
+
+	return strings.Join(cidrs, ","), nil
+}
+
+// ipToUint32 将 IPv4 地址转换为 uint32
+func ipToUint32(ip net.IP) uint32 {
+	ip = ip.To4()
+	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
+}
+
+// maxLeadingZeros32 计算 x 末尾有多少个连续的 0（即从最低位开始）
+// 用于确定能覆盖的最长子网前缀
+func maxLeadingZeros32(x uint32) int {
+	if x == 0 {
+		return 32
+	}
+	n := 0
+	for x&1 == 0 {
+		n++
+		x >>= 1
+	}
+	return n
+}
+
+// floorLog2 计算 floor(log2(x))，x > 0
+func floorLog2(x uint32) int {
+	n := 0
+	for x > 1 {
+		x >>= 1
+		n++
+	}
+	return n
 }

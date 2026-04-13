@@ -24,7 +24,11 @@ func TestAsyncWriter_Write(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create async writer: %v", err)
 	}
-	defer aw.Stop()
+	defer func() {
+		if err := aw.Stop(); err != nil {
+			t.Logf("aw.Stop() error: %v", err)
+		}
+	}()
 
 	// 写入测试记录
 	record := BlockRecord{
@@ -100,7 +104,9 @@ func TestAsyncWriter_Stop(t *testing.T) {
 			MatchType:  "ip4_exact",
 			PacketSize: 64,
 		}
-		aw.Write(record)
+		if err := aw.Write(record); err != nil {
+			t.Logf("aw.Write() error: %v", err)
+		}
 	}
 
 	// 等待一下让写入协程处理记录
@@ -193,9 +199,45 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 		t.Fatalf("Failed to close: %v", err)
 	}
 
-	// 验证文件
+	// 验证文件（AsyncWriter 日志 + StatsStore SQLite 数据库）
 	files, _ := os.ReadDir(tmpDir)
-	if len(files) != 1 {
-		t.Errorf("Expected 1 file, got %d", len(files))
+	if len(files) < 2 {
+		t.Errorf("Expected at least 2 files (log + sqlite), got %d", len(files))
+	}
+
+	// 验证日志文件存在且内容正确
+	var foundLog bool
+	for _, f := range files {
+		if f.Name() == "blocklog_stats.db" {
+			continue // 跳过 SQLite 数据库文件
+		}
+		foundLog = true
+
+		file, err := os.Open(filepath.Join(tmpDir, f.Name()))
+		if err != nil {
+			t.Fatalf("Failed to open log file %s: %v", f.Name(), err)
+		}
+
+		scanner := bufio.NewScanner(file)
+		if !scanner.Scan() {
+			file.Close()
+			t.Fatalf("Failed to read line from log file")
+		}
+
+		var readRecord BlockRecord
+		if err := json.Unmarshal(scanner.Bytes(), &readRecord); err != nil {
+			file.Close()
+			t.Fatalf("Failed to unmarshal record: %v", err)
+		}
+		file.Close()
+
+		if readRecord.SrcIP != record.SrcIP {
+			t.Errorf("Expected SrcIP %s, got %s", record.SrcIP, readRecord.SrcIP)
+		}
+		break
+	}
+
+	if !foundLog {
+		t.Error("Expected to find a log file, but none found")
 	}
 }

@@ -6,16 +6,15 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"rho-aias/utils"
 )
 
 // hostPlaceholder fail2ban 约定的 IP 占位符
 const hostPlaceholder = "<HOST>"
 
-// ipPattern 匹配 IPv4 地址的正则表达式
-const ipPattern = `(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)`
-
 // hostCaptureGroup 用于替换 <HOST> 的命名捕获组正则
-const hostCaptureGroup = `(?P<host>` + ipPattern + `)`
+const hostCaptureGroup = `(?P<host>` + utils.IPv4RegexPatternRaw + `)`
 
 // DefaultSSHDNormalFailRegex normal 模式：仅匹配 SSH 认证失败
 // 参考 fail2ban filter.d/sshd.conf 的 normal 模式规则

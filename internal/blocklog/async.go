@@ -2,6 +2,7 @@
 package blocklog
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -74,9 +75,11 @@ func NewAsyncWriter(config Config) (*AsyncWriter, error) {
 
 	// 添加定时刷新任务
 	flushExpr := "@every " + config.FlushInterval.String()
-	aw.cron.AddFunc(flushExpr, func() {
+	if _, err := aw.cron.AddFunc(flushExpr, func() {
 		aw.Flush()
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("failed to add flush cron job: %w", err)
+	}
 
 	// 启动定时任务
 	aw.cron.Start()

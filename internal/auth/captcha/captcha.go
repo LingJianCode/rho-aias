@@ -1,6 +1,7 @@
 package captcha
 
 import (
+	"fmt"
 	"image/color"
 	"strings"
 	"sync"
@@ -30,7 +31,7 @@ type captchaItem struct {
 }
 
 // NewMemoryStore 创建内存存储
-func NewMemoryStore() *MemoryStore {
+func NewMemoryStore() (*MemoryStore, error) {
 	store := &MemoryStore{
 		data: make(map[string]*captchaItem),
 	}
@@ -39,14 +40,16 @@ func NewMemoryStore() *MemoryStore {
 	store.cron = cron.New(cron.WithSeconds())
 
 	// 添加定时清理任务（每 1 分钟）
-	store.cron.AddFunc("@every 1m", func() {
+	if _, err := store.cron.AddFunc("@every 1m", func() {
 		store.cleanup()
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("failed to add cleanup cron job: %w", err)
+	}
 
 	// 启动定时任务
 	store.cron.Start()
 
-	return store
+	return store, nil
 }
 
 // Set 设置验证码

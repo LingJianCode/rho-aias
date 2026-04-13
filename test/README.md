@@ -13,61 +13,55 @@
 
 ## 快速开始
 
-### 基本测试（不使用认证）
+### 基本测试（API Key 认证已内置）
+
+> 所有测试均使用 API Key 认证，默认使用测试 Key：`sk_live_test-admin-key-1234567890abcdef`  
+> 可通过环境变量 `TEST_API_KEY` 自定义。
 
 ```bash
 # 运行所有测试
-sudo ./test/run_tests.sh
+./test/run_tests.sh
+
+# 使用自定义 API Key 运行
+TEST_API_KEY="sk_live_your-key-here" ./test/run_tests.sh
 
 # 仅运行环境测试（验证 network namespace 功能，不需要编译 rho-aias）
-sudo ./test/run_tests.sh --env-only
+./test/run_tests.sh --env-only
 
 # 运行特定测试
-sudo ./test/run_tests.sh -t TestXDPIpBlocking.test_01_ipv4_exact_block
+./test/run_tests.sh -t TestXDPIpBlocking.test_01_ipv4_exact_block
 
 # 详细输出模式
-sudo ./test/run_tests.sh -v
-```
-
-### API Key 认证测试
-
-```bash
-# 使用 API Key 认证运行测试（使用默认测试 Key）
-sudo ./test/run_tests.sh --use-api-key
-
-# 使用指定的 API Key
-sudo ./test/run_tests.sh --use-api-key --api-key sk_live_your-key-here
-
-# 使用环境变量中的 API Key
-export TEST_API_KEY="sk_live_your-key-here"
-sudo ./test/run_tests.sh --use-api-key
-
-# 运行特定的 API Key 认证测试
-sudo ./test/run_tests.sh --use-api-key -t TestAPIKeyAuth.test_01_api_key_auth
+./test/run_tests.sh -v
 ```
 
 ### DDoS 异常流量检测测试
 
 ```bash
 # 运行所有 DDoS 检测测试
-sudo ./test/run_tests.sh --ddos
+./test/run_tests.sh --ddos
 
 # 仅运行环境测试（验证 network namespace 功能）
-sudo ./test/run_tests.sh --ddos --env-only
+./test/run_tests.sh --ddos --env-only
 
 # 运行特定 DDoS 测试
-sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_01_tcp_syn_flood
-sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_02_udp_flood
-sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_03_icmp_flood
-sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_04_ack_flood
-sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_05_control_without_detection
+./test/run_tests.sh --ddos --test TestDDoSDetection.test_01_tcp_syn_flood
+./test/run_tests.sh --ddos --test TestDDoSDetection.test_02_udp_flood
+./test/run_tests.sh --ddos --test TestDDoSDetection.test_03_icmp_flood
+./test/run_tests.sh --ddos --test TestDDoSDetection.test_04_ack_flood
+./test/run_tests.sh --ddos --test TestDDoSDetection.test_05_control_without_detection
+```
+### 日志监控集成测试
+
+```bash
+./test/run_tests.sh --log-ban
 ```
 
 **注意事项：**
-- `--use-api-key` 参数启用 API Key 认证测试
-- `--api-key` 参数指定测试用的 API Key（可选，优先级高于环境变量）
-- 环境变量 `TEST_API_KEY` 也可以设置 API Key
+- 所有测试默认使用 API Key 认证（本分支要求接口必须验证）
+- 环境变量 `TEST_API_KEY` 可自定义测试用 API Key
 - 不指定时使用默认测试 Key：`sk_live_test-admin-key-1234567890abcdef`
+- `--use-api-key` 和 `--api-key` 参数保留兼容，但不再必需（测试内部已内置认证）
 
 ## 测试用例
 
@@ -135,7 +129,8 @@ sudo ./test/run_tests.sh --ddos --test TestDDoSDetection.test_05_control_without
 |------|------|
 | `run_tests.sh` | **推荐使用的测试入口脚本**，包含环境检查和清理逻辑 |
 | `test_xdp_block.py` | XDP IP 阻断功能测试脚本（由 run_tests.sh 调用） |
-| `test_ddosser_detection.py` | DDoS 检测功能测试脚本（由 run_tests.sh 调用） |
+| `test_ddos_detection.py` | DDoS 检测功能测试脚本（由 run_tests.sh 调用） |
+| `test_log_ban.py` | 日志触发封禁功能测试脚本（由 run_tests.sh 调用） |
 | `netns.py` | Network Namespace 管理模块 |
 
 ## 常见问题
@@ -156,7 +151,7 @@ ip netns list | grep rho_ | awk '{print $1}' | xargs -I {} ip netns del {}
 测试使用临时配置文件，每次运行时自动生成：
 
 - **API 端口**: 18080（避免与生产端口冲突）
-- **认证**: 关闭
+- **认证**: 启用 API Key 认证（默认 Key: `sk_live_test-admin-key-1234567890abcdef`）
 - **情报源**: 关闭
 - **地域封禁**: 关闭
 - **手动规则持久化**: 关闭

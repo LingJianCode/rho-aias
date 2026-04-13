@@ -23,9 +23,13 @@ type Database struct {
 }
 
 // NewDatabase 创建数据库连接
-func NewDatabase(dsn string) (*Database, error) {
+func NewDatabase(dsn string, debug bool) (*Database, error) {
+	logLevel := gormlogger.Warn
+	if debug {
+		logLevel = gormlogger.Info
+	}
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(gormlogger.Info),
+		Logger: gormlogger.Default.LogMode(logLevel),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
@@ -55,10 +59,15 @@ func (db *Database) AutoMigrateAuth() error {
 
 // AutoMigrateBusiness 迁移业务数据表
 func (db *Database) AutoMigrateBusiness() error {
-	return db.DB.AutoMigrate(
+	if err := db.DB.AutoMigrate(
 		&models.SourceStatusRecord{},
 		&models.BanRecord{},
-	)
+		&models.DynamicConfig{},
+	); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // InitDefaultUser 初始化默认管理员用户
@@ -100,9 +109,8 @@ func (db *Database) InitAPIKeysFromConfig(enforcer *casbin.Enforcer, apiKeys []c
 
 	// 获取管理员用户 ID
 	var admin models.User
-	db.Where("role = ?", "admin").First(&admin)
-	if admin.ID == 0 {
-		return fmt.Errorf("admin user not found, cannot create API keys")
+	if err := db.Where("role = ?", "admin").First(&admin).Error; err != nil {
+		return fmt.Errorf("admin user not found, cannot create API keys: %w", err)
 	}
 
 	createdCount := 0
@@ -114,7 +122,12 @@ func (db *Database) InitAPIKeysFromConfig(enforcer *casbin.Enforcer, apiKeys []c
 		}
 
 		// 检查是否已存在相同 Key（计算 Hash 后比较）
-		hash := sha256.Sum256([]byte(keyConfig.Key))
+		// 使用 []byte 并在 hash 计算后立即清零，避免明文 Key 残留在内存中
+		keyBytes := []byte(keyConfig.Key)
+		hash := sha256.Sum256(keyBytes)
+		for i := range keyBytes {
+			keyBytes[i] = 0
+		}
 		hashStr := hex.EncodeToString(hash[:])
 		var count int64
 		db.Model(&models.APIKey{}).Where("key = ?", hashStr).Count(&count)
@@ -173,6 +186,9 @@ func (db *Database) InitAPIKeysFromConfig(enforcer *casbin.Enforcer, apiKeys []c
 
 		createdCount++
 		logger.Infof("[Database] API key created: %s (prefix: %s)", keyConfig.Name, keyPrefix)
+
+		// 清空配置中的明文 Key，减少内存中敏感数据残留时间
+		keyConfig.Key = ""
 	}
 
 	if createdCount > 0 {

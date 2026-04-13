@@ -10,9 +10,6 @@ const (
 	NoMatch         MatchType = 0
 	MatchByIP4Exact MatchType = 1
 	MatchByIP4CIDR  MatchType = 2
-	MatchByIP6Exact MatchType = 3
-	MatchByIP6CIDR  MatchType = 4
-	MatchByMAC      MatchType = 5
 	MatchByGeoBlock MatchType = 6 // 地域封禁匹配
 	MatchByWhitelist MatchType = 7 // IP 白名单匹配（直接放行）
 )
@@ -37,8 +34,6 @@ func (protocol IPProtocol) String() string {
 type PacketInfo struct {
 	SrcIP      [4]byte
 	DstIP      [4]byte
-	SrcIPv6    [16]byte
-	DstIPv6    [16]byte
 	EthProto   EthernetType
 	IPProtocol uint8      // IP 协议类型 (TCP=6, UDP=17, ICMP=1)
 	TCPFlags   uint8      // TCP 标志位 (SYN=0x02, ACK=0x10, etc.)
@@ -49,9 +44,7 @@ type PacketInfo struct {
 
 type Packet struct {
 	Timestamp int64
-	SrcMAC    string
 	SrcIP     string
-	DstMAC    string
 	DstIP     string
 	SrcPort   uint16
 	DstPort   uint16

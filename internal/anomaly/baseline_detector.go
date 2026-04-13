@@ -11,6 +11,11 @@ type BaselineDetector struct {
 	config BaselineConfig
 }
 
+// UpdateConfig 热更新基线检测配置
+func (d *BaselineDetector) UpdateConfig(config BaselineConfig) {
+	d.config = config
+}
+
 // NewBaselineDetector 创建新的基线检测器
 func NewBaselineDetector(config BaselineConfig) *BaselineDetector {
 	// 设置默认值
@@ -25,6 +30,9 @@ func NewBaselineDetector(config BaselineConfig) *BaselineDetector {
 	}
 	if config.MaxAge == 0 {
 		config.MaxAge = 1800 // 默认 30 分钟
+	}
+	if config.BlockDuration == 0 {
+		config.BlockDuration = 60
 	}
 
 	return &BaselineDetector{

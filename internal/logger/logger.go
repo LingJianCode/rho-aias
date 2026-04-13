@@ -21,11 +21,11 @@ import (
 
 // Config 日志配置
 type Config struct {
-	Level         string `yaml:"level"`          // 日志级别: debug/info/warn/error
-	Format        string `yaml:"format"`         // 输出格式: console/json
-	OutputDir     string `yaml:"output_dir"`     // 日志目录
-	MaxAgeDays    int    `yaml:"max_age_days"`   // 日志保留天数
-	RotationHours int    `yaml:"rotation_hours"` // 按小时分割
+	Level         string `yaml:"level" json:"level"`               // 日志级别: debug/info/warn/error
+	Format        string `yaml:"format" json:"format"`              // 输出格式: console/json
+	OutputDir     string `yaml:"output_dir" json:"output_dir"`      // 日志目录
+	MaxAgeDays    int    `yaml:"max_age_days" json:"max_age_days"`  // 日志保留天数
+	RotationHours int    `yaml:"rotation_hours" json:"rotation_hours"` // 按小时分割
 }
 
 // Logger 全局日志管理器
@@ -41,16 +41,25 @@ type Logger struct {
 
 var (
 	globalLogger *Logger
-	once         sync.Once
+	initMu       sync.Mutex
 )
 
 // Init 初始化全局日志管理器
+// 首次失败后可重试，已成功初始化则直接返回 nil
 func Init(cfg *Config) error {
-	var initErr error
-	once.Do(func() {
-		globalLogger, initErr = NewLogger(cfg)
-	})
-	return initErr
+	initMu.Lock()
+	defer initMu.Unlock()
+
+	if globalLogger != nil {
+		return nil
+	}
+
+	l, err := NewLogger(cfg)
+	if err != nil {
+		return err
+	}
+	globalLogger = l
+	return nil
 }
 
 // NewLogger 创建新的日志管理器
@@ -96,9 +105,11 @@ func NewLogger(cfg *Config) (*Logger, error) {
 	l.cron = cron.New(cron.WithSeconds())
 
 	// 添加定时清理任务（每 1 小时）
-	l.cron.AddFunc("@every 1h", func() {
+	if _, err := l.cron.AddFunc("@every 1h", func() {
 		l.cleanupOldLogs()
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("failed to add cleanup cron job: %w", err)
+	}
 
 	// 启动定时任务
 	l.cron.Start()
@@ -226,7 +237,9 @@ func (l *Logger) cleanupOldLogs() {
 		// 检查文件修改时间
 		if info.ModTime().Before(cutoff) {
 			filePath := filepath.Join(l.config.OutputDir, entry.Name())
-			os.Remove(filePath)
+			if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+				Warnf("failed to remove old log file %s: %v", filePath, err)
+			}
 		}
 	}
 }

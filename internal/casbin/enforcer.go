@@ -83,6 +83,7 @@ func (e *Enforcer) InitDefaultPolicies() error {
 		{"role:user", "blocklog:read", "read"},
 		{"role:user", "intel:read", "read"},
 		{"role:user", "geo:read", "read"},
+		{"role:user", "config:read", "read"},
 	}
 
 	for _, policy := range defaultUserPermissions {

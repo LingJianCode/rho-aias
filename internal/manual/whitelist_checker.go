@@ -2,8 +2,43 @@ package manual
 
 import (
 	"net"
+	"rho-aias/utils"
 	"sync"
 )
+
+// protectedNets 内置保护网段，不可通过 API 移除
+// 用于防止本机回环地址和本机 IP 被封禁导致服务不可用
+var protectedNets []*net.IPNet
+
+// InitProtectedNets 初始化保护网段列表
+// 需要在 logger 初始化后调用，以便记录添加的本机 IP
+func InitProtectedNets(logFunc func(format string, args ...interface{})) []*net.IPNet {
+	nets := make([]*net.IPNet, 0)
+
+	// 添加回环地址
+	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
+	nets = append(nets, loopback)
+
+	// 添加本机 IP
+	if localNets, err := utils.GetLocalIPNets(); err == nil && len(localNets) > 0 {
+		ips := make([]string, 0, len(localNets))
+		for _, ipNet := range localNets {
+			ips = append(ips, ipNet.IP.String())
+		}
+		if logFunc != nil {
+			logFunc("[Whitelist] Adding local IPs to protected list: %v", ips)
+		}
+		nets = append(nets, localNets...)
+	}
+
+	protectedNets = nets
+	return nets
+}
+
+func init() {
+	// 默认初始化（不记录日志）
+	InitProtectedNets(nil)
+}
 
 // WhitelistChecker 用户态白名单检查器
 // 维护白名单规则的内存索引，提供高效的 IP/CIDR 匹配检查，
@@ -102,16 +137,25 @@ func (wc *WhitelistChecker) Remove(value string) {
 }
 
 // IsWhitelisted 检查 IP 是否在白名单中
-// 支持精确 IP 匹配和 CIDR 范围匹配
+// 支持精确 IP 匹配、CIDR 范围匹配和内置保护网段（不可移除）
 func (wc *WhitelistChecker) IsWhitelisted(ip string) bool {
+	parsedIP := net.ParseIP(ip)
+
+	// 0. 内置保护网段检查（优先级最高，不受 Add/Remove/LoadFromCache 影响）
+	if parsedIP != nil {
+		for _, net := range protectedNets {
+			if net.Contains(parsedIP) {
+				return true
+			}
+		}
+	}
+
 	wc.mu.RLock()
 	defer wc.mu.RUnlock()
 
 	if len(wc.exactIPs) == 0 && len(wc.cidrNets) == 0 {
 		return false
 	}
-
-	parsedIP := net.ParseIP(ip)
 
 	// 1. 精确匹配
 	if parsedIP != nil {

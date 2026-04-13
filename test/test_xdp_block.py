@@ -16,18 +16,14 @@ eBPF XDP IP 阻断功能集成测试
 - API Key 认证功能
 
 运行示例:
-    # 基本测试（不使用认证）
+    # 基本测试（API Key 认证已内置）
     python3 test_xdp_block.py
 
-    # 使用 API Key 认证测试
-    python3 test_xdp_block.py --use-api-key --api-key sk_live_your-key-here
-
-    # 使用环境变量中的 API Key
-    export TEST_API_KEY="sk_live_your-key-here"
-    python3 test_xdp_block.py --use-api-key
+    # 使用自定义 API Key
+    TEST_API_KEY="sk_live_your-key-here" python3 test_xdp_block.py
 
     # 运行特定测试
-    python3 test_xdp_block.py --test TestAPIKeyAuth.test_01_api_key_auth
+    python3 test_xdp_block.py --test TestXDPIpBlocking.test_01_ipv4_exact_block
 """
 
 import json
@@ -60,13 +56,11 @@ class RhoAiasProcess:
     """rho-aias 进程管理类"""
 
     def __init__(self, binary_path: str, default_config_path: str, interface: str,
-                 api_port: int = 18080, use_auth: bool = False,
-                 api_key: str = None):
+                 api_port: int = 18080, api_key: str = "sk_live_test-admin-key-1234567890abcdef"):
         self.binary_path = binary_path
         self.default_config_path = default_config_path
         self.interface = interface
         self.api_port = api_port
-        self.use_auth = use_auth
         self.api_key = api_key
         self.process: Optional[subprocess.Popen] = None
         self.config_dir = "/tmp/rho_test"
@@ -103,29 +97,31 @@ class RhoAiasProcess:
         config['server']['port'] = self.api_port
         config['ebpf']['interface_name'] = self.interface
 
-        # 禁用外部数据源（测试环境）
-        config['intel']['enabled'] = True
-        config['geo_blocking']['enabled'] = True
-        config['manual']['enabled'] = True  # 保留手动规则功能用于测试
+        # 禁用不必要功能
+        config['intel']['enabled'] = False
+        config['geo_blocking']['enabled'] = False
+        config['waf']['enabled'] = False
+        config['rate_limit']['enabled'] = False
+        config['failguard']['enabled'] = False
+        config['anomaly_detection']['enabled'] = False
 
-        # 配置认证
-        if self.use_auth:
-            config['auth']['enabled'] = True
-            config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
-            config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
+        # 保留手动规则功能用于测试
+        config['manual']['enabled'] = True
 
-            # 如果提供了 API Key，配置到配置文件
-            if self.api_key:
-                config['auth']['api_keys'] = [
-                    {
-                        'name': 'Test Admin Key',
-                        'key': self.api_key,
-                        'permissions': ['*']
-                    }
-                ]
-                logger.info(f"API Key configured for testing")
-        else:
-            config['auth']['enabled'] = False
+        # 配置认证（始终启用，使用 API Key）
+        config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
+        config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
+
+        # 配置 API Key 到配置文件
+        if self.api_key:
+            config['auth']['api_keys'] = [
+                {
+                    'name': 'Test Admin Key',
+                    'key': self.api_key,
+                    'permissions': ['*']
+                }
+            ]
+            logger.info(f"API Key configured for testing")
 
         # 写入临时配置文件
         try:
@@ -141,9 +137,9 @@ class RhoAiasProcess:
         try:
             # 打开日志文件
             self.log_file = open(self.log_path, 'w')
-            # 在配置文件所在目录运行程序，输出到日志文件
+            # 使用 --config 参数指定临时配置文件的绝对路径
             self.process = subprocess.Popen(
-                [self.binary_path],
+                [self.binary_path, "--config", config_file],
                 cwd=self.config_dir,
                 stdout=self.log_file,
                 stderr=subprocess.STDOUT,  # stderr 合并到 stdout
@@ -283,9 +279,10 @@ class TestXDPIpBlocking(unittest.TestCase):
         
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-        cls.default_config_path = os.path.join(cls.project_root, "config.yml")
+        cls.default_config_path = os.path.join(cls.project_root, "config", "config.yml")
         cls.api_port = 18080
-        cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}")
+        cls.test_api_key = os.environ.get("TEST_API_KEY", "sk_live_test-admin-key-1234567890abcdef")
+        cls.api_client = APIClient(f"http://127.0.0.1:{cls.api_port}", cls.test_api_key)
         
         # 检查二进制文件
         if not os.path.exists(cls.binary_path):
@@ -318,14 +315,15 @@ class TestXDPIpBlocking(unittest.TestCase):
         # 等待资源释放
         time.sleep(1)
     
-    def _start_rho_on_veth(self, veth_name: str, use_auth: bool = False, api_key: str = None) -> bool:
+    def _start_rho_on_veth(self, veth_name: str, api_key: str = None) -> bool:
         """在指定 veth 上启动 rho-aias"""
+        if api_key is None:
+            api_key = self.test_api_key
         self.rho_process = RhoAiasProcess(
             self.binary_path,
             self.default_config_path,
             veth_name,
             self.api_port,
-            use_auth,
             api_key
         )
         return self.rho_process.start()
@@ -500,7 +498,7 @@ class TestAPIKeyAuth(unittest.TestCase):
 
         cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cls.binary_path = os.path.join(cls.project_root, "rho-aias")
-        cls.default_config_path = os.path.join(cls.project_root, "config.yml")
+        cls.default_config_path = os.path.join(cls.project_root, "config", "config.yml")
         cls.api_port = 18080
 
         # 检查二进制文件
@@ -541,7 +539,7 @@ class TestAPIKeyAuth(unittest.TestCase):
         time.sleep(1)
 
     def _start_rho_with_auth(self, veth_name: str, api_key: str = None) -> bool:
-        """启动 rho-aias 并启用认证"""
+        """启动 rho-aias（认证始终启用）"""
         if api_key is None:
             api_key = os.environ.get("TEST_API_KEY", "sk_live_test-admin-key-1234567890abcdef")
 
@@ -550,8 +548,7 @@ class TestAPIKeyAuth(unittest.TestCase):
             self.default_config_path,
             veth_name,
             self.api_port,
-            use_auth=True,
-            api_key=api_key
+            api_key
         )
         return self.rho_process.start()
 
@@ -619,26 +616,6 @@ class TestAPIKeyAuth(unittest.TestCase):
         success, resp = self.api_client.add_rule("10.0.1.4")
         self.assertTrue(success, f"Failed to add rule: {resp}")
         logger.info("API Key write permission OK")
-
-    def test_04_api_key_without_auth(self):
-        """测试不启用认证时 API Key 的行为"""
-        # 启动 rho-aias（不启用认证）
-        self.rho_process = RhoAiasProcess(
-            self.binary_path,
-            self.default_config_path,
-            "rho_akt_veth0",
-            self.api_port,
-            use_auth=False
-        )
-        self.assertTrue(self.rho_process.start(), "Failed to start rho-aias")
-
-        # 等待服务启动
-        time.sleep(2)
-
-        # 即使有 API Key，也应该能正常工作
-        success, resp = self.api_client.add_rule("10.0.1.5")
-        self.assertTrue(success, f"Failed to add rule: {resp}")
-        logger.info("API Key works without authentication enabled")
 
 
 class TestEnvironmentSetup(unittest.TestCase):
@@ -708,21 +685,14 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 测试运行示例:
-  # 基本测试（不使用认证）
+  # 基本测试（API Key 认证已内置）
   python3 %(prog)s
 
-  # 使用 API Key 认证测试
-  python3 %(prog)s --use-api-key --api-key sk_live_your-key-here
-
-  # 使用环境变量中的 API Key
-  export TEST_API_KEY="sk_live_your-key-here"
-  python3 %(prog)s --use-api-key
+  # 使用自定义 API Key
+  TEST_API_KEY="sk_live_your-key-here" python3 %(prog)s
 
   # 运行特定测试
   python3 %(prog)s --test TestXDPIpBlocking.test_01_ipv4_exact_block
-
-  # 只测试 API Key 认证功能
-  python3 %(prog)s --test TestAPIKeyAuth
         """
     )
     parser.add_argument(
@@ -742,12 +712,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use-api-key",
         action="store_true",
-        help="Enable API Key authentication for tests"
+        help="兼容参数：API Key 认证已内置，此参数保留向后兼容"
     )
     parser.add_argument(
         "--api-key",
         type=str,
-        help="API Key to use for authentication (default: from TEST_API_KEY env var)"
+        help="自定义 API Key（默认使用 TEST_API_KEY 环境变量或内置默认值）"
     )
 
     args = parser.parse_args()
@@ -755,24 +725,17 @@ if __name__ == "__main__":
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # 设置环境变量用于 API Key
-    if args.use_api_key:
-        if args.api_key:
-            os.environ["TEST_API_KEY"] = args.api_key
-            logger.info(f"Using provided API Key: {args.api_key[:20]}...")
-        elif "TEST_API_KEY" in os.environ:
-            logger.info(f"Using API Key from environment: {os.environ['TEST_API_KEY'][:20]}...")
-        else:
-            # 使用默认测试 Key
-            default_key = "sk_live_test-admin-key-1234567890abcdef"
-            os.environ["TEST_API_KEY"] = default_key
-            logger.info(f"Using default test API Key (set TEST_API_KEY env var to override)")
+    # API Key 已内置到所有测试中，此处仅处理用户自定义 Key
+    if args.api_key:
+        os.environ["TEST_API_KEY"] = args.api_key
+        logger.info(f"Using provided API Key: {args.api_key[:20]}...")
+    elif "TEST_API_KEY" not in os.environ:
+        default_key = "sk_live_test-admin-key-1234567890abcdef"
+        os.environ["TEST_API_KEY"] = default_key
 
     if args.env_only:
         sys.exit(run_tests("TestEnvironmentSetup"))
     elif args.test:
         sys.exit(run_tests(args.test))
-    elif args.use_api_key:
-        sys.exit(run_tests("TestAPIKeyAuth"))
     else:
         sys.exit(run_tests())

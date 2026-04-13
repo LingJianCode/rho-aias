@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	"rho-aias/internal/logger"
 	"rho-aias/internal/models"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // chinaLocation 中国时区 (UTC+8)
@@ -18,6 +18,7 @@ func init() {
 	chinaLocation, err = time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		// 如果加载失败，使用固定偏移量 UTC+8
+		logger.Warnf("Failed to load timezone Asia/Shanghai, using FixedZone CST+0800: %v", err)
 		chinaLocation = time.FixedZone("CST", 8*60*60)
 	}
 }
@@ -206,11 +207,11 @@ func (s *BanRecordService) CleanupExpired() (int64, error) {
 
 // GetBanStats 获取封禁统计
 type BanStats struct {
-	Total      int64            `json:"total"`
-	Active     int64            `json:"active"`
-	BySource   map[string]int64 `json:"by_source"`
-	ByStatus   map[string]int64 `json:"by_status"`
-	TopIPs     []TopIPStat      `json:"top_ips"`
+	Total    int64            `json:"total"`
+	Active   int64            `json:"active"`
+	BySource map[string]int64 `json:"by_source"`
+	ByStatus map[string]int64 `json:"by_status"`
+	TopIPs   []TopIPStat      `json:"top_ips"`
 }
 
 type TopIPStat struct {
@@ -225,14 +226,18 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 	}
 
 	// 总数
-	s.db.Model(&models.BanRecord{}).Count(&stats.Total)
+	if err := s.db.Model(&models.BanRecord{}).Count(&stats.Total).Error; err != nil {
+		return nil, fmt.Errorf("failed to count total ban records: %w", err)
+	}
 
 	// 按来源统计
 	var bySource []struct {
 		Source string
 		Count  int64
 	}
-	s.db.Model(&models.BanRecord{}).Select("source, count(*) as count").Group("source").Find(&bySource)
+	if err := s.db.Model(&models.BanRecord{}).Select("source, count(*) as count").Group("source").Find(&bySource).Error; err != nil {
+		return nil, fmt.Errorf("failed to count ban records by source: %w", err)
+	}
 	for _, item := range bySource {
 		stats.BySource[item.Source] = item.Count
 	}
@@ -242,37 +247,28 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 		Status string
 		Count  int64
 	}
-	s.db.Model(&models.BanRecord{}).Select("status, count(*) as count").Group("status").Find(&byStatus)
+	if err := s.db.Model(&models.BanRecord{}).Select("status, count(*) as count").Group("status").Find(&byStatus).Error; err != nil {
+		return nil, fmt.Errorf("failed to count ban records by status: %w", err)
+	}
 	for _, item := range byStatus {
 		stats.ByStatus[item.Status] = item.Count
-		stats.Active = stats.ByStatus["active"]
 	}
+	stats.Active = stats.ByStatus["active"]
 
 	// Top 封禁 IP
 	var topIPs []TopIPStat
-	s.db.Model(&models.BanRecord{}).Select("ip, count(*) as count").
+	if err := s.db.Model(&models.BanRecord{}).Select("ip, count(*) as count").
 		Group("ip").Order("count DESC").Limit(10).
-		Find(&topIPs)
+		Find(&topIPs).Error; err != nil {
+		return nil, fmt.Errorf("failed to get top banned IPs: %w", err)
+	}
 	stats.TopIPs = topIPs
 
 	return stats, nil
 }
 
 // UpsertActiveBan 插入或忽略：如果同一 IP+来源已存在 active 记录则跳过
-// 使用 ON CONFLICT DO NOTHING 避免重复写入
 func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration int) error {
-	now := time.Now()
-	record := &models.BanRecord{
-		IP:        ip,
-		Source:    source,
-		Reason:    reason,
-		Duration:  duration,
-		Status:    models.BanStatusActive,
-		CreatedAt: now,
-		ExpiresAt: now.Add(time.Duration(duration) * time.Second),
-	}
-
-	// 先检查是否已存在 active 记录
 	var count int64
 	s.db.Model(&models.BanRecord{}).
 		Where("ip = ? AND source = ? AND status = ?", ip, source, models.BanStatusActive).
@@ -281,7 +277,16 @@ func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration i
 		return nil
 	}
 
-	return s.db.Create(record).Error
+	now := time.Now()
+	return s.db.Create(&models.BanRecord{
+		IP:        ip,
+		Source:    source,
+		Reason:    reason,
+		Duration:  duration,
+		Status:    models.BanStatusActive,
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Duration(duration) * time.Second),
+	}).Error
 }
 
 // GetRecordByID 根据 ID 获取封禁记录
@@ -321,11 +326,4 @@ func (s *BanRecordService) MarkAllActiveAsAutoUnblock() (int64, error) {
 		return 0, result.Error
 	}
 	return result.RowsAffected, nil
-}
-
-// init 确保 BanRecord 表存在（用于 UPSERT 时需要唯一索引）
-func init() {
-	// GORM AutoMigrate 会处理表创建
-	// 这里不需要额外操作
-	_ = clause.OnConflict{}
 }

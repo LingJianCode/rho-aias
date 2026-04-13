@@ -1,8 +1,11 @@
 package geoblocking
 
 import (
+	"encoding/gob"
 	"errors"
 	"time"
+
+	"rho-aias/internal/feed"
 )
 
 // SourceID GeoIP 数据源标识符
@@ -35,38 +38,40 @@ type CacheData struct {
 
 // GeoConfig 地域封禁配置
 type GeoConfig struct {
-	Enabled              bool
-	Mode                 string
-	AllowedCountries     []string
-	AllowPrivateNetworks bool // 允许私有网段绕过地域检查
+	Enabled              bool     `json:"enabled"`
+	Mode                 string   `json:"mode"`
+	AllowedCountries     []string `json:"allowed_countries"`
+	AllowPrivateNetworks bool     `json:"allow_private_networks"` // 允许私有网段绕过地域检查
 }
 
 // Status 地域封禁模块状态
 type Status struct {
-	Enabled          bool                      // 实际是否在过滤（数据已加载并激活）
-	Mode             string                    // 模式 (whitelist/blacklist)
-	AllowedCountries []string                  // 允许的国家列表
-	LastUpdate       time.Time                 // 最后更新时间
-	TotalRules       int                       // 总规则数量
-	Sources          map[SourceID]SourceStatus // 各数据源状态
+	Enabled          bool                      `json:"enabled"`                       // 实际是否在过滤（数据已加载并激活）
+	Mode             string                    `json:"mode"`                          // 模式 (whitelist/blacklist)
+	AllowedCountries []string                  `json:"allowed_countries"`             // 允许的国家列表
+	LastUpdate       time.Time                 `json:"last_update"`                   // 最后更新时间
+	TotalRules       int                       `json:"total_rules"`                   // 总规则数量
+	Sources          map[SourceID]SourceStatus `json:"sources"`                      // 各数据源状态
 }
 
-// SourceStatus 单个 GeoIP 数据源的状态
-type SourceStatus struct {
-	Enabled    bool      // 是否启用
-	LastUpdate time.Time // 最后更新时间
-	Success    bool      // 最后一次更新是否成功
-	RuleCount  int       // 该数据源的规则数量
-	Error      string    // 错误信息
-}
+// SourceStatus 单个 GeoIP 数据源的状态（复用公共类型）
+type SourceStatus = feed.SourceStatus
 
 var ErrGeoIPCacheNotFound = errors.New("geoip cache not found")
+
+// 初始化 gob 编码器，注册自定义类型
+func init() {
+	gob.Register(SourceID(""))
+	gob.Register(GeoIPData{})
+	gob.Register(CacheData{})
+}
 
 // NewCacheData 创建新的缓存数据
 func NewCacheData() *CacheData {
 	return &CacheData{
-		Version: 1,
-		Sources: make(map[SourceID]GeoIPData),
+		Version:   1,
+		Timestamp: time.Now().Unix(),
+		Sources:   make(map[SourceID]GeoIPData),
 	}
 }
 

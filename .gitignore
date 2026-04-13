@@ -17,4 +17,8 @@ logs/
 *.log
 __pycache__
 *.out
-caddy/config
+caddy/.config
+caddy/data
+caddy/.local
+
+*.mmdb

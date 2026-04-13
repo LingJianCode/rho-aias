@@ -105,9 +105,11 @@ func (s *OffsetStore) StartPeriodicSave(interval time.Duration) (cancel context.
 
 	// 添加定时保存任务
 	cleanExpr := "@every " + interval.String()
-	s.cron.AddFunc(cleanExpr, func() {
+	if _, err := s.cron.AddFunc(cleanExpr, func() {
 		s.Save()
-	})
+	}); err != nil {
+		logger.Warnf("failed to add save cron job: %v", err)
+	}
 
 	// 启动定时任务
 	s.cron.Start()

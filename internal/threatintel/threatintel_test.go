@@ -104,11 +104,9 @@ func TestNewCacheData(t *testing.T) {
 }
 
 func TestCacheData_Timestamp(t *testing.T) {
-	data := NewCacheData()
-
 	// Timestamp should be set on creation
 	beforeCreate := time.Now().Unix() - 1
-	data = NewCacheData()
+	data := NewCacheData()
 	afterCreate := time.Now().Unix() + 1
 
 	if data.Timestamp < beforeCreate || data.Timestamp > afterCreate {

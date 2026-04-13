@@ -10,17 +10,19 @@ import (
 	"time"
 
 	"rho-aias/internal/config"
+	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/watcher"
 )
 
 // mockXDPRuleManager 是 XDPRuleManager 接口的 mock 实现，用于单元测试
 type mockXDPRuleManager struct {
 	mu              sync.Mutex
-	addedIPs        map[string]uint32   // 记录通过 AddRuleWithSource 添加的 IP 及其 sourceMask
-	removedSources  map[string]uint32   // 记录通过 UpdateRuleSourceMask 移除的来源
-	addErr          error               // AddRuleWithSource 返回的错误
-	removeErr       error               // UpdateRuleSourceMask 返回的错误
-	addCallCount    int                 // AddRuleWithSource 调用次数
-	removeCallCount int                 // UpdateRuleSourceMask 调用次数
+	addedIPs        map[string]uint32 // 记录通过 AddRuleWithSource 添加的 IP 及其 sourceMask
+	removedSources  map[string]uint32 // 记录通过 UpdateRuleSourceMask 移除的来源
+	addErr          error             // AddRuleWithSource 返回的错误
+	removeErr       error             // UpdateRuleSourceMask 返回的错误
+	addCallCount    int               // AddRuleWithSource 调用次数
+	removeCallCount int               // UpdateRuleSourceMask 调用次数
 }
 
 func newMockXDPRuleManager() *mockXDPRuleManager {
@@ -49,7 +51,6 @@ func (m *mockXDPRuleManager) UpdateRuleSourceMask(ip string, removeMask uint32) 
 		return 0, false, false, m.removeErr
 	}
 	m.removedSources[ip] = removeMask
-	// 模拟：返回新掩码为 0（规则被删除）
 	return 0, true, true, nil
 }
 
@@ -76,12 +77,19 @@ func (m *mockXDPRuleManager) getRemovedSources() map[string]uint32 {
 // testConfig 返回测试用的 WAF 配置
 func testConfig(banDuration int) *config.WAFConfig {
 	return &config.WAFConfig{
-		Enabled:          true,
-		WAFLogPath:       "/logs/waf_audit.log",
-		RateLimitLogPath: "/logs/rate_limit.log",
-		BanDuration:      banDuration,
+		Enabled:     true,
+		WAFLogPath:  "/logs/waf_audit.log",
+		BanDuration: banDuration,
 	}
 }
+
+// ============================================
+// 真实日志样本
+// ============================================
+
+const realWAFAuditLog = `{"transaction":{"timestamp":"2026/04/01 09:48:44","unix_timestamp":1775008124708373786,"id":"jxezYgInYOWEWbZf","client_ip":"172.68.10.79","client_port":0,"host_ip":"","host_port":0,"server_id":"www.rho-aias.site","request":{"method":"GET","protocol":"HTTP/2.0","uri":"/wordpress/wp-admin/setup-config.php","http_version":"","headers":{"accept":["text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"],"accept-encoding":["gzip, br"],"accept-language":["en-us,en;q=0.8,fr;q=0.5,fr-ca;q=0.3"],"cache-control":["no-cache"],"cdn-loop":["cloudflare; loops=1"],"cf-ew-via":["15"],"cf-ray":["9e53eee1a914e953-DME"],"cf-worker":["giqydygu.workers.dev"],"host":["www.rho-aias.site"],"pragma":["no-cache"],"user-agent":["http://rho-aias.site/wordpress/wp-admin/setup-config.php"]},"body":"","files":null,"args":{},"length":0},"response":{"protocol":"","status":0,"headers":{},"body":""},"producer":{"connector":"","version":"","server":"","rule_engine":"On","stopwatch":"1775008124708373786 1440948; combined=1397355, p1=638563, p2=725318, p3=0, p4=0, p5=33474","rulesets":["OWASP_CRS/4.21.0"]},"highest_severity":"","is_interrupted":true}}`
+
+const realWAFAuditLogNotInterrupted = `{"transaction":{"timestamp":"2026/04/01 09:48:44","client_ip":"172.68.10.79","is_interrupted":false}}`
 
 // ============================================
 // NewMonitor 测试
@@ -98,24 +106,23 @@ func TestNewMonitor(t *testing.T) {
 		t.Fatal("NewMonitor() returned nil")
 	}
 
-	// 验证字段初始化
 	if monitor.cfg != cfg {
 		t.Error("cfg not set correctly")
 	}
-	if monitor.filePos == nil {
+	if monitor.watcher.GetFilePos() == nil {
 		t.Error("filePos should be initialized as non-nil map")
 	}
-	if monitor.bannedIPs == nil {
-		t.Error("bannedIPs should be initialized as non-nil map")
+	if monitor.watcher == nil {
+		t.Error("watcher should be initialized")
 	}
 	if monitor.ipRegex == nil {
 		t.Error("ipRegex should be initialized")
 	}
-	if len(monitor.filePos) != 0 {
-		t.Errorf("filePos should be empty, got %d entries", len(monitor.filePos))
+	if len(monitor.watcher.GetFilePos()) != 0 {
+		t.Errorf("filePos should be empty, got %d entries", len(monitor.watcher.GetFilePos()))
 	}
-	if len(monitor.bannedIPs) != 0 {
-		t.Errorf("bannedIPs should be empty, got %d entries", len(monitor.bannedIPs))
+	if monitor.watcher.GetBanCount() != 0 {
+		t.Errorf("bannedIPs should be empty, got %d entries", monitor.watcher.GetBanCount())
 	}
 }
 
@@ -128,27 +135,37 @@ func TestNewMonitor_CreatesChildContext(t *testing.T) {
 
 	monitor := NewMonitor(cfg, mockXDP, parentCtx)
 
-	// 验证子 context 是独立的
-	if monitor.ctx == nil {
-		t.Fatal("child context should not be nil")
+	// 新行为：child context 在 Start() 时才创建，构造时 Context() 返回 nil
+	if monitor.watcher.Context() != nil {
+		t.Fatal("child context should be nil before Start()")
 	}
 
-	// 取消子 context 不影响父 context
-	monitor.cancel()
-	select {
-	case <-monitor.ctx.Done():
-		// 子 context 已取消
-	default:
-		t.Fatal("child context should be done after cancel")
+	// 创建临时日志文件用于 Start()
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test-waf.log")
+	if err := os.WriteFile(tmpFile, []byte("{}"), 0644); err != nil {
+		t.Fatalf("failed to create test log file: %v", err)
+	}
+	cfg.WAFLogPath = tmpFile
+
+	monitor.watcher.SetLineHandler(func(line string) (string, uint32, string, int, bool) { return "", 0, "", 0, false })
+	if err := monitor.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
 	}
 
-	// 父 context 不应被取消
-	select {
-	case <-parentCtx.Done():
-		t.Fatal("parent context should not be done")
-	default:
-		// 父 context 仍然活跃
+	childCtx := monitor.watcher.Context()
+	if childCtx == nil {
+		t.Fatal("child context should not be nil after Start")
 	}
+
+	parentCancel()
+	select {
+	case <-childCtx.Done():
+	default:
+		t.Fatal("child context should be done after parent cancel")
+	}
+
+	monitor.Stop()
 }
 
 // ============================================
@@ -161,101 +178,21 @@ func TestExtractIP_NoMatch(t *testing.T) {
 	monitor := NewMonitor(cfg, mockXDP, context.Background())
 
 	tests := []struct {
-		name      string
-		line      string
-		logSource string
-		want      string
+		name string
+		line string
+		want string
 	}{
-		{
-			name:      "empty line",
-			line:      "",
-			logSource: "waf",
-			want:      "",
-		},
-		{
-			name:      "no IP in line",
-			line:      "this line has no ip address",
-			logSource: "waf",
-			want:      "",
-		},
-		{
-			name:      "invalid IP format",
-			line:      "ip: 999.999.999.999",
-			logSource: "rate_limit",
-			want:      "",
-		},
-		{
-			name:      "partial IP",
-			line:      "ip: 192.168.1",
-			logSource: "waf",
-			want:      "",
-		},
+		{"empty line", "", ""},
+		{"no IP in line", "this line has no ip address", ""},
+		{"invalid IP format", "ip: 999.999.999.999", ""},
+		{"partial IP", "ip: 192.168.1", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := monitor.extractIP(tt.line, tt.logSource)
+			got := monitor.extractIP(tt.line)
 			if got != tt.want {
-				t.Errorf("extractIP(%q, %q) = %q, want %q", tt.line, tt.logSource, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestExtractIP_RateLimitSource(t *testing.T) {
-	cfg := testConfig(3600)
-	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
-
-	tests := []struct {
-		name      string
-		line      string
-		logSource string
-		want      string
-	}{
-		{
-			name:      "JSON format rate limit log",
-			line:      `{"level":"info","ts":1774432310.799444,"logger":"http.handlers.rate_limit","msg":"rate limit exceeded","zone":"global_zone","wait":9.911422566,"remote_ip":"47.100.232.185"}`,
-			logSource: "rate_limit",
-			want:      "47.100.232.185",
-		},
-		{
-			name:      "JSON format with empty remote_ip - fallback to regex",
-			line:      `{"level":"info","remote_ip":"","msg":"rate limit exceeded for 1.2.3.4"}`,
-			logSource: "rate_limit",
-			want:      "1.2.3.4",
-		},
-		{
-			name:      "non-JSON format - fallback to regex",
-			line:      "rate_limit_exceeded for 1.2.3.4",
-			logSource: "rate_limit",
-			want:      "1.2.3.4",
-		},
-		{
-			name:      "rate limit log with timestamp",
-			line:      "2024-01-15T10:30:00Z rate_limit_exceeded for 10.20.30.40",
-			logSource: "rate_limit",
-			want:      "10.20.30.40",
-		},
-		{
-			name:      "rate limit log with multiple IPs - first is client",
-			line:      "rate_limit: 192.168.1.100 exceeded for 1.2.3.4",
-			logSource: "rate_limit",
-			want:      "192.168.1.100",
-		},
-		{
-			name:      "Caddy access log format",
-			line:      "1.2.3.4 - - [15/Jan/2024:10:30:00 +0000] \"GET /api HTTP/1.1\" 200",
-			logSource: "rate_limit",
-			want:      "1.2.3.4",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := monitor.extractIP(tt.line, tt.logSource)
-			if got != tt.want {
-				t.Errorf("extractIP(%q, %q) = %q, want %q", tt.line, tt.logSource, got, tt.want)
+				t.Errorf("extractIP(%q) = %q, want %q", tt.line, got, tt.want)
 			}
 		})
 	}
@@ -267,63 +204,44 @@ func TestExtractIP_WAFSource(t *testing.T) {
 	monitor := NewMonitor(cfg, mockXDP, context.Background())
 
 	tests := []struct {
-		name      string
-		line      string
-		logSource string
-		want      string
+		name string
+		line string
+		want string
 	}{
 		{
-			name:      "WAF log with server and client IP - should take last (client)",
-			line:      "server: 10.0.0.1 -> client: 1.2.3.4, rule_id: 12345",
-			logSource: "waf",
-			want:      "1.2.3.4",
+			name: "WAF log with server and client IP - should take last (client)",
+			line: "server: 10.0.0.1 -> client: 1.2.3.4, rule_id: 12345",
+			want: "1.2.3.4",
 		},
 		{
-			name:      "WAF log with single IP",
-			line:      "client_ip: 192.168.1.100, rule_id: 942100",
-			logSource: "waf",
-			want:      "192.168.1.100",
+			name: "WAF log with single IP",
+			line: "client_ip: 192.168.1.100, rule_id: 942100",
+			want: "192.168.1.100",
 		},
 		{
-			name:      "WAF log with multiple server IPs and client IP",
-			line:      "proxy1: 10.0.0.1 proxy2: 10.0.0.2 -> client: 203.0.113.50 matched rule 941100",
-			logSource: "waf",
-			want:      "203.0.113.50",
+			name: "WAF log with multiple server IPs and client IP",
+			line: "proxy1: 10.0.0.1 proxy2: 10.0.0.2 -> client: 203.0.113.50 matched rule 941100",
+			want: "203.0.113.50",
 		},
 		{
-			name:      "Coraza WAF audit log format",
-			line:      "client_ip: 172.16.0.5, rule_id: 942100, msg: SQL Injection",
-			logSource: "waf",
-			want:      "172.16.0.5",
+			name: "Coraza WAF audit log format",
+			line: "client_ip: 172.16.0.5, rule_id: 942100, msg: SQL Injection",
+			want: "172.16.0.5",
 		},
 		{
-			name:      "WAF log with X-Forwarded-For",
-			line:      "xff: 8.8.8.8, server: 10.0.0.1, client: 192.168.100.50, rule: 941160",
-			logSource: "waf",
-			want:      "192.168.100.50",
+			name: "WAF log with X-Forwarded-For",
+			line: "xff: 8.8.8.8, server: 10.0.0.1, client: 192.168.100.50, rule: 941160",
+			want: "192.168.100.50",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := monitor.extractIP(tt.line, tt.logSource)
+			got := monitor.extractIP(tt.line)
 			if got != tt.want {
-				t.Errorf("extractIP(%q, %q) = %q, want %q", tt.line, tt.logSource, got, tt.want)
+				t.Errorf("extractIP(%q) = %q, want %q", tt.line, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestExtractIP_UnknownSource(t *testing.T) {
-	cfg := testConfig(3600)
-	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
-
-	// unknown 来源应默认取第一个 IP
-	line := "10.0.0.1 1.2.3.4 5.6.7.8"
-	got := monitor.extractIP(line, "unknown")
-	if got != "10.0.0.1" {
-		t.Errorf("extractIP with unknown source should return first IP, got %q", got)
 	}
 }
 
@@ -333,56 +251,21 @@ func TestExtractIP_IPv4BoundaryValues(t *testing.T) {
 	monitor := NewMonitor(cfg, mockXDP, context.Background())
 
 	tests := []struct {
-		name      string
-		line      string
-		logSource string
-		want      string
+		name string
+		line string
+		want string
 	}{
-		{"min IP", "0.0.0.1", "rate_limit", "0.0.0.1"},
-		{"max IP", "255.255.255.255", "rate_limit", "255.255.255.255"},
-		{"IP with leading zeros", "001.002.003.004", "rate_limit", "001.002.003.004"},
-		{"IP in URL context", "http://192.168.1.1:8080/path", "rate_limit", "192.168.1.1"},
-		{"JSON min IP", `{"remote_ip":"0.0.0.1"}`, "rate_limit", "0.0.0.1"},
-		{"JSON max IP", `{"remote_ip":"255.255.255.255"}`, "rate_limit", "255.255.255.255"},
+		{"min IP", "0.0.0.1", "0.0.0.1"},
+		{"max IP", "255.255.255.255", "255.255.255.255"},
+		{"IP with leading zeros", "001.002.003.004", "001.002.003.004"},
+		{"IP in URL context", "http://192.168.1.1:8080/path", "192.168.1.1"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := monitor.extractIP(tt.line, tt.logSource)
+			got := monitor.extractIP(tt.line)
 			if got != tt.want {
 				t.Errorf("extractIP(%q) = %q, want %q", tt.line, got, tt.want)
-			}
-		})
-	}
-}
-
-// ============================================
-// getLogSource 测试
-// ============================================
-
-func TestGetLogSource(t *testing.T) {
-	cfg := &config.WAFConfig{
-		WAFLogPath:       "/var/log/waf_audit.log",
-		RateLimitLogPath: "/var/log/rate_limit.log",
-	}
-	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
-
-	tests := []struct {
-		filePath string
-		want     string
-	}{
-		{"/var/log/waf_audit.log", "waf"},
-		{"/var/log/rate_limit.log", "rate_limit"},
-		{"/some/other/file.log", "unknown"},
-		{"", "unknown"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.filePath, func(t *testing.T) {
-			got := monitor.getLogSource(tt.filePath)
-			if got != tt.want {
-				t.Errorf("getLogSource(%q) = %q, want %q", tt.filePath, got, tt.want)
 			}
 		})
 	}
@@ -398,33 +281,29 @@ func TestBanIP_NewBan(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
 
-	// 验证 IP 被封禁
 	if !monitor.IsBanned("1.2.3.4") {
 		t.Error("IP should be banned")
 	}
 
-	// 验证封禁记录
-	if len(monitor.bannedIPs) != 1 {
-		t.Errorf("bannedIPs should have 1 entry, got %d", len(monitor.bannedIPs))
+	record, exists := monitor.watcher.GetBanRecord("1.2.3.4")
+	if !exists {
+		t.Fatal("ban record should exist")
 	}
-
-	record := monitor.bannedIPs["1.2.3.4"]
 	if record.Expiry.Before(time.Now()) {
 		t.Error("expiry should be in the future")
 	}
-	if record.SourceMask != sourceMaskWAF {
-		t.Errorf("record SourceMask should be sourceMaskWAF (%d), got %d", sourceMaskWAF, record.SourceMask)
+	if record.SourceMask != ebpfs.SourceMaskWAF {
+		t.Errorf("record SourceMask should be ebpfs.SourceMaskWAF (%d), got %d", ebpfs.SourceMaskWAF, record.SourceMask)
 	}
 
-	// 验证 XDP 被调用
 	addedIPs := mockXDP.getAddedIPs()
 	if _, ok := addedIPs["1.2.3.4"]; !ok {
 		t.Error("XDP AddRuleWithSource should have been called with IP 1.2.3.4")
 	}
-	if addedIPs["1.2.3.4"] != sourceMaskWAF {
-			t.Errorf("source mask should be sourceMaskWAF (%d), got %d", sourceMaskWAF, addedIPs["1.2.3.4"])
+	if addedIPs["1.2.3.4"] != ebpfs.SourceMaskWAF {
+		t.Errorf("source mask should be ebpfs.SourceMaskWAF (%d), got %d", ebpfs.SourceMaskWAF, addedIPs["1.2.3.4"])
 	}
 }
 
@@ -434,44 +313,30 @@ func TestBanIP_DuplicateBanSkipped(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 第一次封禁
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
 
-	// 立即再次封禁同一 IP（封禁期内）
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
-
-	// XDP 应该只被调用一次
 	if mockXDP.addCallCount != 1 {
 		t.Errorf("AddRuleWithSource should be called once, got %d calls", mockXDP.addCallCount)
 	}
-
-	// 验证只有一个封禁记录
-	if len(monitor.bannedIPs) != 1 {
-		t.Errorf("bannedIPs should have 1 entry, got %d", len(monitor.bannedIPs))
+	if monitor.watcher.GetBanCount() != 1 {
+		t.Errorf("bannedIPs should have 1 entry, got %d", monitor.watcher.GetBanCount())
 	}
 }
 
 func TestBanIP_ReBanAfterExpiry(t *testing.T) {
-	cfg := testConfig(1) // 1 秒封禁时长
+	cfg := testConfig(1)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 第一次封禁
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
-
-	// 等待封禁过期
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
 	time.Sleep(1100 * time.Millisecond)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
 
-	// 过期后再次封禁
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
-
-	// XDP 应该被调用两次（一次初始，一次过期后重封）
 	if mockXDP.addCallCount != 2 {
 		t.Errorf("AddRuleWithSource should be called twice, got %d calls", mockXDP.addCallCount)
 	}
-
-	// 验证 IP 仍然被封禁
 	if !monitor.IsBanned("1.2.3.4") {
 		t.Error("IP should be banned again after re-ban")
 	}
@@ -485,30 +350,18 @@ func TestBanIP_MultipleDifferentIPs(t *testing.T) {
 
 	ips := []string{"1.2.3.4", "5.6.7.8", "10.20.30.40"}
 	for _, ip := range ips {
-		monitor.banIP(ip, "/logs/rate_limit.log", sourceMaskRateLimit)
+		monitor.watcher.BanIP(ip, ebpfs.SourceMaskWAF, "waf ban", cfg.BanDuration)
 	}
 
-	// 验证频率限制来源使用了正确的 mask
-	addedIPs := mockXDP.getAddedIPs()
-	for _, ip := range ips {
-		if addedIPs[ip] != sourceMaskRateLimit {
-			t.Errorf("source mask for rate_limit IP %s should be sourceMaskRateLimit (%d), got %d", ip, sourceMaskRateLimit, addedIPs[ip])
-		}
-	}
-
-	// 验证所有 IP 都被封禁
 	for _, ip := range ips {
 		if !monitor.IsBanned(ip) {
 			t.Errorf("IP %s should be banned", ip)
 		}
 	}
 
-	// 验证封禁数量
 	if monitor.GetBanCount() != 3 {
 		t.Errorf("GetBanCount should return 3, got %d", monitor.GetBanCount())
 	}
-
-	// 验证 XDP 被调用了 3 次
 	if mockXDP.addCallCount != 3 {
 		t.Errorf("AddRuleWithSource should be called 3 times, got %d", mockXDP.addCallCount)
 	}
@@ -521,14 +374,13 @@ func TestBanIP_XDPError(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
 
-	// XDP 失败，IP 不应被封禁
 	if monitor.IsBanned("1.2.3.4") {
 		t.Error("IP should not be banned when XDP fails")
 	}
-	if len(monitor.bannedIPs) != 0 {
-		t.Errorf("bannedIPs should be empty, got %d entries", len(monitor.bannedIPs))
+	if monitor.watcher.GetBanCount() != 0 {
+		t.Errorf("bannedIPs should be empty, got %d entries", monitor.watcher.GetBanCount())
 	}
 }
 
@@ -542,48 +394,31 @@ func TestCleanup_RemovesExpiredBans(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 手动添加一个已过期的封禁记录
 	now := time.Now()
-	monitor.bannedIPs["1.2.3.4"] = IPBanRecord{
-		BannedAt:   now.Add(-2 * time.Hour),
-		Expiry:     now.Add(-1 * time.Hour), // 已过期
-		SourceMask: sourceMaskWAF,
-	}
+	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
+		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+	})
+	monitor.watcher.SetBanRecordForTest("5.6.7.8", watcher.IPBanRecord{
+		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+	})
 
-	// 添加一个未过期的封禁记录
-	monitor.bannedIPs["5.6.7.8"] = IPBanRecord{
-		BannedAt:   now,
-		Expiry:     now.Add(1 * time.Hour), // 未过期
-		SourceMask: sourceMaskRateLimit,
-	}
+	monitor.watcher.CleanupExpiredBans()
 
-	// 执行清理
-	monitor.cleanup()
-
-	// 已过期的应被清理
 	if monitor.IsBanned("1.2.3.4") {
 		t.Error("Expired IP 1.2.3.4 should be cleaned up")
 	}
-
-	// 未过期的应保留
 	if !monitor.IsBanned("5.6.7.8") {
 		t.Error("Non-expired IP 5.6.7.8 should still be banned")
 	}
-
-	// 封禁数量应为 1
 	if monitor.GetBanCount() != 1 {
 		t.Errorf("GetBanCount should return 1, got %d", monitor.GetBanCount())
 	}
-
-	// 验证 XDP 清理被调用了一次（只清理过期的那条）
 	if mockXDP.removeCallCount != 1 {
-		t.Errorf("UpdateRuleSourceMask should be called once for expired IP, got %d", mockXDP.removeCallCount)
+		t.Errorf("UpdateRuleSourceMask should be called once, got %d", mockXDP.removeCallCount)
 	}
-
-	// 验证 XDP 清理使用正确的 mask
 	removed := mockXDP.getRemovedSources()
-	if removed["1.2.3.4"] != sourceMaskWAF {
-		t.Errorf("should remove sourceMaskWAF for expired IP, got %d", removed["1.2.3.4"])
+	if removed["1.2.3.4"] != ebpfs.SourceMaskWAF {
+		t.Errorf("should remove ebpfs.SourceMaskWAF, got %d", removed["1.2.3.4"])
 	}
 }
 
@@ -593,26 +428,18 @@ func TestCleanup_RemovesXDPRuleForExpiredIP(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 添加多个已过期记录
 	now := time.Now()
-	expiredIPs := []string{"1.2.3.4", "5.6.7.8", "10.20.30.40"}
-	for _, ip := range expiredIPs {
-		monitor.bannedIPs[ip] = IPBanRecord{
-			BannedAt:   now.Add(-2 * time.Hour),
-			Expiry:     now.Add(-1 * time.Hour),
-			SourceMask: sourceMaskWAF,
-		}
+	for _, ip := range []string{"1.2.3.4", "5.6.7.8", "10.20.30.40"} {
+		monitor.watcher.SetBanRecordForTest(ip, watcher.IPBanRecord{
+			BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+		})
 	}
 
-	// 执行清理
-	monitor.cleanup()
+	monitor.watcher.CleanupExpiredBans()
 
-	// 验证所有过期 IP 被清理
-	if len(monitor.bannedIPs) != 0 {
-		t.Errorf("all expired IPs should be cleaned, got %d remaining", len(monitor.bannedIPs))
+	if monitor.watcher.GetBanCount() != 0 {
+		t.Errorf("all expired IPs should be cleaned, got %d remaining", monitor.watcher.GetBanCount())
 	}
-
-	// 验证 XDP 清理被调用了 3 次
 	if mockXDP.removeCallCount != 3 {
 		t.Errorf("UpdateRuleSourceMask should be called 3 times, got %d", mockXDP.removeCallCount)
 	}
@@ -624,22 +451,18 @@ func TestCleanup_NoExpiredBans(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 添加未过期的记录
 	now := time.Now()
-	monitor.bannedIPs["1.2.3.4"] = IPBanRecord{
-		BannedAt:   now,
-		Expiry:     now.Add(1 * time.Hour),
-		SourceMask: sourceMaskWAF,
-	}
+	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
+		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+	})
 
-	monitor.cleanup()
+	monitor.watcher.CleanupExpiredBans()
 
-	// 不应有变化
 	if !monitor.IsBanned("1.2.3.4") {
 		t.Error("Non-expired IP should still be banned")
 	}
 	if mockXDP.removeCallCount != 0 {
-		t.Errorf("UpdateRuleSourceMask should not be called when no bans are expired, got %d", mockXDP.removeCallCount)
+		t.Errorf("UpdateRuleSourceMask should not be called, got %d", mockXDP.removeCallCount)
 	}
 }
 
@@ -649,14 +472,13 @@ func TestCleanup_EmptyBans(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 空的封禁列表，清理不应出错
-	monitor.cleanup()
+	monitor.watcher.CleanupExpiredBans()
 
 	if monitor.GetBanCount() != 0 {
 		t.Error("ban count should be 0")
 	}
 	if mockXDP.removeCallCount != 0 {
-		t.Error("no XDP removal should occur for empty ban list")
+		t.Error("no XDP removal should occur")
 	}
 }
 
@@ -671,38 +493,26 @@ func TestGetBannedIPs_ReturnsOnlyActive(t *testing.T) {
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
 	now := time.Now()
-
-	// 活跃的封禁
-	monitor.bannedIPs["1.2.3.4"] = IPBanRecord{
-		BannedAt:   now,
-		Expiry:     now.Add(1 * time.Hour),
-		SourceMask: sourceMaskWAF,
-	}
-	monitor.bannedIPs["5.6.7.8"] = IPBanRecord{
-		BannedAt:   now,
-		Expiry:     now.Add(2 * time.Hour),
-		SourceMask: sourceMaskRateLimit,
-	}
-
-	// 已过期的封禁（但仍在 map 中）
-	monitor.bannedIPs["10.20.30.40"] = IPBanRecord{
-		BannedAt:   now.Add(-2 * time.Hour),
-		Expiry:     now.Add(-1 * time.Hour),
-		SourceMask: sourceMaskWAF,
-	}
+	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
+		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+	})
+	monitor.watcher.SetBanRecordForTest("5.6.7.8", watcher.IPBanRecord{
+		BannedAt: now, Expiry: now.Add(2 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+	})
+	monitor.watcher.SetBanRecordForTest("10.20.30.40", watcher.IPBanRecord{
+		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+	})
 
 	ips := monitor.GetBannedIPs()
 	if len(ips) != 2 {
 		t.Errorf("GetBannedIPs should return 2 active IPs, got %d", len(ips))
 	}
-
-	// 验证返回的 IP 是活跃的
 	ipSet := make(map[string]bool)
 	for _, ip := range ips {
 		ipSet[ip] = true
 	}
 	if !ipSet["1.2.3.4"] || !ipSet["5.6.7.8"] {
-		t.Error("GetBannedIPs should contain active IPs 1.2.3.4 and 5.6.7.8")
+		t.Error("GetBannedIPs should contain 1.2.3.4 and 5.6.7.8")
 	}
 	if ipSet["10.20.30.40"] {
 		t.Error("GetBannedIPs should not contain expired IP 10.20.30.40")
@@ -715,25 +525,20 @@ func TestGetBanCount(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 空列表
 	if monitor.GetBanCount() != 0 {
 		t.Error("empty monitor should have 0 bans")
 	}
 
 	now := time.Now()
-	monitor.bannedIPs["1.2.3.4"] = IPBanRecord{
-		BannedAt:   now,
-		Expiry:     now.Add(1 * time.Hour),
-		SourceMask: sourceMaskWAF,
-	}
-	monitor.bannedIPs["10.20.30.40"] = IPBanRecord{
-		BannedAt:   now.Add(-2 * time.Hour),
-		Expiry:     now.Add(-1 * time.Hour),
-		SourceMask: sourceMaskWAF,
-	}
+	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
+		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+	})
+	monitor.watcher.SetBanRecordForTest("10.20.30.40", watcher.IPBanRecord{
+		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+	})
 
 	if monitor.GetBanCount() != 1 {
-		t.Errorf("GetBanCount should return 1 (only active), got %d", monitor.GetBanCount())
+		t.Errorf("GetBanCount should return 1, got %d", monitor.GetBanCount())
 	}
 }
 
@@ -743,66 +548,23 @@ func TestIsBanned(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 不存在的 IP
 	if monitor.IsBanned("1.2.3.4") {
 		t.Error("non-existent IP should not be banned")
 	}
 
 	now := time.Now()
-
-	// 活跃封禁
-	monitor.bannedIPs["1.2.3.4"] = IPBanRecord{
-		BannedAt:   now,
-		Expiry:     now.Add(1 * time.Hour),
-		SourceMask: sourceMaskWAF,
-	}
+	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
+		BannedAt: now, Expiry: now.Add(1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+	})
 	if !monitor.IsBanned("1.2.3.4") {
 		t.Error("active IP should be banned")
 	}
 
-	// 已过期封禁
-	monitor.bannedIPs["5.6.7.8"] = IPBanRecord{
-		BannedAt:   now.Add(-2 * time.Hour),
-		Expiry:     now.Add(-1 * time.Hour),
-		SourceMask: sourceMaskRateLimit,
-	}
+	monitor.watcher.SetBanRecordForTest("5.6.7.8", watcher.IPBanRecord{
+		BannedAt: now.Add(-2 * time.Hour), Expiry: now.Add(-1 * time.Hour), SourceMask: ebpfs.SourceMaskWAF,
+	})
 	if monitor.IsBanned("5.6.7.8") {
 		t.Error("expired IP should not be banned")
-	}
-}
-
-// ============================================
-// filePos 多文件独立性测试
-// ============================================
-
-func TestFilePos_IndependentPerFile(t *testing.T) {
-	cfg := testConfig(3600)
-	mockXDP := newMockXDPRuleManager()
-	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
-
-	fileA := "/logs/waf_audit.log"
-	fileB := "/logs/rate_limit.log"
-
-	// 模拟两个文件分别有不同的读取位置
-	monitor.filePos[fileA] = 1024
-	monitor.filePos[fileB] = 2048
-
-	// 验证位置独立
-	if monitor.filePos[fileA] == monitor.filePos[fileB] {
-		t.Error("file positions for different files should be independent")
-	}
-	if monitor.filePos[fileA] != 1024 {
-		t.Errorf("filePos[%s] should be 1024, got %d", fileA, monitor.filePos[fileA])
-	}
-	if monitor.filePos[fileB] != 2048 {
-		t.Errorf("filePos[%s] should be 2048, got %d", fileB, monitor.filePos[fileB])
-	}
-
-	// 更新一个文件的位置不应影响另一个
-	monitor.filePos[fileA] = 2048
-	if monitor.filePos[fileB] != 2048 {
-		t.Errorf("updating filePos[%s] should not affect filePos[%s]", fileA, fileB)
 	}
 }
 
@@ -816,44 +578,52 @@ func TestReadLogFile_FileRotation(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 创建临时目录和文件
+	monitor.watcher.SetLineHandler(monitor.handleLine)
+
+	if err := monitor.watcher.Start(); err != nil {
+		t.Fatalf("failed to start watcher: %v", err)
+	}
+	defer monitor.watcher.Stop()
+
 	tmpDir := t.TempDir()
 	wafLogPath := filepath.Join(tmpDir, "waf_audit.log")
-	rateLimitLogPath := filepath.Join(tmpDir, "rate_limit.log")
 
-	// 更新配置使用临时路径
-	cfg.WAFLogPath = wafLogPath
-	cfg.RateLimitLogPath = rateLimitLogPath
-
-	// 写入初始日志内容（较长）
-	initialContent := "1.2.3.4 - first request - some additional context info here\n"
+	initialContent := `{"transaction":{"client_ip":"1.2.3.4","is_interrupted":true}}
+{"transaction":{"client_ip":"2.3.4.5","is_interrupted":true}}
+{"transaction":{"client_ip":"3.4.5.6","is_interrupted":true}}
+`
 	if err := os.WriteFile(wafLogPath, []byte(initialContent), 0644); err != nil {
 		t.Fatalf("failed to write initial log: %v", err)
 	}
 
-	// 模拟读取，设置 filePos 到文件末尾
-	if err := monitor.readLogFile(wafLogPath); err != nil {
+	if err := monitor.watcher.WatchLogFile(wafLogPath); err != nil {
+		t.Fatalf("WatchLogFile failed: %v", err)
+	}
+
+	if err := monitor.watcher.ReadLogFile(wafLogPath); err != nil {
 		t.Fatalf("readLogFile failed: %v", err)
 	}
 
-	// 验证 filePos 已更新
 	initialSize := int64(len(initialContent))
-	if monitor.filePos[wafLogPath] != initialSize {
-		t.Errorf("filePos should be %d after reading, got %d", initialSize, monitor.filePos[wafLogPath])
+	filePos := monitor.watcher.GetFilePos()
+	if filePos[wafLogPath] != initialSize {
+		t.Errorf("filePos should be %d after reading, got %d", initialSize, filePos[wafLogPath])
 	}
 
-	// 模拟文件轮转：写入更小的新内容（模拟日志轮转后新文件从空开始）
-	rotatedContent := "5.6.7.8 - rotated\n"
+	if !monitor.IsBanned("1.2.3.4") {
+		t.Error("IP 1.2.3.4 from initial log should be banned")
+	}
+
+	rotatedContent := `{"transaction":{"client_ip":"5.6.7.8","is_interrupted":true}}
+`
 	if err := os.WriteFile(wafLogPath, []byte(rotatedContent), 0644); err != nil {
 		t.Fatalf("failed to write rotated log: %v", err)
 	}
 
-	// 再次读取
-	if err := monitor.readLogFile(wafLogPath); err != nil {
+	if err := monitor.watcher.ReadLogFile(wafLogPath); err != nil {
 		t.Fatalf("readLogFile failed after rotation: %v", err)
 	}
 
-	// 验证：轮转后新 IP 应被正确读取并封禁
 	if !monitor.IsBanned("5.6.7.8") {
 		t.Error("IP 5.6.7.8 from rotated log should be banned")
 	}
@@ -865,8 +635,7 @@ func TestReadLogFile_NonExistentFile(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 读取不存在的文件不应出错
-	err := monitor.readLogFile("/nonexistent/path/file.log")
+	err := monitor.watcher.ReadLogFile("/nonexistent/path/file.log")
 	if err != nil {
 		t.Errorf("readLogFile should not error for non-existent file, got: %v", err)
 	}
@@ -878,41 +647,49 @@ func TestReadLogFile_IncrementalReading(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 创建临时文件
+	monitor.watcher.SetLineHandler(monitor.handleLine)
+
+	if err := monitor.watcher.Start(); err != nil {
+		t.Fatalf("failed to start watcher: %v", err)
+	}
+	defer monitor.watcher.Stop()
+
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
-	cfg.WAFLogPath = logPath
 
-	// 第一次写入
-	content1 := "1.2.3.4 - request 1\n"
+	content1 := `{"transaction":{"client_ip":"1.2.3.4","is_interrupted":true}}
+`
 	if err := os.WriteFile(logPath, []byte(content1), 0644); err != nil {
 		t.Fatalf("failed to write: %v", err)
 	}
 
-	// 第一次读取
-	if err := monitor.readLogFile(logPath); err != nil {
+	if err := monitor.watcher.WatchLogFile(logPath); err != nil {
+		t.Fatalf("WatchLogFile failed: %v", err)
+	}
+
+	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("first read failed: %v", err)
 	}
 	if mockXDP.addCallCount != 1 {
 		t.Errorf("should have 1 XDP call after first read, got %d", mockXDP.addCallCount)
 	}
 
-	// 追加更多内容
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		t.Fatalf("failed to open for append: %v", err)
 	}
-	f.WriteString("5.6.7.8 - request 2\n")
+	if _, err := f.WriteString(`{"transaction":{"client_ip":"5.6.7.8","is_interrupted":true}}
+`); err != nil {
+		t.Fatalf("failed to write test log: %v", err)
+	}
 	f.Close()
 
-	// 第二次读取（增量）
-	if err := monitor.readLogFile(logPath); err != nil {
+	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
 		t.Fatalf("second read failed: %v", err)
 	}
 
-	// 应该只有 2 次调用（每个新 IP 一次）
 	if mockXDP.addCallCount != 2 {
-		t.Errorf("should have 2 XDP calls after incremental read, got %d", mockXDP.addCallCount)
+		t.Errorf("should have 2 XDP calls, got %d", mockXDP.addCallCount)
 	}
 }
 
@@ -926,7 +703,6 @@ func TestStop_WithoutStart(t *testing.T) {
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// Stop 在未 Start 的情况下不应 panic
 	monitor.Stop()
 }
 
@@ -944,19 +720,17 @@ func TestConcurrentBanAndQuery(t *testing.T) {
 	const goroutines = 10
 	const opsPerGoroutine = 100
 
-	// 并发写入
 	for i := 0; i < goroutines/2; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < opsPerGoroutine; j++ {
 				ip := fmt.Sprintf("10.%d.%d.1", id, j)
-				monitor.banIP(ip, "/logs/waf_audit.log", sourceMaskWAF)
+				monitor.watcher.BanIP(ip, ebpfs.SourceMaskWAF, "concurrent test", cfg.BanDuration)
 			}
 		}(i)
 	}
 
-	// 并发读取
 	for i := 0; i < goroutines/2; i++ {
 		wg.Add(1)
 		go func(id int) {
@@ -972,7 +746,6 @@ func TestConcurrentBanAndQuery(t *testing.T) {
 
 	wg.Wait()
 
-	// 验证没有 panic 发生（如果执行到这里说明并发安全）
 	if monitor.GetBanCount() == 0 {
 		t.Error("should have some banned IPs after concurrent operations")
 	}
@@ -983,45 +756,133 @@ func TestConcurrentBanAndQuery(t *testing.T) {
 // ============================================
 
 func TestFullWorkflow_BanAndCleanup(t *testing.T) {
-	cfg := testConfig(1) // 1 秒封禁时长
+	cfg := testConfig(1)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
 	monitor := NewMonitor(cfg, mockXDP, ctx)
 
-	// 1. 封禁几个 IP
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
-	monitor.banIP("5.6.7.8", "/logs/rate_limit.log", sourceMaskRateLimit)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "test ban", cfg.BanDuration)
+	monitor.watcher.BanIP("5.6.7.8", ebpfs.SourceMaskWAF, "waf ban", cfg.BanDuration)
 
-	// 验证封禁
 	if monitor.GetBanCount() != 2 {
 		t.Fatalf("expected 2 bans, got %d", monitor.GetBanCount())
 	}
 
-	// 2. 等待过期
 	time.Sleep(1100 * time.Millisecond)
 
-	// 3. 执行清理
-	monitor.cleanup()
+	monitor.watcher.CleanupExpiredBans()
 
-	// 4. 验证清理后状态
 	if monitor.GetBanCount() != 0 {
 		t.Errorf("expected 0 bans after cleanup, got %d", monitor.GetBanCount())
 	}
-
-	// 5. 验证 XDP 添加和移除
 	if mockXDP.addCallCount != 2 {
 		t.Errorf("expected 2 XDP adds, got %d", mockXDP.addCallCount)
 	}
 	if mockXDP.removeCallCount != 2 {
-		t.Errorf("expected 2 XDP removes during cleanup, got %d", mockXDP.removeCallCount)
+		t.Errorf("expected 2 XDP removes, got %d", mockXDP.removeCallCount)
 	}
 
-	// 6. 过期后可以重新封禁
-	monitor.banIP("1.2.3.4", "/logs/waf_audit.log", sourceMaskWAF)
+	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskWAF, "re-ban", cfg.BanDuration)
 	if !monitor.IsBanned("1.2.3.4") {
 		t.Error("IP should be banned again after cleanup and re-ban")
 	}
 	if mockXDP.addCallCount != 3 {
-		t.Errorf("expected 3 XDP adds (2 initial + 1 re-ban), got %d", mockXDP.addCallCount)
+		t.Errorf("expected 3 XDP adds, got %d", mockXDP.addCallCount)
+	}
+}
+
+// ============================================
+// 真实日志解析测试
+// ============================================
+
+func TestRealLog_WAFAuditExtraction(t *testing.T) {
+	cfg := testConfig(3600)
+	mockXDP := newMockXDPRuleManager()
+	monitor := NewMonitor(cfg, mockXDP, context.Background())
+
+	ip := monitor.extractIP(realWAFAuditLog)
+	if ip != "172.68.10.79" {
+		t.Errorf("extractIP() = %q, want '172.68.10.79'", ip)
+	}
+}
+
+func TestRealLog_WAFAuditNotInterrupted(t *testing.T) {
+	cfg := testConfig(3600)
+	mockXDP := newMockXDPRuleManager()
+	monitor := NewMonitor(cfg, mockXDP, context.Background())
+
+	ip := monitor.extractIP(realWAFAuditLogNotInterrupted)
+	if ip != "" {
+		t.Errorf("extractIP() should return empty for non-interrupted, got %q", ip)
+	}
+}
+
+func TestRealLog_HandleLine_WAFAudit(t *testing.T) {
+	cfg := testConfig(3600)
+	mockXDP := newMockXDPRuleManager()
+	monitor := NewMonitor(cfg, mockXDP, context.Background())
+
+	ip, sourceMask, reason, duration, shouldBan := monitor.handleLine(realWAFAuditLog)
+	if !shouldBan {
+		t.Fatal("handleLine should return shouldBan=true for WAF audit log")
+	}
+	if ip != "172.68.10.79" {
+		t.Errorf("expected IP '172.68.10.79', got %s", ip)
+	}
+	if sourceMask != ebpfs.SourceMaskWAF {
+		t.Errorf("expected sourceMask %d, got %d", ebpfs.SourceMaskWAF, sourceMask)
+	}
+	if reason != "banned from waf log" {
+		t.Errorf("expected reason 'banned from waf log', got %s", reason)
+	}
+	if duration != 3600 {
+		t.Errorf("expected duration 3600, got %d", duration)
+	}
+}
+
+func TestRealLog_HandleLine_WAFNotInterrupted(t *testing.T) {
+	cfg := testConfig(3600)
+	mockXDP := newMockXDPRuleManager()
+	monitor := NewMonitor(cfg, mockXDP, context.Background())
+
+	_, _, _, _, shouldBan := monitor.handleLine(realWAFAuditLogNotInterrupted)
+	if shouldBan {
+		t.Error("handleLine should NOT ban for non-interrupted WAF log")
+	}
+}
+
+func TestRealLog_ReadLogFile_WAFAudit(t *testing.T) {
+	cfg := testConfig(3600)
+	mockXDP := newMockXDPRuleManager()
+	ctx := context.Background()
+	monitor := NewMonitor(cfg, mockXDP, ctx)
+
+	monitor.watcher.SetLineHandler(monitor.handleLine)
+
+	if err := monitor.watcher.Start(); err != nil {
+		t.Fatalf("failed to start watcher: %v", err)
+	}
+	defer monitor.watcher.Stop()
+
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "waf_audit.log")
+
+	if err := os.WriteFile(logPath, []byte(realWAFAuditLog+"\n"), 0644); err != nil {
+		t.Fatalf("failed to write log: %v", err)
+	}
+
+	if err := monitor.watcher.WatchLogFile(logPath); err != nil {
+		t.Fatalf("WatchLogFile failed: %v", err)
+	}
+
+	if err := monitor.watcher.ReadLogFile(logPath); err != nil {
+		t.Fatalf("ReadLogFile failed: %v", err)
+	}
+
+	if !monitor.IsBanned("172.68.10.79") {
+		t.Error("172.68.10.79 should be banned from WAF audit log")
+	}
+	if mockXDP.addCallCount != 1 {
+		t.Errorf("expected 1 XDP call, got %d", mockXDP.addCallCount)
 	}
 }

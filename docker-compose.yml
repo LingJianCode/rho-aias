@@ -21,9 +21,9 @@ services:
       - /tmp
 
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy/config:/root/.config
-      - ./caddy/data:/root/.local/share/caddy
+      - ./caddy/config:/etc/caddy:ro
+      - ./caddy/.config:/root/.config
+      - ./caddy/.local:/root/.local
       - ./logs/caddy:/logs
 
   rho-aias:
@@ -41,12 +41,12 @@ services:
       - CAP_NET_RAW
     network_mode: host
     volumes:
-      - ./config.yml:/app/config/config.yml:ro
-      # 必须要挂载目录，否则inotify无法监听文件变化
+      - ./config:/app/config:ro
       - ./logs/rho-aias:/app/logs
       - ./data:/app/data
-      - ./logs/caddy:/caddy-logs:ro
       # 必须要挂载目录，否则inotify无法监听文件变化
+      # 挂载监听文件目录
+      - ./logs/caddy:/caddy-logs:ro
       - /var/log:/var/log:ro
     command: ["--config", "/app/config/config.yml"]
     restart: unless-stopped
