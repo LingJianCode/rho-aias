@@ -3,12 +3,14 @@ package handles
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"rho-aias/internal/anomaly"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/failguard"
 	"rho-aias/internal/logger"
+	"rho-aias/internal/models"
 	"rho-aias/internal/ratelimit"
 	"rho-aias/internal/response"
 	"rho-aias/internal/services"
@@ -18,15 +20,8 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// 支持动态配置的模块名常量
-const (
-	ModuleFailGuard        = "failguard"
-	ModuleWAF              = "waf"
-	ModuleRateLimit        = "rate_limit"
-	ModuleAnomalyDetection = "anomaly_detection"
-	ModuleGeoBlocking      = "geo_blocking"
-	ModuleIntel            = "intel"
-)
+// IsValidModule 检查模块名是否合法（导出供 DynamicConfigService 等外部调用，委托给 models 包）
+var IsValidModule = models.IsValidModule
 
 // AnomalyController 封装 eBPF 异常检测相关操作接口
 // 用于在动态启停时控制内核采样和事件监听
@@ -165,7 +160,7 @@ func (h *ConfigHandle) GetAllConfig(c *gin.Context) {
 	}
 
 	// 构建每个模块的配置，优先使用运行时值
-	modules := []string{ModuleFailGuard, ModuleWAF, ModuleRateLimit, ModuleAnomalyDetection, ModuleGeoBlocking, ModuleIntel}
+	modules := []string{models.ModuleFailGuard, models.ModuleWAF, models.ModuleRateLimit, models.ModuleAnomalyDetection, models.ModuleGeoBlocking, models.ModuleIntel}
 	for _, module := range modules {
 		runtimeConfig := h.getRuntimeConfig(module)
 		if runtimeConfig != nil {
@@ -262,19 +257,19 @@ func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 // getRuntimeConfig 获取模块运行时配置
 func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 	switch module {
-	case ModuleFailGuard:
+	case models.ModuleFailGuard:
 		return h.failguardMonitor.GetConfig()
-	case ModuleWAF:
+	case models.ModuleWAF:
 		return h.wafMonitor.GetConfig()
-	case ModuleRateLimit:
+	case models.ModuleRateLimit:
 		return h.rateLimitMonitor.GetConfig()
-	case ModuleAnomalyDetection:
+	case models.ModuleAnomalyDetection:
 		return h.anomalyDetector.GetConfig()
-	case ModuleGeoBlocking:
+	case models.ModuleGeoBlocking:
 		if h.geoBlockingMgr != nil {
 			return h.geoBlockingMgr.GetConfig()
 		}
-	case ModuleIntel:
+	case models.ModuleIntel:
 		if h.intelMgr != nil {
 			return h.intelMgr.GetConfig()
 		}
@@ -285,17 +280,17 @@ func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 // applyConfig 将配置应用到模块
 func (h *ConfigHandle) applyConfig(module string, raw json.RawMessage) error {
 	switch module {
-	case ModuleFailGuard:
+	case models.ModuleFailGuard:
 		return h.applyFailGuardConfig(raw)
-	case ModuleWAF:
+	case models.ModuleWAF:
 		return h.applyWAFConfig(raw)
-	case ModuleRateLimit:
+	case models.ModuleRateLimit:
 		return h.applyRateLimitConfig(raw)
-	case ModuleAnomalyDetection:
+	case models.ModuleAnomalyDetection:
 		return h.applyAnomalyDetectionConfig(raw)
-	case ModuleGeoBlocking:
+	case models.ModuleGeoBlocking:
 		return h.applyGeoBlockingConfig(raw)
-	case ModuleIntel:
+	case models.ModuleIntel:
 		return h.applyIntelConfig(raw)
 	default:
 		return fmt.Errorf("unsupported module: %s", module)
@@ -305,7 +300,7 @@ func (h *ConfigHandle) applyConfig(module string, raw json.RawMessage) error {
 // validateConfig 校验请求参数（使用 validator 库做边界检查）
 func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error {
 	switch module {
-	case ModuleFailGuard:
+	case models.ModuleFailGuard:
 		var req failGuardConfigRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
@@ -313,7 +308,7 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 		if err := h.validate.Struct(req); err != nil {
 			return err
 		}
-	case ModuleWAF:
+	case models.ModuleWAF:
 		var req wafConfigRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
@@ -321,7 +316,7 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 		if err := h.validate.Struct(req); err != nil {
 			return err
 		}
-	case ModuleRateLimit:
+	case models.ModuleRateLimit:
 		var req rateLimitConfigRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
@@ -329,7 +324,7 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 		if err := h.validate.Struct(req); err != nil {
 			return err
 		}
-	case ModuleAnomalyDetection:
+	case models.ModuleAnomalyDetection:
 		var req anomalyDetectionConfigRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
@@ -341,7 +336,7 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 		if err := validateAnomalyNestedFields(req.Baseline, req.Attacks); err != nil {
 			return err
 		}
-	case ModuleGeoBlocking:
+	case models.ModuleGeoBlocking:
 		var req geoBlockingConfigRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
@@ -349,7 +344,7 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 		if err := h.validate.Struct(req); err != nil {
 			return err
 		}
-	case ModuleIntel:
+	case models.ModuleIntel:
 		// Intel 配置校验较宽松（schedule/url 格式各异），仅做基本非空校验即可
 		var req intelConfigRequest
 		if err := json.Unmarshal(raw, &req); err != nil {
@@ -372,20 +367,20 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 // getMergedConfig 获取模块当前合并后的完整配置（用于持久化）
 func (h *ConfigHandle) getMergedConfig(module string) (interface{}, error) {
 	switch module {
-	case ModuleFailGuard:
+	case models.ModuleFailGuard:
 		return h.failguardMonitor.GetConfig(), nil
-	case ModuleWAF:
+	case models.ModuleWAF:
 		return h.wafMonitor.GetConfig(), nil
-	case ModuleRateLimit:
+	case models.ModuleRateLimit:
 		return h.rateLimitMonitor.GetConfig(), nil
-	case ModuleAnomalyDetection:
+	case models.ModuleAnomalyDetection:
 		return h.anomalyDetector.GetConfig(), nil
-	case ModuleGeoBlocking:
+	case models.ModuleGeoBlocking:
 		if h.geoBlockingMgr == nil {
 			return nil, fmt.Errorf("geo_blocking module is not initialized")
 		}
 		return h.geoBlockingMgr.GetConfig(), nil
-	case ModuleIntel:
+	case models.ModuleIntel:
 		if h.intelMgr == nil {
 			return nil, fmt.Errorf("intel module is not initialized")
 		}
@@ -590,7 +585,7 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 // GeoBlocking 动态配置请求
 type geoBlockingConfigRequest struct {
 	Enabled          *bool    `json:"enabled" validate:"omitempty"`
-	Mode             string   `json:"mode" validate:"omitempty,oneof=allow deny"`
+	Mode             string   `json:"mode" validate:"omitempty,oneof=whitelist blacklist"`
 	AllowedCountries []string `json:"allowed_countries" validate:"omitempty,dive,len=2"`
 }
 
@@ -663,16 +658,6 @@ func (h *ConfigHandle) applyIntelConfig(raw json.RawMessage) error {
 	}
 
 	return nil
-}
-
-// IsValidModule 检查模块名是否合法（导出供 DynamicConfigService 等外部调用）
-func IsValidModule(module string) bool {
-	switch module {
-	case ModuleFailGuard, ModuleWAF, ModuleRateLimit, ModuleAnomalyDetection, ModuleGeoBlocking, ModuleIntel:
-		return true
-	default:
-		return false
-	}
 }
 
 // boolValue 如果 ptr 不为 nil 则返回 *ptr，否则返回 def
@@ -825,16 +810,10 @@ func validateAnomalyNestedFields(baseline *anomaly.BaselineConfig, attacks *anom
 // isValidCronExpr 做基本的 cron 表达式格式校验（5段或6段，每段为合法值）
 // 注意：不做完整的 cron 语义校验（如 "2月30日"），仅防止明显非法输入
 func isValidCronExpr(expr string) bool {
-	parts := []rune(expr)
-	// 至少5个段 (分 时 日 月 周)，最多6或7个段 (含秒和/或年)
-	if len(parts) < 5 || len(parts) > 20 {
+	parts := strings.Fields(expr)
+	// 至少5个段 (分 时 日 月 周)，最多7个段 (含秒和/或年)
+	if len(parts) < 5 || len(parts) > 7 {
 		return false
-	}
-	// 简单检查：不能包含空格以外的控制字符
-	for _, ch := range parts {
-		if ch <= 0x20 && ch != ' ' && ch != '\t' {
-			return false
-		}
 	}
 	return true
 }

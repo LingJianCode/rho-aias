@@ -23,6 +23,7 @@ type Monitor struct {
 	cfg     *config.FailGuardConfig
 	watcher *watcher.LogWatcher
 	cron    *cron.Cron
+	running bool
 
 	// FailGuard 特有的字段
 	failRegex   []*regexp.Regexp
@@ -140,6 +141,7 @@ func (m *Monitor) Start() error {
 
 	// 启动定时任务
 	m.cron.Start()
+	m.running = true
 
 	logger.Infof("[FailGuard] Monitor started, mode=%s, log=%s, max_retry=%d, find_time=%ds, ban_duration=%ds",
 		m.cfg.Mode, m.cfg.LogPath, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
@@ -152,6 +154,7 @@ func (m *Monitor) Stop() {
 	if m.cron != nil {
 		m.cron.Stop()
 	}
+	m.running = false
 	m.watcher.Stop()
 	logger.Info("[FailGuard] Monitor stopped")
 }
@@ -330,5 +333,5 @@ func (m *Monitor) IsBanned(ip string) bool {
 
 // IsRunning 检查监控器是否正在运行
 func (m *Monitor) IsRunning() bool {
-	return m.cron != nil
+	return m.running
 }

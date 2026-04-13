@@ -11,16 +11,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// 支持动态配置的合法模块名（与 handles.IsValidModule 保持一致）
-var validModules = map[string]bool{
-	"failguard":          true,
-	"waf":                true,
-	"rate_limit":         true,
-	"anomaly_detection":  true,
-	"geo_blocking":       true,
-	"intel":              true,
-}
-
 // DynamicConfigService 动态配置服务
 // 封装 dynamic_configs 表的 CRUD 操作
 type DynamicConfigService struct {
@@ -49,7 +39,7 @@ func (s *DynamicConfigService) Get(module string) (*models.DynamicConfig, error)
 // Set 设置指定模块的动态配置（upsert）
 func (s *DynamicConfigService) Set(module string, value interface{}) error {
 	// 在模型层校验 module 合法性，防止写入非法值
-	if !validModules[module] {
+	if !models.IsValidModule(module) {
 		return fmt.Errorf("invalid module name: %q, supported: failguard, waf, rate_limit, anomaly_detection, geo_blocking, intel", module)
 	}
 

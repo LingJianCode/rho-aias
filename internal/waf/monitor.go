@@ -33,6 +33,7 @@ type Monitor struct {
 	cfg     *config.WAFConfig
 	watcher *watcher.LogWatcher
 	cron    *cron.Cron
+	running bool
 
 	// 日志解析正则表达式
 	ipRegex *regexp.Regexp
@@ -88,6 +89,7 @@ func (m *Monitor) Start() error {
 		return fmt.Errorf("failed to add cleanup cron job: %w", err)
 	}
 	m.cron.Start()
+	m.running = true
 
 	logger.Infof("[WAF] Monitor started, ban_duration=%d seconds, log_path=%s", m.cfg.BanDuration, logPath)
 	return nil
@@ -98,6 +100,7 @@ func (m *Monitor) Stop() {
 	if m.cron != nil {
 		m.cron.Stop()
 	}
+	m.running = false
 	m.watcher.Stop()
 	logger.Info("[WAF] Monitor stopped")
 }
@@ -172,5 +175,5 @@ func (m *Monitor) IsBanned(ip string) bool {
 
 // IsRunning 检查监控器是否正在运行
 func (m *Monitor) IsRunning() bool {
-	return m.cron != nil
+	return m.running
 }
