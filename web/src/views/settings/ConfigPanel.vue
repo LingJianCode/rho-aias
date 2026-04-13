@@ -1,5 +1,8 @@
 <template>
   <div class="config-panel">
+    <div class="page-header">
+      <h2>防护策略配置</h2>
+    </div>
     <el-alert
       :type="saveStatus === 'success' ? 'success' : saveStatus === 'error' ? 'error' : 'info'"
       :closable="false"
@@ -52,7 +55,7 @@
               </el-select>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="handleSave('failguard', failguard)" :loading="saving">保存</el-button>
+              <el-button type="primary" @click="prepareSave('failguard', failguard)" :loading="saving">保存</el-button>
             </el-form-item>
           </el-form>
         </template>
@@ -68,7 +71,7 @@
               <el-input-number v-model="waf.ban_duration" :min="1" :max="31536000" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="handleSave('waf', waf)" :loading="saving">保存</el-button>
+              <el-button type="primary" @click="prepareSave('waf', waf)" :loading="saving">保存</el-button>
             </el-form-item>
           </el-form>
         </template>
@@ -84,7 +87,7 @@
               <el-input-number v-model="rate_limit.ban_duration" :min="1" :max="31536000" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="handleSave('rate_limit', rate_limit)" :loading="saving">保存</el-button>
+              <el-button type="primary" @click="prepareSave('rate_limit', rate_limit)" :loading="saving">保存</el-button>
             </el-form-item>
           </el-form>
         </template>
@@ -113,7 +116,7 @@
               <el-input-number v-model="baseline.bytes_per_sec" :min="0" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="handleSave('anomaly_detection', { ...anomaly, baseline })" :loading="saving">保存</el-button>
+              <el-button type="primary" @click="prepareSave('anomaly_detection', { ...anomaly, baseline })" :loading="saving">保存</el-button>
             </el-form-item>
           </el-form>
         </template>
@@ -148,7 +151,7 @@
               </el-select>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="handleSave('geo_blocking', geo)" :loading="saving">保存</el-button>
+              <el-button type="primary" @click="prepareSave('geo_blocking', geo)" :loading="saving">保存</el-button>
             </el-form-item>
           </el-form>
         </template>
@@ -176,12 +179,45 @@
               </el-form>
             </div>
             <el-form-item>
-              <el-button type="primary" @click="handleSave('intel', intel)" :loading="saving">保存</el-button>
+              <el-button type="primary" @click="prepareSave('intel', intel)" :loading="saving">保存</el-button>
             </el-form-item>
           </el-form>
         </template>
       </div>
     </div>
+
+    <!-- 变更确认对话框 -->
+    <el-dialog
+      v-model="confirmDialogVisible"
+      title="确认配置变更"
+      width="560px"
+      :close-on-click-modal="false"
+    >
+      <div class="confirm-content">
+        <p class="confirm-intro">以下配置项将被修改，<strong>变更即时生效</strong>：</p>
+        <div class="module-diff-header">{{ pendingModuleName }}</div>
+        <div class="diff-list" v-if="diffItems.length">
+          <div
+            v-for="(item, index) in diffItems"
+            :key="index"
+            class="diff-item"
+            :class="{ 'diff-danger': item.dangerous }"
+          >
+            <span class="diff-label">{{ item.label }}</span>
+            <span class="diff-old">{{ item.oldFormatted }}</span>
+            <span class="diff-arrow">→</span>
+            <span class="diff-new">{{ item.newFormatted }}</span>
+          </div>
+        </div>
+        <el-alert v-if="hasDangerousChange" type="warning" :closable="false" show-icon style="margin-top: 12px">
+          部分关键安全参数变更可能影响现有连接或防护策略，请确认操作。
+        </el-alert>
+      </div>
+      <template #footer>
+        <el-button @click="confirmDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmAndSave" :loading="saving">确认保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -197,6 +233,183 @@ const saving = ref(false)
 const activeModule = ref<ConfigModuleName>('failguard')
 const saveStatus = ref<'success' | 'error' | ''>('')
 const saveMessage = ref('')
+
+// 确认对话框状态
+const confirmDialogVisible = ref(false)
+const pendingModule = ref<ConfigModuleName | null>(null)
+const pendingData = ref<Record<string, unknown>>({})
+const pendingModuleName = ref('')
+const diffItems = ref<{ label: string; oldFormatted: string; newFormatted: string; dangerous: boolean }[]>([])
+const hasDangerousChange = ref(false)
+
+// 原始值快照（用于计算 diff）
+const originalSnapshot = ref<Record<string, Record<string, unknown>>>({})
+
+// 字段标签映射
+const fieldLabels: Record<string, Record<string, string>> = {
+  failguard: {
+    enabled: '启用状态',
+    max_retry: '最大重试次数',
+    find_time: '检测时间窗口(秒)',
+    ban_duration: '封禁时长(秒)',
+    mode: '检测模式',
+  },
+  waf: {
+    enabled: '启用状态',
+    ban_duration: '封禁时长(秒)',
+  },
+  rate_limit: {
+    enabled: '启用状态',
+    ban_duration: '封禁时长(秒)',
+  },
+  anomaly_detection: {
+    enabled: '启用状态',
+    min_packets: '最小包阈值',
+    ports: '监控端口列表',
+    'baseline.packets_per_sec': '每秒包数阈值',
+    'baseline.bytes_per_sec': '每秒字节数阈值',
+  },
+  geo_blocking: {
+    enabled: '启用状态',
+    mode: '运行模式',
+    allowed_countries: '国家/地区列表',
+  },
+  intel: {
+    enabled: '启用状态',
+  },
+}
+
+// 危险操作判定：关闭已启用的核心模块
+function isDangerous(module: string, field: string, oldValue: unknown, newValue: unknown): boolean {
+  if (field === 'enabled') return oldValue === true && newValue === false
+  return false
+}
+
+// 格式化值用于显示
+function formatDiffValue(val: unknown): string {
+  if (val === undefined || val === null) return '-'
+  if (typeof val === 'boolean') return val ? '启用' : '禁用'
+  if (Array.isArray(val)) {
+    if (val.length === 0) return '(空)'
+    return (val as unknown[]).join(', ')
+  }
+  return String(val)
+}
+
+// 模式映射中文
+const modeLabels: Record<string, string> = {
+  normal: '正常模式',
+  ddos: 'DDoS 防护模式',
+  aggressive: '激进模式',
+  whitelist: '白名单模式',
+  blacklist: '黑名单模式',
+}
+
+// 计算 diff
+function computeDiff(module: ConfigModuleName, currentData: Record<string, unknown>) {
+  const orig = originalSnapshot.value[module]
+  if (!orig) return []
+
+  const items: typeof diffItems.value = []
+  let dangerous = false
+
+  const labels = fieldLabels[module] || {}
+
+  // 遍历当前数据的所有字段
+  function compareFields(data: Record<string, unknown>, prefix = '') {
+    for (const [key, newValue] of Object.entries(data)) {
+      const fullKey = prefix ? `${prefix}.${key}` : key
+
+      if (typeof newValue === 'object' && newValue !== null && !Array.isArray(newValue)) {
+        // 嵌套对象递归比较
+        const nestedOrig = prefix ? getNested(orig, prefix) : orig
+        if (nestedOrig && typeof nestedOrig === 'object' && !Array.isArray(nestedOrig)) {
+          compareFields(newValue as Record<string, unknown>, fullKey)
+        }
+        continue
+      }
+
+      const oldVal = prefix ? getNested(orig, fullKey) : orig[key]
+
+      // 深度比较
+      if (!deepEqual(oldVal, newValue)) {
+        const label = labels[fullKey] || key
+        let newFmt = formatDiffValue(newValue)
+        let oldFmt = formatDiffValue(oldVal)
+
+        // 特殊格式化
+        if (fullKey.endsWith('.mode')) {
+          oldFmt = modeLabels[String(oldVal)] || oldFmt
+          newFmt = modeLabels[String(newValue)] || newFmt
+        }
+
+        const d = isDangerful(String(module), String(key), oldVal, newValue)
+        if (d) dangerous = true
+
+        items.push({
+          label,
+          oldFormatted: oldFmt,
+          newFormatted: newFmt,
+          dangerous: d,
+        })
+      }
+    }
+  }
+
+  compareFields(currentData)
+  hasDangerousChange.value = dangerous
+  return items
+}
+
+function getNested(obj: Record<string, unknown>, path: string): unknown {
+  return path.split('.').reduce((acc: unknown, key) => {
+    if (acc && typeof acc === 'object' && !Array.isArray(acc)) {
+      return (acc as Record<string, unknown>)[key]
+    }
+    return undefined
+  }, obj)
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (typeof a !== typeof b) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a)) {
+    return a.length === b.length && a.every((v, i) => deepEqual(v, b[i]))
+  }
+  if (typeof a === 'object') {
+    const ka = Object.keys(a).sort()
+    const kb = Object.keys(b).sort()
+    if (ka.length !== kb.length || ka.some((k, i) => k !== kb[i])) return false
+    return ka.every((k) => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]))
+  }
+  return false
+}
+
+// 快照当前模块的原始值
+function takeSnapshot(module: ConfigModuleName) {
+  switch (module) {
+    case 'failguard':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(failguard))
+      break
+    case 'waf':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(waf))
+      break
+    case 'rate_limit':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(rate_limit))
+      break
+    case 'anomaly_detection':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify({ ...anomaly, baseline }))
+      break
+    case 'geo_blocking':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(geo))
+      break
+    case 'intel':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(intel))
+      break
+  }
+}
 
 const modules: { key: ConfigModuleName; label: string; icon: string }[] = [
   { key: 'failguard', label: 'SSH 防爆破', icon: 'Lock' },
@@ -245,18 +458,45 @@ async function loadModuleConfig(module: ConfigModuleName) {
     }
     else if (module === 'geo_blocking') Object.assign(geo, data)
     else if (module === 'intel') Object.assign(intel, { enabled: data.enabled, sources: data.sources || {} })
+
+    // 加载完成后快照原始值
+    takeSnapshot(module)
   } finally {
     loading.value = false
   }
 }
 
-async function handleSave(module: ConfigModuleName, data: Record<string, unknown>) {
+/** 点击保存按钮 → 计算弹窗 */
+function prepareSave(module: ConfigModuleName, data: Record<string, unknown>) {
+  const diff = computeDiff(module, data)
+
+  if (diff.length === 0) {
+    ElMessage.info('没有检测到配置变更')
+    return
+  }
+
+  pendingModule.value = module
+  pendingData.value = data
+  pendingModuleName.value = modules.find(m => m.key === module)?.label || module
+  diffItems.value = diff
+  confirmDialogVisible.value = true
+}
+
+/** 对话框确认 → 执行实际保存 */
+async function confirmAndSave() {
+  const module = pendingModule.value
+  const data = pendingData.value
+  if (!module) return
+
   saving.value = true
   try {
     await updateModuleConfig(module, data)
-    ElMessage.success(`${modules.find(m => m.key === module)?.label} 配置已保存`)
+    ElMessage.success(`${pendingModuleName.value} 配置已保存`)
     saveStatus.value = 'success'
     saveMessage.value = '配置已保存，变更即时生效'
+    confirmDialogVisible.value = false
+    // 更新快照为最新值
+    takeSnapshot(module)
   } catch {
     saveStatus.value = 'error'
     saveMessage.value = '保存失败，请检查输入或权限'
@@ -269,6 +509,11 @@ onMounted(() => loadModuleConfig(activeModule.value))
 </script>
 
 <style lang="scss" scoped>
+.page-header {
+  margin-bottom: 20px;
+  h2 { margin: 0; }
+}
+
 .config-layout {
   display: flex;
   gap: 20px;
@@ -321,5 +566,70 @@ onMounted(() => loadModuleConfig(activeModule.value))
   font-size: 12px;
   color: var(--el-text-color-secondary);
   margin-top: 4px;
+}
+
+/* ---- 确认对话框样式 ---- */
+.confirm-intro {
+  color: var(--el-text-color-regular);
+  margin: 0 0 12px;
+}
+
+.module-diff-header {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--el-color-primary);
+  padding: 8px 12px;
+  background: var(--el-color-primary-light-9);
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+.diff-list {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.diff-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+
+  &:not(:last-child) {
+    border-bottom: 1px solid var(--el-border-color-extra-light);
+  }
+
+  &.diff-danger {
+    .diff-label, .diff-new { color: var(--el-color-danger); }
+    .diff-new { font-weight: 600; }
+  }
+}
+
+.diff-label {
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  min-width: 110px;
+  flex-shrink: 0;
+}
+
+.diff-old {
+  color: var(--el-text-color-placeholder);
+  text-decoration: line-through;
+  min-width: 60px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.diff-arrow {
+  color: var(--el-text-color-placeholder);
+  flex-shrink: 0;
+}
+
+.diff-new {
+  color: var(--el-color-success);
+  font-weight: 500;
+  word-break: break-all;
 }
 </style>

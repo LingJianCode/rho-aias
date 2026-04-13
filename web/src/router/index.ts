@@ -27,8 +27,12 @@ const routes: RouteRecordRaw[] = [
       // 安全态势（只读监控）
       { path: 'security', name: 'Security', component: () => import('@/views/security/SecurityView.vue') },
 
-      // 系统设置（配置 + 管理）
-      { path: 'settings', name: 'Settings', component: () => import('@/views/settings/SettingsView.vue'), meta: { requiresAdmin: true } },
+      // 系统设置
+      { path: 'settings', redirect: '/settings/config' },
+      { path: 'settings/config', name: 'Config', component: () => import('@/views/settings/ConfigPanel.vue'), meta: { title: '防护策略配置', requiresAdmin: true } },
+      { path: 'settings/users', name: 'Users', component: () => import('@/views/settings/UsersView.vue'), meta: { title: '用户管理', requiresAdmin: true } },
+      { path: 'settings/api-keys', name: 'ApiKeys', component: () => import('@/views/settings/ApiKeysView.vue'), meta: { title: 'API Keys', requiresAdmin: true } },
+      { path: 'settings/audit', name: 'Audit', component: () => import('@/views/settings/AuditPanel.vue'), meta: { title: '审计日志', requiresAdmin: true } },
     ],
   },
   { path: '/403', name: 'Forbidden', component: () => import('@/views/error/403.vue') },

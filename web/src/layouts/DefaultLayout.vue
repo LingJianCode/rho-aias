@@ -36,10 +36,16 @@
           <el-icon><Monitor /></el-icon>
           <template #title>安全态势</template>
         </el-menu-item>
-        <el-menu-item index="/settings" v-if="authStore.isAdmin || true">
-          <el-icon><Setting /></el-icon>
-          <template #title>系统设置</template>
-        </el-menu-item>
+        <el-sub-menu index="settings" v-if="authStore.isAdmin || true">
+          <template #title>
+            <el-icon><Setting /></el-icon>
+            <span>系统设置</span>
+          </template>
+          <el-menu-item index="/settings/config">防护策略配置</el-menu-item>
+          <el-menu-item index="/settings/users">用户管理</el-menu-item>
+          <el-menu-item index="/settings/api-keys">API Keys</el-menu-item>
+          <el-menu-item index="/settings/audit" v-if="authStore.isAdmin">审计日志</el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
     <el-container>

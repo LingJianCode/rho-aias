@@ -1,5 +1,8 @@
 <template>
   <div class="audit-panel">
+    <div class="page-header">
+      <h2>审计日志</h2>
+    </div>
     <!-- 筛选区 -->
     <el-card shadow="never" class="filter-card">
       <el-form :inline="true" :model="filters">
@@ -228,6 +231,11 @@ onMounted(() => fetchLogs())
 </script>
 
 <style lang="scss" scoped>
+.page-header {
+  margin-bottom: 20px;
+  h2 { margin: 0; }
+}
+
 .filter-card {
   :deep(.el-card__body) {
     padding-bottom: 2px;

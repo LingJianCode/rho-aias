@@ -4,7 +4,7 @@
       <h2>封禁记录</h2>
     </div>
 
-    <el-row :gutter="20" class="stats-row">
+    <el-row :gutter="12" class="stats-row">
       <el-col :span="6">
         <StatsCard label="总封禁数" :value="stats.total" :icon="Lock" icon-color="#409eff" />
       </el-col>

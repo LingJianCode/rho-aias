@@ -4,78 +4,67 @@
       <h2>阻断日志</h2>
     </div>
 
-    <el-row :gutter="20" class="stats-row">
+    <el-row :gutter="12" class="stats-row">
       <el-col :span="6">
-        <el-card shadow="hover">
-          <div class="stat-item">
-            <div class="stat-value">{{ formatNumber(stats.total_blocks) }}</div>
-            <div class="stat-label">阻断总数</div>
-          </div>
-        </el-card>
+        <StatsCard label="阻断总数" :value="stats.total_blocks" :icon="DataLine" icon-color="#409eff" />
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover">
-          <div class="stat-item">
-            <div class="stat-value">{{ formatNumber(stats.unique_ips) }}</div>
-            <div class="stat-label">阻断 IP 数</div>
-          </div>
-        </el-card>
+        <StatsCard label="阻断 IP 数" :value="stats.unique_ips" :icon="Monitor" icon-color="#67c23a" />
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover">
-          <div class="stat-item">
-            <div class="stat-value">{{ stats.top_countries.length }}</div>
-            <div class="stat-label">涉及国家</div>
-          </div>
-        </el-card>
+        <StatsCard label="涉及国家" :value="stats.top_countries.length" :icon="Location" icon-color="#e6a23c" />
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover">
-          <div class="stat-item">
-            <div class="stat-value">{{ stats.top_sources.length }}</div>
-            <div class="stat-label">数据来源</div>
-          </div>
-        </el-card>
+        <StatsCard label="数据来源" :value="stats.top_sources.length" :icon="Connection" icon-color="#909399" />
       </el-col>
     </el-row>
 
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <div class="filter-row">
-            <el-date-picker
-              v-model="dateRange"
-              type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              @change="handleFilter"
-            />
-            <el-input
-              v-model="ipFilter"
-              placeholder="搜索 IP"
-              clearable
-              style="width: 200px"
-              @clear="handleFilter"
-              @keyup.enter="handleFilter"
-            />
-            <el-select v-model="sourceFilter" placeholder="来源" clearable @change="handleFilter">
-              <el-option label="全部" value="" />
-              <el-option label="手动" value="manual" />
-              <!-- 注：大数据源（ipsum、spamhaus）规则量巨大，不在列表页展示 -->
-              <el-option label="WAF" value="waf" />
-              <el-option label="DDoS" value="ddos" />
-              <el-option label="异常检测" value="anomaly" />
-              <el-option label="FailGuard" value="failguard" />
-            </el-select>
-            <el-button type="primary" @click="handleFilter">搜索</el-button>
-          </div>
+    <el-card class="filter-card">
+      <el-form :inline="true" :model="filters" class="filter-form">
+        <el-form-item label="时间范围">
+          <el-date-picker
+            v-model="dateRange"
+            type="datetimerange"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            format="YYYY-MM-DD HH:mm:ss"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            :shortcuts="timeShortcuts"
+            style="width: 360px"
+          />
+        </el-form-item>
+        <el-form-item label="搜索 IP">
+          <el-input
+            v-model="filters.ip"
+            placeholder="输入 IP"
+            clearable
+            style="width: 180px"
+            @clear="handleSearch"
+            @keyup.enter="handleSearch"
+          />
+        </el-form-item>
+        <el-form-item label="来源">
+          <el-select v-model="filters.source" placeholder="全部来源" clearable style="width: 140px" @change="handleSearch">
+            <el-option label="手动" value="manual" />
+            <!-- 注：大数据源（ipsum、spamhaus）规则量巨大，不在列表页展示 -->
+            <el-option label="WAF" value="waf" />
+            <el-option label="DDoS" value="ddos" />
+            <el-option label="异常检测" value="anomaly" />
+            <el-option label="FailGuard" value="failguard" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
           <el-button type="danger" v-if="authStore.hasPermission('blocklog:clear')" @click="handleClear">
             清除日志
           </el-button>
-        </div>
-      </template>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card>
 
       <el-table :data="logs" v-loading="loading" stripe>
         <el-table-column prop="timestamp" label="时间" width="180">
@@ -118,9 +107,11 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { DataLine, Monitor, Location, Connection } from '@element-plus/icons-vue'
+import StatsCard from '@/components/StatsCard.vue'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
-import { formatDateTime, formatBytes, formatNumber } from '@/utils/format'
+import { formatDateTime, formatBytes } from '@/utils/format'
 import { useConfirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import { getBlockLogs, getBlockLogStats, clearBlockLogs } from '@/api/blocklog'
@@ -136,8 +127,39 @@ const pageSize = ref(20)
 const total = ref(0)
 
 const dateRange = ref<[string, string] | null>(null)
-const ipFilter = ref('')
-const sourceFilter = ref('')
+const filters = reactive({
+  ip: '',
+  source: '',
+})
+
+const timeShortcuts = [
+  {
+    text: '今天',
+    value: () => {
+      const start = new Date()
+      start.setHours(0, 0, 0, 0)
+      return [start, new Date()]
+    },
+  },
+  {
+    text: '最近7天',
+    value: () => {
+      const end = new Date()
+      const start = new Date()
+      start.setTime(start.getTime() - 7 * 24 * 3600 * 1000)
+      return [start, end]
+    },
+  },
+  {
+    text: '最近30天',
+    value: () => {
+      const end = new Date()
+      const start = new Date()
+      start.setTime(start.getTime() - 30 * 24 * 3600 * 1000)
+      return [start, end]
+    },
+  },
+]
 
 const stats = reactive<BlockLogStats>({
   total_blocks: 0,
@@ -152,11 +174,7 @@ async function fetchStats() {
     const res = await getBlockLogStats()
     Object.assign(stats, res.data)
   } catch {
-    // 模拟数据（已注释保留作为格式提示）：
-    // stats.total_blocks = 125846
-    // stats.unique_ips = 8432
-    // stats.top_countries = [{ country: 'CN', count: 5000 }, { country: 'US', count: 3000 }]
-    // stats.top_sources = [{ source: 'waf', count: 10000 }, { source: 'ddos', count: 8000 }]
+    // Error handled
   }
 }
 
@@ -168,8 +186,8 @@ async function fetchLogs() {
       page_size: pageSize.value,
       start_time: dateRange.value?.[0],
       end_time: dateRange.value?.[1],
-      ip: ipFilter.value || undefined,
-      source: sourceFilter.value || undefined,
+      ip: filters.ip || undefined,
+      source: filters.source || undefined,
     })
     logs.value = res.data.items
     total.value = res.data.total
@@ -181,7 +199,15 @@ async function fetchLogs() {
   }
 }
 
-function handleFilter() {
+function handleSearch() {
+  page.value = 1
+  fetchLogs()
+}
+
+function handleReset() {
+  dateRange.value = null
+  filters.ip = ''
+  filters.source = ''
   page.value = 1
   fetchLogs()
 }
@@ -205,27 +231,14 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
-.stat-item {
-  text-align: center;
-  padding: 8px 0;
+.filter-card {
+  margin-bottom: 16px;
 }
 
-.stat-value {
-  font-size: 28px;
-  font-weight: 600;
-  color: var(--el-color-primary);
-}
-
-.stat-label {
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
-}
-
-.filter-row {
+.filter-form {
   display: flex;
-  gap: 12px;
   flex-wrap: wrap;
+  gap: 8px;
 }
 
 .pagination-wrapper {
