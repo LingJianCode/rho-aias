@@ -193,6 +193,38 @@ func (s *Syncer) LoadAll(data *GeoIPData, config *GeoConfig) error {
 	return nil
 }
 
+// RemoveAll 从内核 eBPF map 中移除所有 GeoIP 规则
+// 用于模块禁用时立即清理地域封禁数据
+func (s *Syncer) RemoveAll() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. 获取当前内核中的所有 GeoIP 规则
+	currentRules, err := s.xdp.GetGeoIPRules()
+	if err != nil {
+		return fmt.Errorf("get current rules failed: %w", err)
+	}
+
+	if len(currentRules) == 0 {
+		logger.Info("[GeoSyncer] No GeoIP rules in kernel, nothing to clean")
+		return nil
+	}
+
+	// 2. 批量删除所有规则
+	if err := s.batchDelete(currentRules); err != nil {
+		return fmt.Errorf("batch delete all rules failed: %w", err)
+	}
+	logger.Infof("[GeoSyncer] Removed %d GeoIP rules from kernel", len(currentRules))
+
+	// 3. 关闭地域过滤功能
+	if err := s.xdp.UpdateGeoConfig(false, 0); err != nil {
+		return fmt.Errorf("disable geo config failed: %w", err)
+	}
+	logger.Info("[GeoSyncer] Geo-blocking DEACTIVATED")
+
+	return nil
+}
+
 // addPrivateNetworks 添加私有网段到 GeoIP whitelist
 // 使用特殊国家代码 "PN" (Private Network)
 // RFC 1918 私有地址范围:

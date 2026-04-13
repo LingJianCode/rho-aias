@@ -381,22 +381,45 @@ func (m *Manager) TriggerUpdate() error {
 
 // UpdateConfig 更新 GeoIP 配置（扩展支持 enabled 切换）
 func (m *Manager) UpdateConfig(enabled bool, mode string, countries []string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	wasEnabled := m.config.Enabled
 
+	m.mu.Lock()
 	m.config.Enabled = enabled
 	m.status.Enabled = enabled
 	m.status.Mode = mode
 	m.status.AllowedCountries = countries
 	m.config.Mode = mode
 	m.config.AllowedCountries = countries
+	m.mu.Unlock()
 
+	// 更新内核配置总开关（enabled/mode）
 	if err := m.updateKernelConfig(); err != nil {
 		return err
 	}
 
-	if enabled {
-		go m.updateAllSources()
+	switch {
+	case enabled && !wasEnabled:
+		// 从禁用→启用：立即拉取数据并同步到 eBPF map
+		go func() {
+			logger.Info("[GeoBlocking] Immediate fetch triggered by config enable")
+			m.updateAllSources()
+			if err := m.saveCache(); err != nil {
+				logger.Errorf("[GeoBlocking] Failed to save cache after immediate fetch: %v", err)
+			}
+		}()
+	case !enabled && wasEnabled:
+		// 从启用→禁用：立即清理所有 GeoIP 规则并从 eBPF map 中移除
+		go func() {
+			logger.Info("[GeoBlocking] Immediate cleanup triggered by config disable")
+			if err := m.syncer.RemoveAll(); err != nil {
+				logger.Errorf("[GeoBlocking] Cleanup failed: %v", err)
+			} else {
+				logger.Info("[GeoBlocking] Cleanup completed, all GeoIP rules removed from eBPF")
+			}
+			if err := m.saveCache(); err != nil {
+				logger.Errorf("[GeoBlocking] Failed to save cache after cleanup: %v", err)
+			}
+		}()
 	}
 
 	return nil

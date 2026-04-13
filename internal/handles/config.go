@@ -3,6 +3,7 @@ package handles
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -266,11 +267,11 @@ func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 	case models.ModuleAnomalyDetection:
 		return h.anomalyDetector.GetConfig()
 	case models.ModuleGeoBlocking:
-		if h.geoBlockingMgr != nil {
+		if h.geoBlockingMgr != nil && !isNilInterface(h.geoBlockingMgr) {
 			return h.geoBlockingMgr.GetConfig()
 		}
 	case models.ModuleIntel:
-		if h.intelMgr != nil {
+		if h.intelMgr != nil && !isNilInterface(h.intelMgr) {
 			return h.intelMgr.GetConfig()
 		}
 	}
@@ -590,7 +591,7 @@ type geoBlockingConfigRequest struct {
 }
 
 func (h *ConfigHandle) applyGeoBlockingConfig(raw json.RawMessage) error {
-	if h.geoBlockingMgr == nil {
+	if h.geoBlockingMgr == nil || isNilInterface(h.geoBlockingMgr) {
 		return fmt.Errorf("geo_blocking module is not initialized")
 	}
 
@@ -626,7 +627,7 @@ type intelSourceConfig struct {
 }
 
 func (h *ConfigHandle) applyIntelConfig(raw json.RawMessage) error {
-	if h.intelMgr == nil {
+	if h.intelMgr == nil || isNilInterface(h.intelMgr) {
 		return fmt.Errorf("intel module is not initialized")
 	}
 
@@ -677,6 +678,11 @@ func intValue(def int, ptr *int) int {
 }
 
 // mapBool 从 map[string]interface{} 中安全读取 bool 值
+// isNilInterface 检查接口值是否为 nil（包括 nil 指针赋值给接口的"非 nil interface, nil data"情况）
+func isNilInterface(i any) bool {
+	return reflect.ValueOf(i).IsNil()
+}
+
 func mapBool(m map[string]interface{}, key string, fallback bool) bool {
 	v, ok := m[key]
 	if !ok {
