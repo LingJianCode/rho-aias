@@ -591,7 +591,7 @@ type geoBlockingConfigRequest struct {
 }
 
 func (h *ConfigHandle) applyGeoBlockingConfig(raw json.RawMessage) error {
-	if h.geoBlockingMgr == nil {
+	if h.geoBlockingMgr == nil || isNilInterface(h.geoBlockingMgr) {
 		return fmt.Errorf("geo_blocking module is not initialized")
 	}
 
@@ -627,7 +627,7 @@ type intelSourceConfig struct {
 }
 
 func (h *ConfigHandle) applyIntelConfig(raw json.RawMessage) error {
-	if h.intelMgr == nil {
+	if h.intelMgr == nil || isNilInterface(h.intelMgr) {
 		return fmt.Errorf("intel module is not initialized")
 	}
 

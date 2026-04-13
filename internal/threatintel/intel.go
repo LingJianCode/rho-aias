@@ -370,14 +370,16 @@ func (m *Manager) TriggerUpdate() error {
 
 // UpdateSourceConfig 热更新情报源配置（单个源的 enabled/schedule/url）
 func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule string, url string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	wasEnabled := false
 
+	m.mu.Lock()
 	src, exists := m.config.Sources[sourceID]
 	if !exists {
+		m.mu.Unlock()
 		return fmt.Errorf("source %s not found", sourceID)
 	}
 
+	wasEnabled = src.Enabled
 	src.Enabled = enabled
 	if schedule != "" {
 		src.Schedule = schedule
@@ -401,6 +403,43 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule str
 				logger.Warnf("[ThreatIntel] Failed to reschedule %s: %v", sourceID, err)
 			}
 		}
+	}
+	m.mu.Unlock()
+
+	// 状态切换时的即时操作
+	switch {
+	case enabled && !wasEnabled:
+		// 从禁用→启用：立即拉取一次数据并同步到 eBPF map
+		go func() {
+			logger.Infof("[ThreatIntel] [%s] Immediate fetch triggered by config change", sourceID)
+			if err := m.updateSource(SourceID(sourceID), src); err != nil {
+				logger.Errorf("[ThreatIntel] [%s] Immediate fetch failed: %v", sourceID, err)
+				m.updateSourceStatus(SourceID(sourceID), false, 0, err.Error())
+			} else {
+				logger.Infof("[ThreatIntel] [%s] Immediate fetch completed, rules synced to eBPF", sourceID)
+			}
+			if err := m.saveCache(); err != nil {
+				logger.Errorf("[ThreatIntel] Failed to save cache after immediate fetch: %v", err)
+			}
+		}()
+	case !enabled && wasEnabled:
+		// 从启用→禁用：立即清理该源的规则并从 eBPF map 中移除
+		go func() {
+			sourceMask := sourceIDToMask(SourceID(sourceID))
+			logger.Infof("[ThreatIntel] [%s] Immediate cleanup triggered by config change (mask=0x%x)", sourceID, sourceMask)
+			if err := m.syncer.RemoveBySourceMask(sourceMask); err != nil {
+				logger.Errorf("[ThreatIntel] [%s] Cleanup failed: %v", sourceID, err)
+			} else {
+				logger.Infof("[ThreatIntel] [%s] Cleanup completed, rules removed from eBPF", sourceID)
+			}
+			// 清理内存中的源规则缓存
+			m.mu.Lock()
+			delete(m.sourceRules, SourceID(sourceID))
+			m.mu.Unlock()
+			if err := m.saveCache(); err != nil {
+				logger.Errorf("[ThreatIntel] Failed to save cache after cleanup: %v", err)
+			}
+		}()
 	}
 
 	logger.Infof("[ThreatIntel] Source config updated: %s, enabled=%v, schedule=%s", sourceID, enabled, schedule)
