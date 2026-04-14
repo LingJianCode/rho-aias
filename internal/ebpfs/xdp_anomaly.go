@@ -66,21 +66,4 @@ func (x *Xdp) SetAnomalyPortFilter(enabled bool, ports []uint32) error {
 	return nil
 }
 
-// GetAnomalyConfig 获取当前异常检测采样配置
-func (x *Xdp) GetAnomalyConfig() (AnomalyConfig, error) {
-	key := uint32(0)
-	config := AnomalyConfig{}
-	if err := x.objects.AnomalyConfig.Lookup(&key, &config); err != nil {
-		return DefaultAnomalyConfig(), err
-	}
-	return config, nil
-}
 
-// IsAnomalyDetectionEnabled 检查异常检测是否启用
-func (x *Xdp) IsAnomalyDetectionEnabled() bool {
-	config, err := x.GetAnomalyConfig()
-	if err != nil {
-		return false
-	}
-	return config.Enabled == 1
-}

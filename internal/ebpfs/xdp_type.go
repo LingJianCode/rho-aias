@@ -203,8 +203,4 @@ func NewAnomalyConfig(enabled bool, sampleRate uint32) AnomalyConfig {
 	}
 }
 
-// DefaultAnomalyConfig 返回默认的异常检测配置
-// 默认关闭采样，采样率 100 (1%)
-func DefaultAnomalyConfig() AnomalyConfig {
-	return NewAnomalyConfig(false, 100)
-}
+

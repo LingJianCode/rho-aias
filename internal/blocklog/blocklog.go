@@ -12,13 +12,13 @@ import (
 
 // BlockRecord 阻断记录
 type BlockRecord struct {
-	Timestamp   int64    `json:"timestamp"`    // 阻断时间戳 (Unix 纳秒)
-	SrcIP       string   `json:"src_ip"`       // 源 IP 地址
-	DstIP       string   `json:"dst_ip"`       // 目标 IP 地址
-	MatchType   string   `json:"match_type"`   // 匹配类型 (ip4_exact, ip4_cidr, geo_block, etc.)
-	RuleSource  string   `json:"rule_source"`  // 规则来源 (manual, ipsum, spamhaus, geo)
-	CountryCode string   `json:"country_code"` // 国家代码 (仅 geo_block 时有值)
-	PacketSize  uint32   `json:"packet_size"`  // 数据包大小
+	Timestamp   int64  `json:"timestamp"`    // 阻断时间戳 (Unix 纳秒)
+	SrcIP       string `json:"src_ip"`       // 源 IP 地址
+	DstIP       string `json:"dst_ip"`       // 目标 IP 地址
+	MatchType   string `json:"match_type"`   // 匹配类型 (ip4_exact, ip4_cidr, geo_block, etc.)
+	RuleSource  string `json:"rule_source"`  // 规则来源 (manual, ipsum, spamhaus, geo)
+	CountryCode string `json:"country_code"` // 国家代码 (仅 geo_block 时有值)
+	PacketSize  uint32 `json:"packet_size"`  // 数据包大小
 }
 
 // BlockLog 阻断日志管理器
@@ -152,11 +152,11 @@ type RecordFilter struct {
 
 // Stats 统计信息
 type Stats struct {
-	TotalBlocked       int            `json:"total_blocked"`       // 总阻断数
-	ByMatchType        map[string]int `json:"by_match_type"`       // 按匹配类型统计
-	ByRuleSource       map[string]int `json:"by_rule_source"`      // 按规则来源统计
-	ByCountry          map[string]int `json:"by_country"`          // 按国家统计
-	TopBlockedIPs      []IPCount      `json:"top_blocked_ips"`     // 被阻断最多的 IP
+	TotalBlocked        int            `json:"total_blocked"`         // 总阻断数
+	ByMatchType         map[string]int `json:"by_match_type"`         // 按匹配类型统计
+	ByRuleSource        map[string]int `json:"by_rule_source"`        // 按规则来源统计
+	ByCountry           map[string]int `json:"by_country"`            // 按国家统计
+	TopBlockedIPs       []IPCount      `json:"top_blocked_ips"`       // 被阻断最多的 IP
 	TopBlockedCountries []CountryCount `json:"top_blocked_countries"` // 被阻断最多的国家
 }
 
@@ -178,11 +178,11 @@ func (bl *BlockLog) GetStats() Stats {
 	defer bl.mu.RUnlock()
 
 	stats := Stats{
-		TotalBlocked:       len(bl.records),
-		ByMatchType:        make(map[string]int),
-		ByRuleSource:       make(map[string]int),
-		ByCountry:          make(map[string]int),
-		TopBlockedIPs:      make([]IPCount, 0),
+		TotalBlocked:        len(bl.records),
+		ByMatchType:         make(map[string]int),
+		ByRuleSource:        make(map[string]int),
+		ByCountry:           make(map[string]int),
+		TopBlockedIPs:       make([]IPCount, 0),
 		TopBlockedCountries: make([]CountryCount, 0),
 	}
 
