@@ -120,13 +120,25 @@
         <!-- Geo Blocking -->
         <template v-else-if="activeModule === 'geo_blocking'">
           <h3>地域封禁</h3>
-          <el-form :model="geo" label-width="140px" style="max-width: 600px">
+          <el-form :model="geo" label-width="140px" style="max-width: 640px">
             <el-form-item label="启用状态">
               <el-switch v-model="geo.enabled" />
             </el-form-item>
-            <el-form-item label="调度周期">
-                  <el-input v-model="geo.schedule" placeholder="如 0 * * * *" />
+            <el-divider content-position="left">数据源配置</el-divider>
+            <div v-for="(src, name) in geo.sources" :key="name" style="margin-bottom: 20px; padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 4px;">
+              <h4 style="margin: 0 0 12px">{{ name }}</h4>
+              <el-form :model="src" label-width="80px">
+                <el-form-item label="启用">
+                  <el-switch v-model="src.enabled" />
                 </el-form-item>
+                <el-form-item label="调度周期">
+                  <el-input v-model="src.schedule" placeholder="如 0 * * * *" />
+                </el-form-item>
+                <el-form-item label="URL">
+                  <el-input v-model="src.url" placeholder="数据源 URL" />
+                </el-form-item>
+              </el-form>
+            </div>
             <el-form-item label="运行模式">
               <el-radio-group v-model="geo.mode">
                 <el-radio value="whitelist">白名单模式（仅允许列表中的国家）</el-radio>
@@ -298,6 +310,13 @@ const fieldLabels: Record<string, Record<string, string>> = {
   },
 }
 
+// 数据源子字段的通用标签（geo/intel 的 sources 内部共用）
+const sourceFieldLabels: Record<string, string> = {
+  enabled: '启用',
+  schedule: '调度周期',
+  url: 'URL',
+}
+
 // 危险操作判定：关闭已启用的核心模块
 function isDangerous(module: string, field: string, oldValue: unknown, newValue: unknown): boolean {
   if (field === 'enabled') return oldValue === true && newValue === false
@@ -352,7 +371,7 @@ function computeDiff(module: ConfigModuleName, currentData: Record<string, unkno
 
       // 深度比较
       if (!deepEqual(oldVal, newValue)) {
-        const label = labels[fullKey] || key
+        const label = labels[fullKey] || sourceFieldLabels[key] || key
         let newFmt = formatDiffValue(newValue)
         let oldFmt = formatDiffValue(oldVal)
 
@@ -450,7 +469,7 @@ const waf = reactive({ enabled: false, ban_duration: 3600 })
 const rate_limit = reactive({ enabled: false, ban_duration: 3600 })
 const baseline = reactive({ packets_per_sec: 0, bytes_per_sec: 0 })
 const anomaly = reactive({ enabled: false, min_packets: 10, ports: [80, 443] })
-const geo = reactive({ enabled: false, mode: 'whitelist' as string, allowed_countries: [] as string[], schedule: undefined as string | undefined })
+const geo = reactive({ enabled: false, mode: 'whitelist' as string, allowed_countries: [] as string[], sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
 const intel = reactive({ enabled: false, sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
 const xdpEvents = reactive({ enabled: false, sample_rate: 100 })
 
@@ -482,7 +501,7 @@ async function loadModuleConfig(module: ConfigModuleName) {
       Object.assign(anomaly, { enabled: data.enabled, min_packets: data.min_packets, ports: data.ports })
       if (data.baseline) Object.assign(baseline, data.baseline)
     }
-    else if (module === 'geo_blocking') Object.assign(geo, data)
+    else if (module === 'geo_blocking') Object.assign(geo, { enabled: data.enabled, mode: data.mode || 'whitelist', allowed_countries: data.allowed_countries || [], sources: data.sources || {} })
     else if (module === 'intel') Object.assign(intel, { enabled: data.enabled, sources: data.sources || {} })
     else if (module === 'xdp_events') Object.assign(xdpEvents, { enabled: data.enabled, sample_rate: data.sample_rate ?? 100 })
 
