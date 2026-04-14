@@ -8,8 +8,8 @@ import (
 
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
-	"rho-aias/internal/logger"
 	"rho-aias/internal/feed"
+	"rho-aias/internal/logger"
 
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
@@ -17,24 +17,24 @@ import (
 
 // Manager GeoIP 管理器
 type Manager struct {
-	config   *config.GeoBlockingConfig // GeoBlocking 配置
-	xdp      *ebpfs.Xdp                // XDP eBPF 程序接口
-	fetcher  *feed.Fetcher           // 数据获取器（公共）
-	parser   *Parser                   // 数据解析器
-	cache    *feed.Cache[CacheData]  // 持久化缓存（公共泛型）
-	syncer   *Syncer                   // 内核同步器
-	cron     *cron.Cron                // Cron 调度器
-	jobIDs   map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
-	done     chan struct{}             // 停止信号
-	mu       sync.RWMutex              // 读写锁
+	config  *config.GeoBlockingConfig // GeoBlocking 配置
+	xdp     *ebpfs.Xdp                // XDP eBPF 程序接口
+	fetcher *feed.Fetcher             // 数据获取器（公共）
+	parser  *Parser                   // 数据解析器
+	cache   *feed.Cache[CacheData]    // 持久化缓存（公共泛型）
+	syncer  *Syncer                   // 内核同步器
+	cron    *cron.Cron                // Cron 调度器
+	jobIDs  map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
+	done    chan struct{}             // 停止信号
+	mu      sync.RWMutex              // 读写锁
 
 	// 状态管理
 	status       *Status                    // 模块状态
 	sourceStatus map[SourceID]*SourceStatus // 各 GeoIP 源状态
 
 	// 数据库支持和并发控制（使用公共组件）
-	db            *gorm.DB                          // 数据库连接
-	sourceMutexes *feed.MutexPool[SourceID]       // 互斥锁池（公共）
+	db            *gorm.DB                  // 数据库连接
+	sourceMutexes *feed.MutexPool[SourceID] // 互斥锁池（公共）
 }
 
 // NewManager 创建新的 GeoIP 管理器
@@ -198,8 +198,8 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 	// 3. 同步到内核
 	geoConfig := &GeoConfig{
 		Enabled:              m.config.Enabled,
-		Mode:                  m.config.Mode,
-		AllowedCountries:      m.config.AllowedCountries,
+		Mode:                 m.config.Mode,
+		AllowedCountries:     m.config.AllowedCountries,
 		AllowPrivateNetworks: m.config.AllowPrivateNetworks,
 	}
 	if err := m.syncer.SyncToKernel(parsed, geoConfig); err != nil {
@@ -243,8 +243,8 @@ func (m *Manager) loadFromCache() error {
 
 		geoConfig := &GeoConfig{
 			Enabled:              cacheData.Config.Enabled,
-			Mode:                  cacheData.Config.Mode,
-			AllowedCountries:      cacheData.Config.AllowedCountries,
+			Mode:                 cacheData.Config.Mode,
+			AllowedCountries:     cacheData.Config.AllowedCountries,
 			AllowPrivateNetworks: m.config.AllowPrivateNetworks,
 		}
 		if err := m.syncer.LoadAll(&data, geoConfig); err != nil {
@@ -430,11 +430,82 @@ func (m *Manager) GetConfig() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	sources := make(map[string]interface{})
+	for id, src := range m.config.Sources {
+		sources[id] = map[string]interface{}{
+			"enabled":  src.Enabled,
+			"periodic": src.Periodic,
+			"schedule": src.Schedule,
+			"url":      src.URL,
+			"format":   src.Format,
+		}
+	}
+
 	return map[string]interface{}{
 		"enabled":           m.config.Enabled,
 		"mode":              m.config.Mode,
 		"allowed_countries": m.config.AllowedCountries,
+		"sources":           sources,
 	}
+}
+
+// UpdateSourceConfig 热更新 GeoIP 源配置（单个源的 enabled/periodic/schedule/url）
+func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, periodic bool, schedule string, url string) error {
+	m.mu.Lock()
+	src, exists := m.config.Sources[sourceID]
+	if !exists {
+		m.mu.Unlock()
+		return fmt.Errorf("geo source %s not found", sourceID)
+	}
+
+	src.Enabled = enabled
+	src.Periodic = periodic
+	if schedule != "" {
+		src.Schedule = schedule
+	}
+	if url != "" {
+		src.URL = url
+	}
+	m.config.Sources[sourceID] = src
+
+	// 如果模块已启动，需要重新调度 Cron 任务
+	if m.cron != nil {
+		// 移除旧的 Cron 任务
+		if oldJobID, ok := m.jobIDs[SourceID(sourceID)]; ok {
+			m.cron.Remove(oldJobID)
+			delete(m.jobIDs, SourceID(sourceID))
+		}
+
+		// 如果启用且需要周期调度，注册新的 Cron 任务
+		if enabled && periodic {
+			if err := m.scheduleSource(SourceID(sourceID), src); err != nil {
+				logger.Warnf("[GeoBlocking] Failed to reschedule %s: %v", sourceID, err)
+			} else {
+				logger.Infof("[GeoBlocking] [%s] Source config updated and rescheduled", sourceID)
+			}
+		} else if enabled && !periodic {
+			logger.Infof("[GeoBlocking] [%s] Source enabled but periodic update disabled", sourceID)
+		}
+	}
+	m.mu.Unlock()
+
+	logger.Infof("[GeoBlocking] [%s] Source config updated: enabled=%v, periodic=%v, schedule=%s, url=%s",
+		sourceID, enabled, periodic, schedule, url)
+
+	// 启用时立即拉取一次数据
+	go func() {
+		m.mu.RLock()
+		srcCfg := m.config.Sources[sourceID]
+		m.mu.RUnlock()
+		if err := m.updateSource(SourceID(sourceID), srcCfg); err != nil {
+			logger.Errorf("[GeoBlocking] [%s] Immediate fetch after config change failed: %v", sourceID, err)
+		}
+		if err := m.saveCache(); err != nil {
+			logger.Errorf("[GeoBlocking] Failed to save cache after source config update: %v", err)
+		}
+	}()
+
+	return nil
 }
 
 // Stop 停止 GeoIP 管理器

@@ -56,6 +56,7 @@ func (lm *LifecycleManager) ShutdownAll() {
 
 type GeoBlockingConfigUpdater interface {
 	UpdateConfig(enabled bool, mode string, countries []string) error
+	UpdateSourceConfig(sourceID string, enabled bool, periodic bool, schedule string, url string) error
 	GetConfig() map[string]interface{}
 }
 type IntelConfigUpdater interface {
@@ -332,7 +333,15 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
 		}
-		return h.validate.Struct(req)
+		if err := h.validate.Struct(req); err != nil {
+			return err
+		}
+		for sourceID, srcCfg := range req.Sources {
+			if srcCfg.Schedule != "" && !isValidCronExpr(srcCfg.Schedule) {
+				return fmt.Errorf("geo source '%s': invalid cron schedule '%s'", sourceID, srcCfg.Schedule)
+			}
+		}
+		return nil
 	case models.ModuleIntel:
 		var req intelConfigRequest
 		if err := json.Unmarshal(raw, &req); err != nil {

@@ -38,9 +38,17 @@ type anomalyDetectionConfigRequest struct {
 }
 
 type geoBlockingConfigRequest struct {
-	Enabled          *bool    `json:"enabled" validate:"omitempty"`
-	Mode             string   `json:"mode" validate:"omitempty,oneof=whitelist blacklist"`
-	AllowedCountries []string `json:"allowed_countries" validate:"omitempty,dive,len=2"`
+	Enabled          *bool                        `json:"enabled" validate:"omitempty"`
+	Mode             string                       `json:"mode" validate:"omitempty,oneof=whitelist blacklist"`
+	AllowedCountries []string                     `json:"allowed_countries" validate:"omitempty,dive,len=2"`
+	Sources          map[string]geoSourceConfig    `json:"sources" validate:"omitempty"`
+}
+
+type geoSourceConfig struct {
+	Enabled  *bool  `json:"enabled" validate:"omitempty"`
+	Periodic *bool  `json:"periodic" validate:"omitempty"`
+	Schedule string `json:"schedule" validate:"omitempty"`
+	URL      string `json:"url" validate:"omitempty"`
 }
 
 type intelConfigRequest struct {
@@ -214,7 +222,28 @@ func (h *ConfigHandle) applyGeoBlockingConfig(raw json.RawMessage) error {
 	enabled := boolValue(mapBool(current, "enabled", false), req.Enabled)
 	mode := req.Mode; if mode == "" { mode = mapString(current, "mode", "") }
 	countries := req.AllowedCountries; if countries == nil { countries = mapStringSlice(current, "allowed_countries") }
-	return h.geoBlockingMgr.UpdateConfig(enabled, mode, countries)
+	if err := h.geoBlockingMgr.UpdateConfig(enabled, mode, countries); err != nil {
+		return fmt.Errorf("failed to update geoblocking base config: %w", err)
+	}
+
+	// 处理单源配置更新
+	for sourceID, srcCfg := range req.Sources {
+		currentSrcMap, _ := current["sources"].(map[string]interface{})
+		defaultEnabled := true
+		defaultPeriodic := true
+		if srcMap, ok := currentSrcMap[sourceID]; ok {
+			if src, ok2 := srcMap.(map[string]interface{}); ok2 {
+				defaultEnabled = mapBool(src, "enabled", true)
+				defaultPeriodic = mapBool(src, "periodic", true)
+			}
+		}
+		srcEnabled := boolValue(defaultEnabled, srcCfg.Enabled)
+		srcPeriodic := boolValue(defaultPeriodic, srcCfg.Periodic)
+		if err := h.geoBlockingMgr.UpdateSourceConfig(sourceID, srcEnabled, srcPeriodic, srcCfg.Schedule, srcCfg.URL); err != nil {
+			logger.Warnf("[ConfigAPI] Failed to update geo source %s: %v", sourceID, err)
+		}
+	}
+	return nil
 }
 
 func (h *ConfigHandle) applyIntelConfig(raw json.RawMessage) error {
