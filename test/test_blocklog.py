@@ -93,9 +93,7 @@ class RhoAiasProcess:
         config['server']['port'] = self.api_port
         config['ebpf']['interface_name'] = self.interface
 
-        # 启用 blocklog（测试目标）
-        config['blocklog']['enabled'] = True
-        config['blocklog']['sample_rate'] = 1
+        # blocklog 始终持久化，无需额外配置
 
         # 禁用不必要功能
         config['intel']['enabled'] = False
@@ -140,10 +138,9 @@ class RhoAiasProcess:
                 stderr=subprocess.STDOUT,
                 preexec_fn=os.setsid
             )
-            time.sleep(3)
-
-            if self.process.poll() is not None:
-                logger.error(f"Process exited unexpectedly. Check log: {self.log_path}")
+            # 轮询等待服务就绪（端口可连），替代固定 sleep
+            if not self._wait_for_ready(timeout=15):
+                logger.error("Service did not become ready within 15s. Check log: %s", self.log_path)
                 return False
 
             logger.info(f"rho-aias started (PID: {self.process.pid})")
@@ -154,6 +151,29 @@ class RhoAiasProcess:
             if self.log_file:
                 self.log_file.close()
             return False
+
+    def _wait_for_ready(self, timeout: int = 15) -> bool:
+        """轮询等待 HTTP 服务端口就绪"""
+        import urllib.request
+        health_url = f"http://127.0.0.1:{self.api_port}/api/rules"
+        headers = {}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.process.poll() is not None:
+                logger.error("Process exited unexpectedly (code=%s). Check log: %s", self.process.returncode, self.log_path)
+                return False
+            try:
+                req = urllib.request.Request(health_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=2) as resp:
+                    if resp.status == 200:
+                        return True
+            except Exception:
+                pass
+            time.sleep(0.3)
+        logger.error("Timeout (%ds): service not ready on port %d", timeout, self.api_port)
+        return False
 
     def stop(self):
         """停止 rho-aias 进程"""
@@ -228,7 +248,7 @@ class BlockLogAPIClient:
         必须通过此 API 显式启用才能向 ringbuf 写入阻断事件。
         sample_rate=1 表示每个丢弃包都上报（100% 采样）。
         """
-        return self._request("POST", "/api/xdp/events/config",
+        return self._request("PUT", "/api/config/xdp_events",
                              {"enabled": True, "sample_rate": sample_rate})
 
     def add_rule(self, value: str) -> Tuple[bool, dict]:
