@@ -1,6 +1,6 @@
 import axios, { type AxiosInstance, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import { ElMessage, ElNotification } from 'element-plus'
-import { getToken, setToken, clearAuth } from '@/utils/auth'
+import { getToken, clearAuth } from '@/utils/auth'
 import type { ApiResponse } from '@/types/api'
 import router from '@/router'
 
@@ -12,11 +12,14 @@ const instance: AxiosInstance = axios.create({
   },
 })
 
+// 是否正在刷新标识，避免重复刷新
 let isRefreshing = false
-let refreshSubscribers: ((token: string) => void)[] = []
+// 因 Token 过期导致的请求等待队列
+const waitingQueue: (() => void)[] = []
 
 // 处理会话过期
-function handleSessionExpired() {
+async function handleSessionExpired() {
+  if (router.currentRoute.value.path === '/login') return
   ElNotification({
     title: '提示',
     message: '您的会话已过期，请重新登录',
@@ -26,19 +29,44 @@ function handleSessionExpired() {
   router.push('/login')
 }
 
-function subscribeTokenRefresh(cb: (token: string) => void) {
-  refreshSubscribers.push(cb)
-}
+// 刷新 Token 处理：将请求加入等待队列，仅由首个请求触发刷新
+function handleTokenRefresh(config: InternalAxiosRequestConfig): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    // 封装需要重试的请求：刷新成功后用新 token 重发
+    const retryRequest = () => {
+      config.headers.Authorization = `Bearer ${getToken()}`
+      resolve(instance(config as Parameters<typeof instance>[0]))
+    }
+    waitingQueue.push(retryRequest)
 
-function onRefreshed(token: string) {
-  refreshSubscribers.forEach((cb) => cb(token))
-  refreshSubscribers = []
+    if (!isRefreshing) {
+      isRefreshing = true
+      // 延迟导入避免循环依赖
+      import('@/stores/auth').then(({ useAuthStore }) => {
+        const authStore = useAuthStore()
+        authStore
+          .refreshToken()
+          .then(() => {
+            // 刷新成功 → 依次重试队列中所有请求
+            waitingQueue.forEach((callback) => callback())
+            waitingQueue.length = 0
+          })
+          .catch(async () => {
+            // 刷新失败 → 清空队列，跳转登录页
+            waitingQueue.length = 0
+            await handleSessionExpired()
+          })
+          .finally(() => {
+            isRefreshing = false
+          })
+      })
+    }
+  }).catch((error) => Promise.reject(error))
 }
 
 instance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = getToken()
-    // 如果 Authorization 设置为 no-auth，则不携带 Token
     if (config.headers?.['Authorization'] === 'no-auth') {
       delete config.headers.Authorization
     } else if (token && config.headers) {
@@ -51,54 +79,32 @@ instance.interceptors.request.use(
 
 instance.interceptors.response.use(
   (response: AxiosResponse<ApiResponse>) => {
-    const { data } = response
-    if (data.code !== 0) {
-      ElMessage.error(data.message || '请求失败')
-      return Promise.reject(new Error(data.message || '请求失败'))
+    // 二进制流（文件下载等）直接返回原始响应
+    if (response.config.responseType === 'blob') {
+      return response
     }
-    return response
+
+    const { data } = response
+    if (data.code === 0) {
+      return response
+    }
+
+    ElMessage.error(data.message || '请求失败')
+    return Promise.reject(new Error(data.message || '请求失败'))
   },
   async (error) => {
-    const originalRequest = error.config
+    const { config, response } = error
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      if (isRefreshing) {
-        return new Promise((resolve) => {
-          subscribeTokenRefresh((token: string) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`
-            resolve(instance(originalRequest))
-          })
-        })
+    if (response?.status === 401) {
+      // Token 过期，尝试刷新 Token 并重试
+      if (getToken()) {
+        return handleTokenRefresh(config)
       }
-
-      originalRequest._retry = true
-      isRefreshing = true
-
-      // 使用当前 token 尝试刷新（后端设计：用 access token 刷新）
-      const currentToken = getToken()
-      if (!currentToken) {
-        handleSessionExpired()
-        return Promise.reject(error)
-      }
-
-      try {
-        // 延迟导入避免循环依赖
-        const { useAuthStore } = await import('@/stores/auth')
-        const authStore = useAuthStore()
-        const newToken = await authStore.refreshToken()
-        onRefreshed(newToken)
-        setToken(newToken)
-        originalRequest.headers.Authorization = `Bearer ${newToken}`
-        return instance(originalRequest)
-      } catch {
-        handleSessionExpired()
-        return Promise.reject(error)
-      } finally {
-        isRefreshing = false
-      }
+      // 无 Token，直接跳转登录页
+      await handleSessionExpired()
     }
 
-    const message = error.response?.data?.message || error.message || '网络错误'
+    const message = response?.data?.message || error.message || '网络错误'
     ElMessage.error(message)
     return Promise.reject(error)
   }
