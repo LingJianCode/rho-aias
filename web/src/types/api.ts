@@ -309,7 +309,7 @@ export interface DashboardStats {
 // 统一配置（运行时热更新）
 // ============================================
 
-export type ConfigModuleName = 'failguard' | 'waf' | 'rate_limit' | 'anomaly_detection' | 'geo_blocking' | 'intel'
+export type ConfigModuleName = 'failguard' | 'waf' | 'rate_limit' | 'anomaly_detection' | 'geo_blocking' | 'intel' | 'xdp_events'
 
 export interface FailGuardConfig {
   enabled?: boolean
