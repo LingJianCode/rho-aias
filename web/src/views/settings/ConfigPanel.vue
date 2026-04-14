@@ -187,9 +187,9 @@
             <el-form-item label="启用状态">
               <el-switch v-model="xdpEvents.enabled" />
             </el-form-item>
-            <el-form-item label="采样率(%)">
+            <el-form-item label="采样（每N个包采样一个，1000 表示 0.1% 的采样率）">
               <el-slider v-model="xdpEvents.sample_rate" :min="1" :max="100" show-input input-size="small" />
-              <div class="form-hint">控制上报到后端的事件比例，100% 为全部上报</div>
+              <div class="form-hint">控制上报到后端的事件比例，1为全部上报</div>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="prepareSave('xdp_events', xdpEvents)" :loading="saving">保存</el-button>
