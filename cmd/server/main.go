@@ -60,6 +60,9 @@ func main() {
 	}
 	go core.XDP.MonitorEvents()
 
+	// 加载持久化的缓存规则到 eBPF map（必须在 Start 之后）
+	core.LoadCachedRules(cfg)
+
 	// Phase 2: 数据库初始化 + 迁移 + 动态配置恢复
 	dbDeps := bootstrap.InitDatabase(cfg)
 	defer dbDeps.AuthDB.Close()

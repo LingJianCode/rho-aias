@@ -19,30 +19,13 @@ type CoreDependencies struct {
 	BlockLogHandle  *handles.BlockLogHandle
 }
 
-// InitCore 初始化核心 eBPF 基础设施和规则缓存
+// InitCore 初始化核心 eBPF 基础设施（不加载缓存规则，缓存需在 Start 后通过 LoadCachedRules 加载）
 func InitCore(cfg *config.Config) *CoreDependencies {
 	xdp := ebpfs.NewXdp(cfg.Ebpf.InterfaceName)
 
 	var manualCache *manual.Cache
 	if cfg.Manual.Enabled {
 		manualCache = manual.NewCache(cfg.Manual.PersistenceDir)
-		if cfg.Manual.AutoLoad && manualCache.Exists() {
-			cacheData, err := manualCache.Load()
-			if err != nil {
-				logger.Warnf("[Manual] Failed to load cache: %v", err)
-			} else {
-				logger.Infof("[Manual] Loading %d rules from cache...", cacheData.RuleCount())
-				loaded := 0
-				for _, entry := range cacheData.Rules {
-					if err := xdp.AddRule(entry.Value); err != nil {
-						logger.Warnf("[Manual] Failed to add rule %s: %v", entry.Value, err)
-					} else {
-						loaded++
-					}
-				}
-				logger.Infof("[Manual] Loaded %d/%d rules from cache", loaded, cacheData.RuleCount())
-			}
-		}
 	}
 	manualHandle := handles.NewManualHandle(xdp, manualCache, nil)
 
@@ -52,24 +35,6 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 	whitelistChecker := manual.NewWhitelistChecker()
 	if cfg.Manual.Enabled {
 		whitelistCache = manual.NewCache(cfg.Manual.PersistenceDir)
-		if cfg.Manual.AutoLoad && whitelistCache.WhitelistExists() {
-			whitelistData, err := whitelistCache.LoadWhitelist()
-			if err != nil {
-				logger.Warnf("[Whitelist] Failed to load cache: %v", err)
-			} else {
-				logger.Infof("[Whitelist] Loading %d rules from cache...", whitelistData.WhitelistRuleCount())
-				loaded := 0
-				for _, entry := range whitelistData.Rules {
-					if err := xdp.AddWhitelistRule(entry.Value); err != nil {
-						logger.Warnf("[Whitelist] Failed to add rule %s: %v", entry.Value, err)
-					} else {
-						loaded++
-					}
-				}
-				logger.Infof("[Whitelist] Loaded %d/%d rules from cache", loaded, whitelistData.WhitelistRuleCount())
-				whitelistChecker.LoadFromCache(whitelistData)
-			}
-		}
 	}
 	whitelistHandle = handles.NewWhitelistHandle(xdp, whitelistCache, whitelistChecker)
 	manualHandle.SetWhitelistChecker(whitelistChecker)
@@ -105,5 +70,52 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 		ManualHandle:    manualHandle,
 		WhitelistHandle: whitelistHandle,
 		BlockLogHandle:  blockLogHandle,
+	}
+}
+
+// LoadCachedRules 在 XDP.Start() 之后加载持久化的缓存规则到 eBPF map
+func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
+	if !cfg.Manual.Enabled {
+		return
+	}
+
+	// 加载手动阻断规则
+	if c.ManualHandle != nil && c.ManualHandle.Cache() != nil && c.ManualHandle.Cache().Exists() {
+		cacheData, err := c.ManualHandle.Cache().Load()
+		if err != nil {
+			logger.Warnf("[Manual] Failed to load cache: %v", err)
+		} else if cacheData.RuleCount() > 0 {
+			logger.Infof("[Manual] Loading %d rules from cache...", cacheData.RuleCount())
+			loaded := 0
+			for _, entry := range cacheData.Rules {
+				if err := c.XDP.AddRule(entry.Value); err != nil {
+					logger.Warnf("[Manual] Failed to add rule %s: %v", entry.Value, err)
+				} else {
+					loaded++
+				}
+			}
+			logger.Infof("[Manual] Loaded %d/%d rules from cache", loaded, cacheData.RuleCount())
+		}
+	}
+
+	// 加载白名单规则
+	if c.WhitelistHandle != nil && c.WhitelistHandle.Cache() != nil &&
+		cfg.Manual.AutoLoad && c.WhitelistHandle.Cache().WhitelistExists() {
+		whitelistData, err := c.WhitelistHandle.Cache().LoadWhitelist()
+		if err != nil {
+			logger.Warnf("[Whitelist] Failed to load cache: %v", err)
+		} else if whitelistData.WhitelistRuleCount() > 0 {
+			logger.Infof("[Whitelist] Loading %d rules from cache...", whitelistData.WhitelistRuleCount())
+			loaded := 0
+			for _, entry := range whitelistData.Rules {
+				if err := c.XDP.AddWhitelistRule(entry.Value); err != nil {
+					logger.Warnf("[Whitelist] Failed to add whitelist rule %s: %v", entry.Value, err)
+				} else {
+					loaded++
+				}
+			}
+			logger.Infof("[Whitelist] Loaded %d/%d rules from cache", loaded, whitelistData.WhitelistRuleCount())
+			c.WhitelistHandle.Checker().LoadFromCache(whitelistData)
+		}
 	}
 }

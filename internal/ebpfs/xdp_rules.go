@@ -17,6 +17,9 @@ import (
 // lookupExistingValue 根据 IP 类型构造 key 并从对应的 eBPF map 中查找现有值
 // 调用者必须已持有 mapMu 锁
 func (x *Xdp) lookupExistingValue(iptype utils.IPType, rawBytes []byte) (BlockValue, bool) {
+	if x.objects == nil {
+		return BlockValue{}, false
+	}
 	var blockValue BlockValue
 	switch iptype {
 	case utils.IPTypeIPv4:
@@ -38,6 +41,9 @@ func (x *Xdp) lookupExistingValue(iptype utils.IPType, rawBytes []byte) (BlockVa
 
 // updateMap 更新内核 map - 支持来源掩码
 func (x *Xdp) updateMap(iptype utils.IPType, value []byte, blockValue BlockValue, add bool) (err error) {
+	if x.objects == nil {
+		return fmt.Errorf("eBPF not initialized")
+	}
 	switch iptype {
 	case utils.IPTypeIPv4:
 		if add {
