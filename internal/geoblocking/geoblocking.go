@@ -468,6 +468,12 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, periodic boo
 	}
 	m.config.Sources[sourceID] = src
 
+	// 同步状态层的 enabled 标志
+	if ss, ok := m.sourceStatus[SourceID(sourceID)]; ok {
+		ss.Enabled = enabled
+		m.status.Sources[SourceID(sourceID)] = *ss
+	}
+
 	// 如果模块已启动，需要重新调度 Cron 任务
 	if m.cron != nil {
 		// 移除旧的 Cron 任务
