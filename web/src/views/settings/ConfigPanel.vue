@@ -124,6 +124,9 @@
             <el-form-item label="启用状态">
               <el-switch v-model="geo.enabled" />
             </el-form-item>
+            <el-form-item label="调度周期">
+                  <el-input v-model="geo.schedule" placeholder="如 0 * * * *" />
+                </el-form-item>
             <el-form-item label="运行模式">
               <el-radio-group v-model="geo.mode">
                 <el-radio value="whitelist">白名单模式（仅允许列表中的国家）</el-radio>
@@ -447,7 +450,7 @@ const waf = reactive({ enabled: false, ban_duration: 3600 })
 const rate_limit = reactive({ enabled: false, ban_duration: 3600 })
 const baseline = reactive({ packets_per_sec: 0, bytes_per_sec: 0 })
 const anomaly = reactive({ enabled: false, min_packets: 10, ports: [80, 443] })
-const geo = reactive({ enabled: false, mode: 'whitelist' as string, allowed_countries: [] as string[] })
+const geo = reactive({ enabled: false, mode: 'whitelist' as string, allowed_countries: [] as string[], schedule: undefined as string | undefined })
 const intel = reactive({ enabled: false, sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
 const xdpEvents = reactive({ enabled: false, sample_rate: 100 })
 
