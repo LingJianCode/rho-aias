@@ -24,6 +24,13 @@ import (
 // IsValidModule 检查模块名是否合法（导出供 DynamicConfigService 等外部调用，委托给 models 包）
 var IsValidModule = models.IsValidModule
 
+// supportedModules 用于错误提示的合法模块名列表
+var supportedModules = []string{
+	models.ModuleFailGuard, models.ModuleWAF, models.ModuleRateLimit,
+	models.ModuleAnomalyDetection, models.ModuleGeoBlocking, models.ModuleIntel,
+	models.ModuleXDPEvents,
+}
+
 // AnomalyController 封装 eBPF 异常检测相关操作接口
 // 用于在动态启停时控制内核采样和事件监听
 type AnomalyController interface {
@@ -67,6 +74,9 @@ type ConfigHandle struct {
 	geoBlockingMgr   GeoBlockingConfigUpdater
 	intelMgr         IntelConfigUpdater
 
+	// eBPF XDP 实例（用于 xdp_events 模块的配置读写）
+	xdp *ebpfs.Xdp
+
 	// eBPF 异常检测控制器（用于动态启停时的管道管理）
 	anomalyController  AnomalyController
 
@@ -102,6 +112,7 @@ func NewConfigHandle(
 	anomalyDetector *anomaly.Detector,
 	geoBlockingMgr GeoBlockingConfigUpdater,
 	intelMgr IntelConfigUpdater,
+	xdp *ebpfs.Xdp,
 ) *ConfigHandle {
 	lifecycle := &LifecycleManager{}
 
@@ -114,6 +125,7 @@ func NewConfigHandle(
 		anomalyDetector:    anomalyDetector,
 		geoBlockingMgr:     geoBlockingMgr,
 		intelMgr:           intelMgr,
+		xdp:                xdp,
 		lifecycle:          lifecycle,
 	}
 
@@ -144,6 +156,11 @@ func (h *ConfigHandle) SetAnomalyController(controller AnomalyController, record
 	h.anomalyController = controller
 	h.anomalyRecordPacketFn = recordPacketFn
 }
+
+// SetXDP 设置 eBPF XDP 实例（用于 xdp_events 模块配置读写）
+func (h *ConfigHandle) SetXDP(xdp *ebpfs.Xdp) {
+	h.xdp = xdp
+}
 func (h *ConfigHandle) GetAllConfig(c *gin.Context) {
 	result := make(map[string]interface{})
 
@@ -161,7 +178,7 @@ func (h *ConfigHandle) GetAllConfig(c *gin.Context) {
 	}
 
 	// 构建每个模块的配置，优先使用运行时值
-	modules := []string{models.ModuleFailGuard, models.ModuleWAF, models.ModuleRateLimit, models.ModuleAnomalyDetection, models.ModuleGeoBlocking, models.ModuleIntel}
+	modules := []string{models.ModuleFailGuard, models.ModuleWAF, models.ModuleRateLimit, models.ModuleAnomalyDetection, models.ModuleGeoBlocking, models.ModuleIntel, models.ModuleXDPEvents}
 	for _, module := range modules {
 		runtimeConfig := h.getRuntimeConfig(module)
 		if runtimeConfig != nil {
@@ -179,7 +196,7 @@ func (h *ConfigHandle) GetAllConfig(c *gin.Context) {
 func (h *ConfigHandle) GetModuleConfig(c *gin.Context) {
 	module := c.Param("module")
 	if !IsValidModule(module) {
-		response.BadRequest(c, "Invalid module name, supported: failguard, waf, rate_limit, anomaly_detection, geo_blocking, intel")
+		response.BadRequest(c, fmt.Sprintf("Invalid module name, supported: %v", supportedModules))
 		return
 	}
 
@@ -213,7 +230,7 @@ func (h *ConfigHandle) GetModuleConfig(c *gin.Context) {
 func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 	module := c.Param("module")
 	if !IsValidModule(module) {
-		response.BadRequest(c, "Invalid module name, supported: failguard, waf, rate_limit, anomaly_detection, geo_blocking, intel")
+		response.BadRequest(c, fmt.Sprintf("Invalid module name, supported: %v", supportedModules))
 		return
 	}
 
@@ -274,7 +291,67 @@ func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 		if h.intelMgr != nil && !isNilInterface(h.intelMgr) {
 			return h.intelMgr.GetConfig()
 		}
+	case models.ModuleXDPEvents:
+		return h.getXDPEventsRuntimeConfig()
 	}
+	return nil
+}
+
+// ========== XDP Events 动态配置（从 event.go 迁移）==========
+
+// xdpEventsConfigRequest XDP 事件上报配置请求
+type xdpEventsConfigRequest struct {
+	Enabled    *bool   `json:"enabled" validate:"omitempty"`
+	SampleRate *uint32 `json:"sample_rate" validate:"omitempty,gte=1"`
+}
+
+// getXDPEventsRuntimeConfig 获取 XDP Events 当前运行时配置
+func (h *ConfigHandle) getXDPEventsRuntimeConfig() map[string]interface{} {
+	if h.xdp == nil {
+		return nil
+	}
+	config, err := h.xdp.GetEventConfig()
+	if err != nil {
+		// 查询失败返回默认配置
+		config = ebpfs.DefaultEventConfig()
+	}
+	return map[string]interface{}{
+		"enabled":     config.Enabled == 1,
+		"sample_rate": config.SampleRate,
+	}
+}
+
+// applyXDPEventsConfig 应用 XDP Events 配置到 eBPF 内核
+func (h *ConfigHandle) applyXDPEventsConfig(raw json.RawMessage) error {
+	if h.xdp == nil {
+		return fmt.Errorf("xdp_events module is not initialized (XDP not available)")
+	}
+
+	var req xdpEventsConfigRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return fmt.Errorf("invalid config format: %w", err)
+	}
+
+	currentCfg, _ := h.xdp.GetEventConfig()
+
+	enabled := currentCfg.Enabled == 1
+	sampleRate := currentCfg.SampleRate
+
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	if req.SampleRate != nil {
+		sampleRate = *req.SampleRate
+		if sampleRate == 0 {
+			sampleRate = 1
+		}
+	}
+
+	if err := h.xdp.SetEventConfig(enabled, sampleRate); err != nil {
+		return fmt.Errorf("failed to set xdp event config: %w", err)
+	}
+
+	logger.Infof("[ConfigAPI] XDPEvents config updated: enabled=%v, sample_rate=%d", enabled, sampleRate)
 	return nil
 }
 
@@ -293,6 +370,8 @@ func (h *ConfigHandle) applyConfig(module string, raw json.RawMessage) error {
 		return h.applyGeoBlockingConfig(raw)
 	case models.ModuleIntel:
 		return h.applyIntelConfig(raw)
+	case models.ModuleXDPEvents:
+		return h.applyXDPEventsConfig(raw)
 	default:
 		return fmt.Errorf("unsupported module: %s", module)
 	}
@@ -359,6 +438,14 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 				return fmt.Errorf("source '%s': invalid cron schedule '%s'", sourceID, srcCfg.Schedule)
 			}
 		}
+	case models.ModuleXDPEvents:
+		var req xdpEventsConfigRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fmt.Errorf("invalid format: %w", err)
+		}
+		if err := h.validate.Struct(req); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unsupported module: %s", module)
 	}
@@ -386,6 +473,11 @@ func (h *ConfigHandle) getMergedConfig(module string) (interface{}, error) {
 			return nil, fmt.Errorf("intel module is not initialized")
 		}
 		return h.intelMgr.GetConfig(), nil
+	case models.ModuleXDPEvents:
+		if h.xdp == nil {
+			return nil, fmt.Errorf("xdp_events module is not initialized (XDP not available)")
+		}
+		return h.getXDPEventsRuntimeConfig(), nil
 	default:
 		return nil, fmt.Errorf("unsupported module: %s", module)
 	}

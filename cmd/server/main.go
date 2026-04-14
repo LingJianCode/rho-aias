@@ -554,9 +554,6 @@ func main() {
 	ruleQueryHandle := handles.NewRuleQueryHandle(xdp)
 	routers.RegisterRuleRoutes(api, ruleQueryHandle, authEnforcer, authSvc, apiKeySvc)
 
-	eventHandle := handles.NewEventHandle(xdp)
-	routers.RegisterEventRoutes(api, eventHandle, authEnforcer, authSvc, apiKeySvc)
-
 	if bizDB != nil {
 		sourceHandle := handles.NewSourceHandle(bizDB.DB, intelMgr, geoMgr)
 		routers.RegisterSourceRoutes(api, sourceHandle, authEnforcer, authSvc, apiKeySvc)
@@ -589,6 +586,7 @@ func main() {
 			anomalyDetector,
 			geoMgr,
 			intelMgr,
+			xdp,
 		)
 		// 注入 eBPF 异常检测控制器（用于动态启停时管理内核管道）
 		configHandle.SetAnomalyController(xdp, recordPacketFn)

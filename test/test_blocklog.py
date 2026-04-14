@@ -228,7 +228,7 @@ class BlockLogAPIClient:
         必须通过此 API 显式启用才能向 ringbuf 写入阻断事件。
         sample_rate=1 表示每个丢弃包都上报（100% 采样）。
         """
-        return self._request("POST", "/api/xdp/events/config",
+        return self._request("PUT", "/api/config/xdp_events",
                              {"enabled": True, "sample_rate": sample_rate})
 
     def add_rule(self, value: str) -> Tuple[bool, dict]:
