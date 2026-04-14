@@ -592,6 +592,8 @@ func main() {
 		configHandle.SetAnomalyController(xdp, recordPacketFn)
 		// 注册统一生命周期退出（替代分散的 defer Stop）
 		defer configHandle.GetLifecycle().ShutdownAll()
+		// 从 DB 恢复已持久化的配置到运行时（含 eBPF map）
+		configHandle.RestoreAll()
 		routers.RegisterConfigRoutes(api, configHandle, authEnforcer, authSvc, apiKeySvc)
 	}
 

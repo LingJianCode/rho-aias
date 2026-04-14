@@ -161,6 +161,41 @@ func (h *ConfigHandle) SetAnomalyController(controller AnomalyController, record
 func (h *ConfigHandle) SetXDP(xdp *ebpfs.Xdp) {
 	h.xdp = xdp
 }
+
+// RestoreAll 从 DB 恢复所有已持久化的模块配置到运行时（启动时调用）
+// 确保重启后 DB 中保存的配置能正确回写到各模块（包括 eBPF kernel map）
+func (h *ConfigHandle) RestoreAll() {
+	records, err := h.configService.GetAll()
+	if err != nil {
+		logger.Warnf("[Restore] Failed to load configs from DB: %v", err)
+		return
+	}
+	if len(records) == 0 {
+		return
+	}
+
+	supported := map[string]bool{
+		models.ModuleFailGuard:        true,
+		models.ModuleWAF:              true,
+		models.ModuleRateLimit:        true,
+		models.ModuleAnomalyDetection: true,
+		models.ModuleGeoBlocking:      true,
+		models.ModuleIntel:            true,
+		models.ModuleXDPEvents:       true,
+	}
+
+	for _, record := range records {
+		if !supported[record.Module] {
+			continue
+		}
+		raw := json.RawMessage(record.Value)
+		if err := h.applyConfig(record.Module, raw); err != nil {
+			logger.Warnf("[Restore] Failed to restore module %s: %v", record.Module, err)
+		} else {
+			logger.Infof("[Restored] Module %s config restored from DB", record.Module)
+		}
+	}
+}
 func (h *ConfigHandle) GetAllConfig(c *gin.Context) {
 	result := make(map[string]interface{})
 
