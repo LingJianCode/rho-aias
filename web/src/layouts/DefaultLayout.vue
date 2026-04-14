@@ -16,6 +16,10 @@
           <el-icon><Odometer /></el-icon>
           <template #title>仪表盘</template>
         </el-menu-item>
+        <el-menu-item index="/security">
+          <el-icon><Monitor /></el-icon>
+          <template #title>安全态势</template>
+        </el-menu-item>
         <el-sub-menu index="firewall">
           <template #title>
             <el-icon><Aim /></el-icon>
@@ -32,10 +36,6 @@
           <el-menu-item index="/logs/blocklog">阻断日志</el-menu-item>
           <el-menu-item index="/logs/ban-records">封禁记录</el-menu-item>
         </el-sub-menu>
-        <el-menu-item index="/security">
-          <el-icon><Monitor /></el-icon>
-          <template #title>安全态势</template>
-        </el-menu-item>
         <el-sub-menu index="settings" v-if="authStore.isAdmin || true">
           <template #title>
             <el-icon><Setting /></el-icon>
