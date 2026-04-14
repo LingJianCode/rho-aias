@@ -4,6 +4,8 @@ import { resolve } from 'path'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+import IconsResolver from 'unplugin-icons/resolver'
+import Icons from 'unplugin-icons/vite'
 
 const pathSrc = resolve(__dirname, 'src')
 
@@ -24,9 +26,10 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
         dts: 'src/auto-imports.d.ts',
       }),
       Components({
-        resolvers: [ElementPlusResolver()],
+        resolvers: [ElementPlusResolver(), IconsResolver({ enabledCollections: ['ep'] })],
         dts: 'src/components.d.ts',
       }),
+      Icons({ autoInstall: true }),
     ],
     server: {
       host: '0.0.0.0',
