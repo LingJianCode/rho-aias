@@ -16,9 +16,8 @@ const (
 	defaultBatchSize = 100
 )
 
-// Config 持久化配置
+// Config 持久化配置（始终启用持久化）
 type Config struct {
-	Enabled         bool          // 是否启用文件持久化
 	LogDir          string        // 日志目录
 	MemoryCacheSize int           // 内存缓存大小
 	BufferSize      int           // 异步写入缓冲区大小
@@ -27,7 +26,6 @@ type Config struct {
 
 // DefaultConfig 默认配置
 var DefaultConfig = Config{
-	Enabled:         true,
 	LogDir:          "./logs/blocklog",
 	MemoryCacheSize: 10000,
 	BufferSize:      1000,
@@ -49,13 +47,6 @@ type AsyncWriter struct {
 
 // NewAsyncWriter 创建异步写入器
 func NewAsyncWriter(config Config) (*AsyncWriter, error) {
-	if !config.Enabled {
-		return &AsyncWriter{
-			config:  config,
-			stopped: true,
-		}, nil
-	}
-
 	// 创建文件写入器
 	fileWriter, err := NewFileWriter(config.LogDir)
 	if err != nil {
@@ -97,7 +88,7 @@ func (aw *AsyncWriter) Write(record BlockRecord) error {
 	stopped := aw.stopped
 	aw.stopMu.RUnlock()
 
-	if stopped || !aw.config.Enabled {
+	if stopped {
 		return nil
 	}
 
@@ -148,7 +139,7 @@ func (aw *AsyncWriter) Flush() error {
 	stopped := aw.stopped
 	aw.stopMu.RUnlock()
 
-	if stopped || !aw.config.Enabled {
+	if stopped {
 		return nil
 	}
 

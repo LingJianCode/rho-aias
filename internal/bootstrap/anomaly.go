@@ -32,6 +32,7 @@ func InitAnomaly(
 		CheckInterval:   cfg.AnomalyDetection.CheckInterval,
 		MinPackets:      cfg.AnomalyDetection.MinPackets,
 		CleanupInterval: cfg.AnomalyDetection.CleanupInterval,
+		Ports:           cfg.AnomalyDetection.Ports,
 		Baseline: anomaly.BaselineConfig{
 			MinSampleCount:  cfg.AnomalyDetection.Baseline.MinSampleCount,
 			SigmaMultiplier: cfg.AnomalyDetection.Baseline.SigmaMultiplier,

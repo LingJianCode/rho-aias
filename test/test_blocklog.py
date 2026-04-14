@@ -93,9 +93,7 @@ class RhoAiasProcess:
         config['server']['port'] = self.api_port
         config['ebpf']['interface_name'] = self.interface
 
-        # 启用 blocklog（测试目标）
-        config['blocklog']['enabled'] = True
-        config['blocklog']['sample_rate'] = 1
+        # blocklog 始终持久化，无需额外配置
 
         # 禁用不必要功能
         config['intel']['enabled'] = False

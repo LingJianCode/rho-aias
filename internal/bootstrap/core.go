@@ -40,9 +40,8 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 	manualHandle.SetWhitelistChecker(whitelistChecker)
 
 	var blockLog *blocklog.BlockLog
-	if cfg.BlockLog.Enabled {
+	{
 		blConfig := blocklog.Config{
-			Enabled:         cfg.BlockLog.Enabled,
 			LogDir:          cfg.BlockLog.LogDir,
 			MemoryCacheSize: cfg.BlockLog.MemoryCacheSize,
 			BufferSize:      cfg.BlockLog.BufferSize,
@@ -54,9 +53,6 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 			logger.Fatalf("[BlockLog] Failed to initialize with persistence: %v", err)
 		}
 		logger.Infof("[Main] Block log initialized with persistence enabled, log dir: %s", cfg.BlockLog.LogDir)
-	} else {
-		blockLog = blocklog.NewBlockLog(10000)
-		logger.Info("[Main] Block log initialized without persistence")
 	}
 
 	xdp.SetCallback(func(srcIP, dstIP, matchType, ruleSource, countryCode string, packetSize uint32) {
