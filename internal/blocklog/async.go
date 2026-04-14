@@ -24,14 +24,6 @@ type Config struct {
 	FlushInterval   time.Duration // 刷盘间隔
 }
 
-// DefaultConfig 默认配置
-var DefaultConfig = Config{
-	LogDir:          "./logs/blocklog",
-	MemoryCacheSize: 10000,
-	BufferSize:      1000,
-	FlushInterval:   5 * time.Second,
-}
-
 // AsyncWriter 异步日志写入器
 type AsyncWriter struct {
 	config     Config

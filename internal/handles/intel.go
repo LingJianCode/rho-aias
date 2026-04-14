@@ -37,9 +37,3 @@ func (h *IntelHandle) TriggerUpdate(c *gin.Context) {
 
 	response.OKMsg(c, "Update triggered successfully")
 }
-
-// ClearCache 清除缓存
-func (h *IntelHandle) ClearCache(c *gin.Context) {
-	// 需要暴露 cache 的清除方法
-	response.OKMsg(c, "Cache cleared")
-}
