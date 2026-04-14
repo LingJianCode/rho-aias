@@ -355,21 +355,55 @@ func (m *Manager) getEnabledSources() map[SourceID]config.GeoIPSource {
 	return sources
 }
 
-// GetStatus 获取 GeoIP 模块状态
+// GetStatus 获取 GeoIP 模块状态（优先查 DB，DB 无记录返回空）
 func (m *Manager) GetStatus() *Status {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	xdpEnabled := m.xdp.GetGeoConfigEnabled()
+	configSources := m.config.Sources
+	mode := m.status.Mode
+	countries := m.status.AllowedCountries
+	m.mu.RUnlock()
 
-	enabled := m.xdp.GetGeoConfigEnabled()
-
-	statusCopy := *m.status
-	statusCopy.Enabled = (enabled == 1)
-	statusCopy.Sources = make(map[SourceID]SourceStatus)
-	for k, v := range m.status.Sources {
-		statusCopy.Sources[k] = v
+	result := Status{
+		Enabled:          xdpEnabled == 1,
+		Mode:             mode,
+		AllowedCountries: countries,
+		Sources:          make(map[SourceID]SourceStatus),
 	}
 
-	return &statusCopy
+	totalRules := 0
+	var latestUpdate time.Time
+
+	for id, src := range configSources {
+		record, err := feed.GetLatestSourceStatus(m.db, feed.SourceTypeGeoBlocking, string(id))
+		if err != nil || record == nil {
+			result.Sources[SourceID(id)] = SourceStatus{Enabled: src.Enabled}
+			continue
+		}
+
+		ss := SourceStatus{
+			Enabled:    src.Enabled,
+			LastUpdate: record.UpdatedAt,
+			Success:    record.Status == "success",
+			RuleCount:  record.RuleCount,
+			Error:      record.ErrorMessage,
+		}
+		result.Sources[SourceID(id)] = ss
+
+		if record.Status == "success" && record.RuleCount > 0 {
+			totalRules += record.RuleCount
+			if record.UpdatedAt.After(latestUpdate) {
+				latestUpdate = record.UpdatedAt
+			}
+		}
+	}
+
+	result.TotalRules = totalRules
+	if !latestUpdate.IsZero() {
+		result.LastUpdate = latestUpdate
+	}
+
+	return &result
 }
 
 // TriggerUpdate 手动触发 GeoIP 更新
@@ -467,12 +501,6 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, periodic boo
 		src.URL = url
 	}
 	m.config.Sources[sourceID] = src
-
-	// 同步状态层的 enabled 标志
-	if ss, ok := m.sourceStatus[SourceID(sourceID)]; ok {
-		ss.Enabled = enabled
-		m.status.Sources[SourceID(sourceID)] = *ss
-	}
 
 	// 如果模块已启动，需要重新调度 Cron 任务
 	if m.cron != nil {
