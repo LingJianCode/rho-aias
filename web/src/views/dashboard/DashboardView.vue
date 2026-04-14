@@ -6,25 +6,25 @@
 
     <!-- 第一行：系统运行状态概览 -->
     <el-row :gutter="12" class="stats-row">
-      <el-col :span="6" @click="$router.push('/security')">
+      <el-col :span="5">
         <div class="stat-card-clickable">
           <StatsCard label="XDP 事件上报" :value="systemStatus.eventEnabled ? 1 : 0" :icon="Connection" icon-color="#409eff" />
           <span class="card-sub">{{ systemStatus.eventEnabled ? '运行中' : '已停止' }}</span>
         </div>
       </el-col>
-      <el-col :span="6" @click="$router.push('/security')">
+      <el-col :span="5">
         <div class="stat-card-clickable">
           <StatsCard label="威胁情报规则" :value="systemStatus.intelTotalRules" :icon="Cpu" icon-color="#67c23a" />
           <span class="card-sub">{{ systemStatus.intelEnabled ? '已启用' : '未启用' }}</span>
         </div>
       </el-col>
-      <el-col :span="6" @click="$router.push('/settings/config')">
+      <el-col :span="5">
         <div class="stat-card-clickable">
           <StatsCard label="地域封禁规则" :value="systemStatus.geoTotalRules" :icon="Location" icon-color="#e6a23c" />
           <span class="card-sub">{{ systemStatus.geoMode === 'whitelist' ? '白名单' : systemStatus.geoMode === 'blacklist' ? '黑名单' : '未启用' }}</span>
         </div>
       </el-col>
-      <el-col :span="6" @click="$router.push('/firewall/blacklist')">
+      <el-col :span="5">
         <div class="stat-card-clickable">
           <StatsCard label="生效封禁数" :value="systemStatus.activeBans" :icon="Lock" icon-color="#f56c6c" />
           <span class="card-sub">共 {{ systemStatus.totalBans }} 条</span>
@@ -264,18 +264,21 @@ onUnmounted(() => {
 .stat-card-clickable {
   cursor: pointer;
   transition: transform 0.15s;
+  position: relative;
 
   &:hover {
     transform: translateY(-2px);
   }
 
   .card-sub {
-    display: block;
+    position: absolute;
+    bottom: 8px;
+    left: 0;
+    right: 0;
     text-align: center;
     font-size: 12px;
     color: var(--el-text-color-secondary);
-    margin-top: -8px;
-    margin-bottom: 4px;
+    pointer-events: none;
   }
 }
 
