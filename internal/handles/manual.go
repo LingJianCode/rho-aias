@@ -33,6 +33,11 @@ func NewManualHandle(xdp *ebpfs.Xdp, cache *manual.Cache, checker *manual.Whitel
 	}
 }
 
+// GetWhitelistChecker 返回内部白名单检查器
+func (w *WhitelistHandle) GetWhitelistChecker() *manual.WhitelistChecker {
+	return w.checker
+}
+
 // SetWhitelistChecker 设置白名单检查器（支持延迟注入）
 func (m *ManualHandle) SetWhitelistChecker(checker *manual.WhitelistChecker) {
 	m.checker = checker
