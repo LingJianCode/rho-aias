@@ -8,8 +8,8 @@
     <el-row :gutter="12" class="stats-row">
       <el-col :span="5">
         <div class="stat-card-clickable">
-          <StatsCard label="XDP 事件上报" :value="systemStatus.eventEnabled ? systemStatus.eventSampleRate : 0" :icon="Connection" icon-color="#409eff">
-            <template #extra>{{ systemStatus.eventEnabled ? `${systemStatus.eventSampleRate}% 采样 · 运行中` : '已停止' }}</template>
+          <StatsCard label="XDP 事件上报" :value="systemStatus.eventEnabled ? Number((100 / systemStatus.eventSampleRate).toFixed(1)) : 0" :icon="Connection" icon-color="#409eff">
+            <template #extra>{{ systemStatus.eventEnabled ? `${Number((100 / systemStatus.eventSampleRate).toFixed(1))}% · 运行中` : '已停止' }}</template>
           </StatsCard>
         </div>
       </el-col>
