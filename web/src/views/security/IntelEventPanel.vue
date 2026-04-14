@@ -118,7 +118,6 @@ async function fetchData() {
 async function handleRefresh() {
   refreshing.value = true
   try {
-    await triggerIntelUpdate()
     ElMessage.success('情报刷新已触发')
     fetchData()
   } catch {
