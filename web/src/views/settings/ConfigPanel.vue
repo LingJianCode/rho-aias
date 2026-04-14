@@ -188,7 +188,7 @@
               <el-switch v-model="xdpEvents.enabled" />
             </el-form-item>
             <el-form-item label="采样">
-              <el-slider v-model="xdpEvents.sample_rate" :min="1" :max="100" show-input input-size="small" />
+              <el-slider v-model="xdpEvents.sample_rate" :min="1" :max="10000" show-input input-size="small" />
               <div class="form-hint">控制上报到后端的事件比例（每N个包采样一个，1000 表示 0.1% 的采样率），1为全部上报</div>
             </el-form-item>
             <el-form-item>
