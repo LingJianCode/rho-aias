@@ -8,8 +8,8 @@
     <el-row :gutter="12" class="stats-row">
       <el-col :span="5">
         <div class="stat-card-clickable">
-          <StatsCard label="XDP 事件上报" :icon="Connection" icon-color="#409eff">
-            <template #extra>{{ systemStatus.eventEnabled ? '运行中' : '已停止' }}</template>
+          <StatsCard label="XDP 事件上报" :value="systemStatus.eventEnabled ? systemStatus.eventSampleRate : 0" :icon="Connection" icon-color="#409eff">
+            <template #extra>{{ systemStatus.eventEnabled ? `${systemStatus.eventSampleRate}% 采样 · 运行中` : '已停止' }}</template>
           </StatsCard>
         </div>
       </el-col>
@@ -118,6 +118,7 @@ import { getGeoBlockingStatus } from '@/api/geoblocking'
 // 统计与趋势
 import { getBlockLogStats, getBlockLogs, getBlockedCountries } from '@/api/blocklog'
 import { getBanRecordStats } from '@/api/ban-records'
+import type { BlockLog } from '@/types/api'
 
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
@@ -135,7 +136,7 @@ const systemStatus = reactive({
 })
 
 const topCountries = ref<{ country: string; count: number }[]>([])
-const recentBlocks = ref<Record<string, unknown>[]>([])
+const recentBlocks = ref<BlockLog[]>([])
 const blockTrend = ref<{ date: string; count: number }[]>([])
 
 async function fetchDashboardData() {
@@ -217,8 +218,8 @@ async function fetchTopCountries() {
 async function fetchRecentBlocks() {
   try {
     const res = await getBlockLogs({ page_size: 5 })
-    if (res.data?.records) {
-      recentBlocks.value = res.data.records
+    if (res.data?.items) {
+      recentBlocks.value = res.data.items
     }
   } catch {
     // Error handled

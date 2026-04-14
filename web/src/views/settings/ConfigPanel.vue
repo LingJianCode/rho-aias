@@ -391,8 +391,10 @@ function deepEqual(a: unknown, b: unknown): boolean {
   if (!a || !b) return false
   if (typeof a !== typeof b) return false
   if (Array.isArray(a) !== Array.isArray(b)) return false
-  if (Array.isArray(a)) {
-    return a.length === b.length && a.every((v, i) => deepEqual(v, b[i]))
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const arrA = a as unknown[]
+    const arrB = b as unknown[]
+    return arrA.length === arrB.length && arrA.every((v, i) => deepEqual(v, arrB[i]))
   }
   if (typeof a === 'object') {
     const ka = Object.keys(a).sort()

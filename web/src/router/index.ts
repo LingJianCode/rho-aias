@@ -15,6 +15,9 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/dashboard' },
       { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/dashboard/DashboardView.vue') },
+      
+      // 安全态势（只读监控）
+      { path: 'security', name: 'Security', component: () => import('@/views/security/SecurityView.vue') },
 
       // 防火墙
       { path: 'firewall/blacklist', name: 'Blacklist', component: () => import('@/views/firewall/BlacklistView.vue') },
@@ -24,8 +27,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'logs/blocklog', name: 'BlockLog', component: () => import('@/views/blocklog/BlockLogView.vue') },
       { path: 'logs/ban-records', name: 'BanRecords', component: () => import('@/views/ban-records/BanRecordsView.vue') },
 
-      // 安全态势（只读监控）
-      { path: 'security', name: 'Security', component: () => import('@/views/security/SecurityView.vue') },
+
 
       // 系统设置
       { path: 'settings', redirect: '/settings/config' },
