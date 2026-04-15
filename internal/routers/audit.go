@@ -17,12 +17,12 @@ func RegisterAuditRoutes(group *gin.RouterGroup, auditHandle *handles.AuditHandl
 		audit.Use(middleware.AuthMiddleware(authService, apiKeyService))
 
 		// 列出审计日志 - 需要 admin:* 权限
-		audit.GET("/logs", middleware.CasbinMiddleware(enforcer, "admin:*", "*"), auditHandle.ListAuditLogs)
+		audit.GET("/logs", middleware.CasbinMiddleware(enforcer, "admin", "*"), auditHandle.ListAuditLogs)
 
 		// 获取单条日志 - 需要 admin:* 权限
-		audit.GET("/logs/:id", middleware.CasbinMiddleware(enforcer, "admin:*", "*"), auditHandle.GetAuditLog)
+		audit.GET("/logs/:id", middleware.CasbinMiddleware(enforcer, "admin", "*"), auditHandle.GetAuditLog)
 
 		// 清理旧日志 - 需要 admin:* 权限
-		audit.POST("/clean", middleware.CasbinMiddleware(enforcer, "admin:*", "*"), auditHandle.CleanAuditLogs)
+		audit.POST("/clean", middleware.CasbinMiddleware(enforcer, "admin", "*"), auditHandle.CleanAuditLogs)
 	}
 }

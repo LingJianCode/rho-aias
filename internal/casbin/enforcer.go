@@ -79,11 +79,11 @@ func (e *Enforcer) InitDefaultPolicies() error {
 
 	// role:user 拥有基础只读权限
 	defaultUserPermissions := [][]string{
-		{"role:user", "firewall:read", "read"},
-		{"role:user", "blocklog:read", "read"},
-		{"role:user", "intel:read", "read"},
-		{"role:user", "geo:read", "read"},
-		{"role:user", "config:read", "read"},
+		{"role:user", "firewall", "read"},
+		{"role:user", "blocklog", "read"},
+		{"role:user", "intel", "read"},
+		{"role:user", "geo", "read"},
+		{"role:user", "config", "read"},
 	}
 
 	for _, policy := range defaultUserPermissions {
@@ -146,15 +146,8 @@ func (e *Enforcer) AddAPIKeyPermissions(keyHash string, permissions []string) er
 			return fmt.Errorf("invalid permission format: %s, expected 'resource:action'", perm)
 		}
 
-		// 添加策略：(subject, obj, act)
-		// obj 为完整权限标识（如 firewall:read），act 为操作类型（如 read）
-		// 特殊处理 *:* 通配符
-		obj := perm
+		obj := parts[0]
 		act := parts[1]
-		if perm == "*:*" {
-			obj = "*"
-			act = "*"
-		}
 
 		if _, err := e.AddPolicy(subject, obj, act); err != nil {
 			return fmt.Errorf("failed to add api key permission: %w", err)
