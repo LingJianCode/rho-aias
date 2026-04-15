@@ -207,11 +207,11 @@ func (s *BanRecordService) CleanupExpired() (int64, error) {
 
 // GetBanStats 获取封禁统计
 type BanStats struct {
-	Total      int64            `json:"total"`
-	Active     int64            `json:"active"`
-	BySource   map[string]int64 `json:"by_source"`
-	ByStatus   map[string]int64 `json:"by_status"`
-	TopIPs     []TopIPStat      `json:"top_ips"`
+	Total    int64            `json:"total"`
+	Active   int64            `json:"active"`
+	BySource map[string]int64 `json:"by_source"`
+	ByStatus map[string]int64 `json:"by_status"`
+	TopIPs   []TopIPStat      `json:"top_ips"`
 }
 
 type TopIPStat struct {
@@ -327,5 +327,3 @@ func (s *BanRecordService) MarkAllActiveAsAutoUnblock() (int64, error) {
 	}
 	return result.RowsAffected, nil
 }
-
-
