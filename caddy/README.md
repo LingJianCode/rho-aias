@@ -1,3 +1,7 @@
+# coraza_waf
+
+CorazaWAF 采用混合检测模式：通过 libinjection-go 实现 SQLi 与 XSS 的语义分析，而对其余攻击则利用正则匹配进行防御。
+
 # 运行
 
 ## 直接运行
