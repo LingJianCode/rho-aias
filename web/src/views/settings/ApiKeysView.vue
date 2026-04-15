@@ -51,10 +51,13 @@
         </el-form-item>
         <el-form-item label="权限" prop="permissions">
           <el-checkbox-group v-model="form.permissions">
-            <el-checkbox value="rules:read">读取规则</el-checkbox>
-            <el-checkbox value="rules:write">写入规则</el-checkbox>
-            <el-checkbox value="blocklog:read">读取日志</el-checkbox>
-            <el-checkbox value="blocklog:clear">清除日志</el-checkbox>
+            <el-checkbox
+              v-for="perm in availablePermissions"
+              :key="perm.value"
+              :value="perm.value"
+            >
+              {{ perm.label }}
+            </el-checkbox>
           </el-checkbox-group>
         </el-form-item>
         <el-form-item label="有效期">
@@ -87,8 +90,8 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/format'
 import { useConfirm } from '@/composables/useConfirm'
-import { getApiKeys, createApiKey, revokeApiKey } from '@/api/api-keys'
-import type { ApiKey } from '@/types/api'
+import { getApiKeys, createApiKey, revokeApiKey, getPermissions } from '@/api/api-keys'
+import type { ApiKey, PermissionInfo } from '@/types/api'
 
 const { confirm } = useConfirm()
 
@@ -98,6 +101,7 @@ const showAddDialog = ref(false)
 const showKeyDialog = ref(false)
 const newKey = ref('')
 const formRef = ref<FormInstance>()
+const availablePermissions = ref<PermissionInfo[]>([])
 
 const form = reactive({
   name: '',
@@ -119,6 +123,15 @@ async function fetchApiKeys() {
     apiKeys.value = []
   } finally {
     loading.value = false
+  }
+}
+
+async function fetchPermissions() {
+  try {
+    const res = await getPermissions()
+    availablePermissions.value = res.data.permissions
+  } catch {
+    availablePermissions.value = []
   }
 }
 
@@ -160,5 +173,6 @@ function copyKey() {
 
 onMounted(() => {
   fetchApiKeys()
+  fetchPermissions()
 })
 </script>

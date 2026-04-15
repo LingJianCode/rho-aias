@@ -24,5 +24,8 @@ func RegisterAPIKeyRoutes(group *gin.RouterGroup, apiKeyHandle *handles.APIKeyHa
 
 		// 吊销 API Key - 需要 api_key:write 权限
 		apikeys.DELETE("/:id", middleware.CasbinMiddleware(enforcer, "api_key", "write"), apiKeyHandle.RevokeAPIKey)
+
+		// 获取可用权限列表（公开给已认证用户）
+		apikeys.GET("/permissions", apiKeyHandle.GetPermissions)
 	}
 }
