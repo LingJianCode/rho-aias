@@ -17,18 +17,18 @@ func RegisterUserRoutes(group *gin.RouterGroup, userHandle *handles.UserHandle, 
 		users.Use(middleware.AuthMiddleware(authService, apiKeyService))
 
 		// 创建用户 - 需要 admin:* 权限
-		users.POST("", middleware.CasbinMiddleware(enforcer, "admin:*", "*"), userHandle.CreateUser)
+		users.POST("", middleware.CasbinMiddleware(enforcer, "admin", "*"), userHandle.CreateUser)
 
 		// 列出用户 - 需要 admin:* 权限
-		users.GET("", middleware.CasbinMiddleware(enforcer, "admin:*", "*"), userHandle.ListUsers)
+		users.GET("", middleware.CasbinMiddleware(enforcer, "admin", "*"), userHandle.ListUsers)
 
 		// 获取用户详情 - 需要 admin:* 权限
-		users.GET("/:id", middleware.CasbinMiddleware(enforcer, "admin:*", "*"), userHandle.GetUser)
+		users.GET("/:id", middleware.CasbinMiddleware(enforcer, "admin", "*"), userHandle.GetUser)
 
 		// 更新用户 - 需要 admin:* 权限
-		users.PUT("/:id", middleware.CasbinMiddleware(enforcer, "admin:*", "*"), userHandle.UpdateUser)
+		users.PUT("/:id", middleware.CasbinMiddleware(enforcer, "admin", "*"), userHandle.UpdateUser)
 
 		// 删除用户 - 需要 admin:* 权限
-		users.DELETE("/:id", middleware.CasbinMiddleware(enforcer, "admin:*", "*"), userHandle.DeleteUser)
+		users.DELETE("/:id", middleware.CasbinMiddleware(enforcer, "admin", "*"), userHandle.DeleteUser)
 	}
 }

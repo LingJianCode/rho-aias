@@ -16,14 +16,14 @@ func RegisterIntelRoutes(group *gin.RouterGroup, intelHandle *handles.IntelHandl
 	// 查看情报状态 - 需要 intel:read 权限
 	intel.GET("/status",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "intel:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "intel", "read"),
 		intelHandle.GetStatus,
 	)
 
 	// 触发更新 - 需要 intel:write 权限
 	intel.POST("/update",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "intel:write", "write"),
+		middleware.CasbinMiddleware(enforcer, "intel", "write"),
 		intelHandle.TriggerUpdate,
 	)
 }

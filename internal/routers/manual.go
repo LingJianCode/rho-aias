@@ -19,21 +19,21 @@ func RegisterManualRoutes(group *gin.RouterGroup, manualHandle *handles.ManualHa
 	// 添加黑名单规则 - 需要 firewall:write 权限
 	blacklist.POST("/rules",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+		middleware.CasbinMiddleware(enforcer, "firewall", "write"),
 		manualHandle.AddRule,
 	)
 
 	// 删除黑名单规则 - 需要 firewall:write 权限
 	blacklist.DELETE("/rules",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+		middleware.CasbinMiddleware(enforcer, "firewall", "write"),
 		manualHandle.DelRule,
 	)
 
 	// 查询黑名单规则列表 - 需要 firewall:read 权限
 	blacklist.GET("/rules",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "firewall", "read"),
 		manualHandle.ListManualRules,
 	)
 }
@@ -48,21 +48,21 @@ func RegisterWhitelistRoutes(group *gin.RouterGroup, whitelistHandle *handles.Wh
 	// 添加白名单规则 - 需要 firewall:write 权限
 	whitelist.POST("/rules",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+		middleware.CasbinMiddleware(enforcer, "firewall", "write"),
 		whitelistHandle.AddWhitelistRule,
 	)
 
 	// 删除白名单规则 - 需要 firewall:write 权限
 	whitelist.DELETE("/rules",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+		middleware.CasbinMiddleware(enforcer, "firewall", "write"),
 		whitelistHandle.DelWhitelistRule,
 	)
 
 	// 查询白名单规则列表 - 需要 firewall:read 权限
 	whitelist.GET("/rules",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "firewall", "read"),
 		whitelistHandle.ListWhitelistRules,
 	)
 }

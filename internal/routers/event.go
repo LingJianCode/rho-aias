@@ -16,14 +16,14 @@ func RegisterEventRoutes(group *gin.RouterGroup, eventHandle *handles.EventHandl
 	// 获取事件状态 - 需要 firewall:read 权限
 	events.GET("/status",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "firewall", "read"),
 		eventHandle.GetEventStatus,
 	)
 
 	// 设置事件配置 - 需要 firewall:write 权限
 	events.POST("/config",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "firewall:write", "write"),
+		middleware.CasbinMiddleware(enforcer, "firewall", "write"),
 		eventHandle.SetEventConfig,
 	)
 }

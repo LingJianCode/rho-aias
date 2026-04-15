@@ -16,21 +16,21 @@ func RegisterGeoBlockingRoutes(group *gin.RouterGroup, geoHandle *handles.GeoBlo
 	// 查看状态 - 需要 geo:read 权限
 	geo.GET("/status",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "geo:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "geo", "read"),
 		geoHandle.GetStatus,
 	)
 
 	// 触发更新 - 需要 geo:write 权限
 	geo.POST("/update",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "geo:write", "write"),
+		middleware.CasbinMiddleware(enforcer, "geo", "write"),
 		geoHandle.TriggerUpdate,
 	)
 
 	// 更新配置 - 需要 geo:write 权限
 	geo.POST("/config",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "geo:write", "write"),
+		middleware.CasbinMiddleware(enforcer, "geo", "write"),
 		geoHandle.UpdateConfig,
 	)
 }

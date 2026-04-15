@@ -16,49 +16,49 @@ func RegisterBlockLogRoutes(group *gin.RouterGroup, blockLogHandle *handles.Bloc
 	// 查看阻断记录 - 需要 blocklog:read 权限
 	blocklog.GET("/records",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
 		blockLogHandle.GetRecords,
 	)
 
 	// 查看统计数据 - 需要 blocklog:read 权限
 	blocklog.GET("/stats",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
 		blockLogHandle.GetStats,
 	)
 
 	// 查看阻断 IP 列表 - 需要 blocklog:read 权限
 	blocklog.GET("/blocked-ips",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
 		blockLogHandle.GetBlockedIPs,
 	)
 
 	// 查看阻断国家列表 - 需要 blocklog:read 权限
 	blocklog.GET("/blocked-countries",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
 		blockLogHandle.GetBlockedCountries,
 	)
 
 	// 清除记录 - 需要 blocklog:clear 权限
 	blocklog.DELETE("/records",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "blocklog:clear", "clear"),
+		middleware.CasbinMiddleware(enforcer, "blocklog", "write"),
 		blockLogHandle.ClearRecords,
 	)
 
 	// 查看小时趋势 - 需要 blocklog:read 权限
 	blocklog.GET("/hourly-trend",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
 		blockLogHandle.GetHourlyTrend,
 	)
 
 	// 查看丢弃概览 - 需要 blocklog:read 权限
 	blocklog.GET("/dropped-summary",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "blocklog:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
 		blockLogHandle.GetDroppedSummary,
 	)
 }

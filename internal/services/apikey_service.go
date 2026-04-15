@@ -15,18 +15,32 @@ import (
 	"gorm.io/gorm"
 )
 
-// ValidPermissions 定义有效的权限白名单
+// ValidPermissions 定义 API Key 创建时的有效权限白名单
+//
+// 格式说明：
+//   - key 使用 "resource:action" 冒号拼接格式（前端传入格式）
+//   - 内部存储时会被 AddAPIKeyPermissions 拆分为 (obj, act) 两列存入 Casbin 策略表
+//   - action 统一为 read/write 两种（admin:* 为管理员通配符）
+//
+// 用途：前端创建 API Key 时校验 permissions 字段合法性，防止非法值入库
 var ValidPermissions = map[string]bool{
-	"firewall:read":  true,
-	"firewall:write": true,
-	"intel:read":     true,
-	"intel:write":    true,
-	"geo:read":       true,
-	"geo:write":      true,
-	"blocklog:read":  true,
-	"blocklog:clear": true,
-	"api_key:manage": true,
-	"admin:*":        true,
+	"firewall:read":    true,
+	"firewall:write":   true,
+	"intel:read":       true,
+	"intel:write":      true,
+	"geo:read":         true,
+	"geo:write":        true,
+	"blocklog:read":    true,
+	"blocklog:write":   true,
+	"config:read":      true,
+	"config:write":     true,
+	"source:read":      true,
+	"source:write":     true,
+	"ban_record:read":  true,
+	"ban_record:write": true,
+	"api_key:read":     true,
+	"api_key:write":    true,
+	"admin:*":          true,
 }
 
 var (
