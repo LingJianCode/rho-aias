@@ -10,6 +10,7 @@ import (
 
 	"rho-aias/internal/auth/apikey"
 	"rho-aias/internal/casbin"
+	"rho-aias/internal/logger"
 	"rho-aias/internal/models"
 
 	"gorm.io/gorm"
@@ -231,9 +232,16 @@ func (s *APIKeyService) ValidateAPIKey(key string) (*models.APIKey, error) {
 		return nil, errors.New("api key has expired")
 	}
 
-	// 更新最后使用时间
+	// 更新最后使用时间（原子操作：基于主键更新并检查影响行数）
 	now := time.Now()
-	s.db.Model(&apiKey).Update("last_used_at", now)
+	result := s.db.Model(&apiKey).Update("last_used_at", now)
+	if result.Error != nil {
+		logger.Warnf("[APIKey] Failed to update last_used_at for key %s: %v", apiKey.KeyPrefix, result.Error)
+	} else if result.RowsAffected == 0 {
+		logger.Warnf("[APIKey] last_updated update affected 0 rows (key may have been deleted): %s", apiKey.KeyPrefix)
+	}
 
+	// 清除敏感字段后再返回，防止哈希值泄露
+	apiKey.Key = ""
 	return &apiKey, nil
 }

@@ -15,8 +15,8 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/rlimit"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/cilium/ebpf/rlimit"
 )
 
 // BlockLogCallback 阻断日志回调函数类型
@@ -26,7 +26,7 @@ type Xdp struct {
 	InterfaceName string
 	objects       *xdpObjects
 	link          *link.Link
-	reader       *ringbuf.Reader
+	reader        *ringbuf.Reader
 	done          chan struct{}
 	doneOnce      sync.Once
 	linkType      string
@@ -260,6 +260,11 @@ func (x *Xdp) getRuleSourceFromPacket(srcIP [4]byte, ethProto uint16, mt MatchTy
 	x.mapMu.RLock()
 	defer x.mapMu.RUnlock()
 
+	// 防护：restart() 期间 x.objects 可能被临时置为 nil
+	if x.objects == nil {
+		return "unknown"
+	}
+
 	switch mt {
 	case MatchByIP4Exact:
 		var blockValue BlockValue
@@ -384,7 +389,8 @@ func (x *Xdp) GetWhitelistRules() ([]string, error) {
 type AnomalyEventCallback func(srcIP string, protocol uint8, tcpFlags uint8, pktSize uint32)
 
 // MonitorAnomalyEvents 监听异常检测采样事件
-func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback) {
+// extraDone 为可选的额外停止信号（如禁用异常检测时触发），nil 则仅监听 x.done
+func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback, extraDone <-chan struct{}) {
 	logger.Info("[XDP] MonitorAnomalyEvents started")
 
 	reader, err := ringbuf.NewReader(x.objects.AnomalyEvents)
@@ -399,6 +405,9 @@ func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback) {
 		case <-x.done:
 			logger.Info("[XDP] MonitorAnomalyEvents exit")
 			return
+		case <-extraDone:
+			logger.Info("[XDP] MonitorAnomalyEvents exit (extra stop signal)")
+			return
 		default:
 		}
 
@@ -411,6 +420,9 @@ func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback) {
 			select {
 			case <-x.done:
 				logger.Info("[XDP] MonitorAnomalyEvents exit after error")
+				return
+			case <-extraDone:
+				logger.Info("[XDP] MonitorAnomalyEvents exit after error (extra stop signal)")
 				return
 			default:
 				continue

@@ -27,6 +27,7 @@ type Manager struct {
 	cron    *cron.Cron                // Cron 调度器
 	jobIDs  map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
 	done    chan struct{}             // 停止信号
+	stopOnce sync.Once               // 确保 Stop 只执行一次
 	mu      sync.RWMutex              // 读写锁
 
 	// 状态管理
@@ -510,14 +511,16 @@ func (m *Manager) GetConfig() map[string]interface{} {
 	}
 }
 
-// Stop 停止威胁情报管理器
+// Stop 停止威胁情报管理器（幂等，多次调用安全）
 func (m *Manager) Stop() {
-	logger.Info("[ThreatIntel] Stopping threat intelligence manager...")
-	if m.cron != nil {
-		m.cron.Stop()
-	}
-	close(m.done)
-	logger.Info("[ThreatIntel] Stopped")
+	m.stopOnce.Do(func() {
+		logger.Info("[ThreatIntel] Stopping threat intelligence manager...")
+		if m.cron != nil {
+			m.cron.Stop()
+		}
+		close(m.done)
+		logger.Info("[ThreatIntel] Stopped")
+	})
 }
 
 // sourceIDToMask 将 SourceID 转换为来源掩码

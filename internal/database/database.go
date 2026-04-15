@@ -74,7 +74,9 @@ func (db *Database) AutoMigrateBusiness() error {
 func (db *Database) InitDefaultUser(enforcer *casbin.Enforcer) error {
 	// 检查是否存在管理员
 	var count int64
-	db.Model(&models.User{}).Where("role = ?", "admin").Count(&count)
+	if err := db.Model(&models.User{}).Where("role = ?", "admin").Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to query admin users: %w", err)
+	}
 	if count > 0 {
 		return nil // 已存在管理员，无需初始化
 	}
@@ -130,7 +132,9 @@ func (db *Database) InitAPIKeysFromConfig(enforcer *casbin.Enforcer, apiKeys []c
 		}
 		hashStr := hex.EncodeToString(hash[:])
 		var count int64
-		db.Model(&models.APIKey{}).Where("key = ?", hashStr).Count(&count)
+		if err := db.Model(&models.APIKey{}).Where("key = ?", hashStr).Count(&count).Error; err != nil {
+			return fmt.Errorf("failed to check existing api keys: %w", err)
+		}
 		if count > 0 {
 			logger.Infof("[Database] API key already exists: %s", keyConfig.Name)
 			continue

@@ -131,7 +131,7 @@ func InitAnomaly(
 				logger.Warnf("[Main] Failed to set anomaly port filter: %v", err)
 			}
 
-			go xdp.MonitorAnomalyEvents(recordPacketFn)
+			go xdp.MonitorAnomalyEvents(recordPacketFn, nil)
 		}
 	}
 

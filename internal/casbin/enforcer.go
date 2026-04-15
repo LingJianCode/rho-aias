@@ -128,8 +128,8 @@ func (e *Enforcer) GetUserRole(userID uint) string {
 	}
 	// 返回第一个角色（去掉 role: 前缀）
 	role := roles[0]
-	if len(role) > 5 && role[:5] == "role:" {
-		return role[5:]
+	if strings.HasPrefix(role, "role:") {
+		return strings.TrimPrefix(role, "role:")
 	}
 	return role
 }
