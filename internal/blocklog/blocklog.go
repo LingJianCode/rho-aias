@@ -62,8 +62,13 @@ func NewBlockLogWithPersistence(maxSize int, config Config) (*BlockLog, error) {
 
 // AddRecord 添加阻断记录
 func (bl *BlockLog) AddRecord(record BlockRecord) {
+	// 统计写入在锁外执行（SQLite 磁盘 I/O），避免阻塞热路径
+	var ruleSource string
+	if bl.statsStore != nil {
+		ruleSource = record.RuleSource
+	}
+
 	bl.mu.Lock()
-	defer bl.mu.Unlock()
 
 	// 如果超过最大记录数，删除最旧的记录
 	// 使用 copy 而非 slice 重切，避免底层数组无限增长导致内存泄漏
@@ -81,9 +86,11 @@ func (bl *BlockLog) AddRecord(record BlockRecord) {
 		}
 	}
 
-	// 同步写入统计（热路径，失败仅 warn 不阻塞）
-	if bl.statsStore != nil {
-		bl.statsStore.Record(record.RuleSource)
+	bl.mu.Unlock()
+
+	// 统计存储写操作移至锁外（SQLite INSERT），避免 DDoS 场景下锁争用
+	if ruleSource != "" {
+		bl.statsStore.Record(ruleSource)
 	}
 }
 

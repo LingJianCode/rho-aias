@@ -15,8 +15,8 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/rlimit"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/cilium/ebpf/rlimit"
 )
 
 // BlockLogCallback 阻断日志回调函数类型
@@ -26,7 +26,7 @@ type Xdp struct {
 	InterfaceName string
 	objects       *xdpObjects
 	link          *link.Link
-	reader       *ringbuf.Reader
+	reader        *ringbuf.Reader
 	done          chan struct{}
 	doneOnce      sync.Once
 	linkType      string
