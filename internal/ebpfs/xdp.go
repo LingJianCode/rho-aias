@@ -260,6 +260,11 @@ func (x *Xdp) getRuleSourceFromPacket(srcIP [4]byte, ethProto uint16, mt MatchTy
 	x.mapMu.RLock()
 	defer x.mapMu.RUnlock()
 
+	// 防护：restart() 期间 x.objects 可能被临时置为 nil
+	if x.objects == nil {
+		return "unknown"
+	}
+
 	switch mt {
 	case MatchByIP4Exact:
 		var blockValue BlockValue
