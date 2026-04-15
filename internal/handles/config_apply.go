@@ -1,6 +1,7 @@
 package handles
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -186,13 +187,25 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 		if err := h.anomalyController.SetAnomalyPortFilter(len(ports) > 0, ports); err != nil {
 			logger.Warnf("[ConfigAPI] Failed to set eBPF anomaly port filter: %v", err)
 		}
-		go h.anomalyController.MonitorAnomalyEvents(h.anomalyRecordPacketFn)
+
+		// 创建带取消的 context，用于后续可主动停止该 goroutine
+		anomalyCtx, cancel := context.WithCancel(context.Background())
+		h.anomalyMonitorCancel = cancel
+
+		go h.anomalyController.MonitorAnomalyEvents(h.anomalyRecordPacketFn, anomalyCtx.Done())
+
 		if err := h.anomalyDetector.Start(); err != nil {
+			cancel()
 			logger.Warnf("[ConfigAPI] AnomalyDetection start failed: %v", err)
 		} else {
 			logger.Info("[ConfigAPI] AnomalyDetection started (eBPF pipeline activated)")
 		}
 	} else if wasRunning && !cfg.Enabled && h.anomalyController != nil {
+		// 停止旧的 anomaly monitor goroutine 防止泄漏
+		if h.anomalyMonitorCancel != nil {
+			h.anomalyMonitorCancel()
+			h.anomalyMonitorCancel = nil
+		}
 		if err := h.anomalyController.SetAnomalyConfig(false, 0); err != nil {
 			logger.Warnf("[ConfigAPI] Failed to disable eBPF anomaly config: %v", err)
 		}

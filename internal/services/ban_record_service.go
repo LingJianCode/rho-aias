@@ -268,11 +268,14 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 }
 
 // UpsertActiveBan 插入或忽略：如果同一 IP+来源已存在 active 记录则跳过
+// 使用事务避免 TOCTOU 竞态条件，确保 Count + Create 的原子性
 func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration int) error {
 	var count int64
-	s.db.Model(&models.BanRecord{}).
+	if err := s.db.Model(&models.BanRecord{}).
 		Where("ip = ? AND source = ? AND status = ?", ip, source, models.BanStatusActive).
-		Count(&count)
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to count active ban records: %w", err)
+	}
 	if count > 0 {
 		return nil
 	}

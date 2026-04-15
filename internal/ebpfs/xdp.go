@@ -384,7 +384,8 @@ func (x *Xdp) GetWhitelistRules() ([]string, error) {
 type AnomalyEventCallback func(srcIP string, protocol uint8, tcpFlags uint8, pktSize uint32)
 
 // MonitorAnomalyEvents 监听异常检测采样事件
-func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback) {
+// extraDone 为可选的额外停止信号（如禁用异常检测时触发），nil 则仅监听 x.done
+func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback, extraDone <-chan struct{}) {
 	logger.Info("[XDP] MonitorAnomalyEvents started")
 
 	reader, err := ringbuf.NewReader(x.objects.AnomalyEvents)
@@ -399,6 +400,9 @@ func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback) {
 		case <-x.done:
 			logger.Info("[XDP] MonitorAnomalyEvents exit")
 			return
+		case <-extraDone:
+			logger.Info("[XDP] MonitorAnomalyEvents exit (extra stop signal)")
+			return
 		default:
 		}
 
@@ -411,6 +415,9 @@ func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback) {
 			select {
 			case <-x.done:
 				logger.Info("[XDP] MonitorAnomalyEvents exit after error")
+				return
+			case <-extraDone:
+				logger.Info("[XDP] MonitorAnomalyEvents exit after error (extra stop signal)")
 				return
 			default:
 				continue

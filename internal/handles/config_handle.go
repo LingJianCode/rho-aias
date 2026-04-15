@@ -1,6 +1,7 @@
 package handles
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -33,7 +34,7 @@ var IsValidModule = models.IsValidModule
 type AnomalyController interface {
 	SetAnomalyConfig(enabled bool, sampleRate uint32) error
 	SetAnomalyPortFilter(enabled bool, ports []uint32) error
-	MonitorAnomalyEvents(callback ebpfs.AnomalyEventCallback)
+	MonitorAnomalyEvents(callback ebpfs.AnomalyEventCallback, extraDone <-chan struct{})
 }
 
 type LifecycleManager struct {
@@ -78,6 +79,7 @@ type ConfigHandle struct {
 	xdp                   *ebpfs.Xdp
 	anomalyController     AnomalyController
 	anomalyRecordPacketFn ebpfs.AnomalyEventCallback
+	anomalyMonitorCancel  context.CancelFunc // 用于取消旧 anomaly 监听 goroutine
 	lifecycle             *LifecycleManager
 	mu                    sync.Mutex
 }
@@ -96,7 +98,7 @@ func NewConfigHandle(
 	h := &ConfigHandle{
 		configService, validator.New(),
 		failguardMonitor, wafMonitor, rateLimitMonitor,
-		anomalyDetector, geoBlockingMgr, intelMgr, xdp, nil, nil, lifecycle, sync.Mutex{},
+		anomalyDetector, geoBlockingMgr, intelMgr, xdp, nil, nil, nil, lifecycle, sync.Mutex{},
 	}
 	if failguardMonitor != nil {
 		lifecycle.Register(failguardMonitor.Stop)
