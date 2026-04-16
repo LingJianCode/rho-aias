@@ -103,9 +103,6 @@ func main() {
 	// Phase 6: 统一路由注册
 	bootstrap.RegisterAllRoutes(api, core, dbDeps, detectors, anomalyDeps, authDeps)
 
-	// Phase 6.5: 注册前端静态文件（SPA fallback）
-	frontend.RegisterFrontend(r)
-
 	// ConfigHandle (含 RestoreAll) + 注册路由
 	var configHandle *handles.ConfigHandle
 	if dbDeps.DynamicConfigSvc != nil {
@@ -116,6 +113,9 @@ func main() {
 		defer configHandle.GetLifecycle().ShutdownAll()
 		routers.RegisterConfigRoutes(api, configHandle, authDeps.Enforcer, authDeps.AuthService, authDeps.APIKeyService)
 	}
+
+	// Phase 6.5: 注册前端静态文件（SPA fallback）
+	frontend.RegisterFrontend(r)
 
 	// Phase 7: 启动 Server + 优雅退出
 	bootstrap.StartServer(cfg, r, ctx, cancel, dbDeps.BizDB)
