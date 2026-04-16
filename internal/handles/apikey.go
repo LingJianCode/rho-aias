@@ -125,3 +125,9 @@ func (h *APIKeyHandle) RevokeAPIKey(c *gin.Context) {
 
 	response.OKMsg(c, "api key revoked successfully")
 }
+
+// GetPermissions 获取可用权限列表
+func (h *APIKeyHandle) GetPermissions(c *gin.Context) {
+	permissions := h.apiKeyService.GetValidPermissions()
+	response.OK(c, gin.H{"permissions": permissions})
+}

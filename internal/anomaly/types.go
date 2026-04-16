@@ -61,20 +61,6 @@ type IPProtocolStats struct {
 	TotalPackets uint64 // 总包数
 }
 
-// Merge 合并另一个统计到当前统计
-func (s *IPProtocolStats) Merge(other *IPProtocolStats) {
-	s.TCPCount += other.TCPCount
-	s.TCPSynCount += other.TCPSynCount
-	s.TCPAckCount += other.TCPAckCount
-	s.TCPRstCount += other.TCPRstCount
-	s.TCPFinCount += other.TCPFinCount
-	s.UDPCount += other.UDPCount
-	s.ICMPCount += other.ICMPCount
-	s.OtherCount += other.OtherCount
-	s.TotalBytes += other.TotalBytes
-	s.TotalPackets += other.TotalPackets
-}
-
 // Reset 重置统计
 func (s *IPProtocolStats) Reset() {
 	s.TCPCount = 0

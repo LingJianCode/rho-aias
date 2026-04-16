@@ -16,13 +16,16 @@ func RegisterAPIKeyRoutes(group *gin.RouterGroup, apiKeyHandle *handles.APIKeyHa
 		// 所有接口都需要认证
 		apikeys.Use(middleware.AuthMiddleware(authService, apiKeyService))
 
-		// 创建 API Key - 需要 api_key:manage 权限
-		apikeys.POST("", middleware.CasbinMiddleware(enforcer, "api_key:manage", "manage"), apiKeyHandle.CreateAPIKey)
+		// 创建 API Key - 需要 api_key:write 权限
+		apikeys.POST("", middleware.CasbinMiddleware(enforcer, "api_key", "write"), apiKeyHandle.CreateAPIKey)
 
-		// 列出 API Keys - 需要 api_key:manage 权限
-		apikeys.GET("", middleware.CasbinMiddleware(enforcer, "api_key:manage", "manage"), apiKeyHandle.ListAPIKeys)
+		// 列出 API Keys - 需要 api_key:read 权限
+		apikeys.GET("", middleware.CasbinMiddleware(enforcer, "api_key", "read"), apiKeyHandle.ListAPIKeys)
 
-		// 吊销 API Key - 需要 api_key:manage 权限
-		apikeys.DELETE("/:id", middleware.CasbinMiddleware(enforcer, "api_key:manage", "manage"), apiKeyHandle.RevokeAPIKey)
+		// 吊销 API Key - 需要 api_key:write 权限
+		apikeys.DELETE("/:id", middleware.CasbinMiddleware(enforcer, "api_key", "write"), apiKeyHandle.RevokeAPIKey)
+
+		// 获取可用权限列表（公开给已认证用户）
+		apikeys.GET("/permissions", apiKeyHandle.GetPermissions)
 	}
 }

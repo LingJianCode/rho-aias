@@ -9,6 +9,9 @@
         <div class="stats-label">{{ label }}</div>
       </div>
     </div>
+    <div v-if="$slots.extra" class="stats-extra">
+      <slot name="extra" />
+    </div>
     <div v-if="trend !== undefined" class="stats-trend" :class="trendClass">
       <el-icon><component :is="trendIcon" /></el-icon>
       <span>{{ Math.abs(trend) }}%</span>
@@ -96,6 +99,13 @@ function formatBytes(bytes: number): string {
   gap: 4px;
   font-size: 14px;
   margin-top: 12px;
+}
+
+.stats-extra {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .stats-trend.trend-up {

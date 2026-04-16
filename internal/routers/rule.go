@@ -16,7 +16,7 @@ func RegisterRuleRoutes(group *gin.RouterGroup, ruleQueryHandle *handles.RuleQue
 	// 查询规则 - 需要 firewall:read 权限
 	rules.GET("",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "firewall:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "firewall", "read"),
 		ruleQueryHandle.GetRules,
 	)
 }

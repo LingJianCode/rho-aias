@@ -179,10 +179,19 @@ export interface IntelSourceStatus {
   updated: string
 }
 
+export interface IntelSourceDetail {
+  enabled: boolean
+  last_update: string
+  success: boolean
+  rule_count: number
+  error: string
+}
+
 export interface IntelStatus {
+  enabled: boolean
   last_update: string
   total_rules: number
-  sources: IntelSourceStatus[]
+  sources: Record<string, IntelSourceDetail>
 }
 
 // ============================================
@@ -294,4 +303,64 @@ export interface DashboardStats {
   block_trend: { date: string; count: number }[]
   recent_blocks: BlockLog[]
   source_status: { name: string; status: string }[]
+}
+
+// ============================================
+// 统一配置（运行时热更新）
+// ============================================
+
+export type ConfigModuleName = 'failguard' | 'waf' | 'rate_limit' | 'anomaly_detection' | 'geo_blocking' | 'intel' | 'xdp_events'
+
+export interface FailGuardConfig {
+  enabled?: boolean
+  max_retry?: number
+  find_time?: number
+  ban_duration?: number
+  mode?: 'normal' | 'ddos' | 'aggressive'
+}
+
+export interface WAFConfig {
+  enabled?: boolean
+  ban_duration?: number
+}
+
+export interface RateLimitConfig {
+  enabled?: boolean
+  ban_duration?: number
+}
+
+export interface BaselineConfig {
+  packets_per_sec?: number
+  bytes_per_sec?: number
+}
+
+export interface AttackConfig {
+  enabled?: boolean
+  threshold?: number
+  time_window?: number
+}
+
+export interface AnomalyDetectionConfig {
+  enabled?: boolean
+  min_packets?: number
+  ports?: number[]
+  baseline?: BaselineConfig
+  attacks?: Record<string, AttackConfig>
+}
+
+export interface GeoBlockingRuntimeConfig {
+  enabled?: boolean
+  mode?: 'whitelist' | 'blacklist'
+  allowed_countries?: string[]
+}
+
+export interface IntelSourceRuntimeConfig {
+  enabled?: boolean
+  schedule?: string
+  url?: string
+}
+
+export interface IntelRuntimeConfig {
+  enabled?: boolean
+  sources?: Record<string, IntelSourceRuntimeConfig>
 }

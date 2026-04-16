@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"rho-aias/internal/logger"
 	"sync"
 	"time"
 )
@@ -22,7 +23,7 @@ type Cache struct {
 func NewCache(dir string) *Cache {
 	// 确保目录存在
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		fmt.Printf("[Manual] Warning: failed to create cache dir: %v\n", err)
+		logger.Warnf("[Manual] Warning: failed to create cache dir: %v\n", err)
 	}
 	return &Cache{
 		dir: dir,
@@ -49,14 +50,14 @@ func (c *Cache) Save(data *CacheData) error {
 
 	encoder := gob.NewEncoder(f)
 	if err := encoder.Encode(data); err != nil {
-		f.Close() // 忽略关闭错误
+		f.Close()          // 忽略关闭错误
 		os.Remove(tmpPath) // 清理临时文件
 		return fmt.Errorf("encode cache data failed: %w", err)
 	}
 
 	// 2. 确保数据写入磁盘
 	if err := f.Sync(); err != nil {
-		f.Close() // 忽略关闭错误
+		f.Close()          // 忽略关闭错误
 		os.Remove(tmpPath) // 清理临时文件
 		return fmt.Errorf("sync cache data failed: %w", err)
 	}

@@ -33,6 +33,17 @@ func NewManualHandle(xdp *ebpfs.Xdp, cache *manual.Cache, checker *manual.Whitel
 	}
 }
 
+// Cache 返回内部缓存实例
+func (m *ManualHandle) Cache() *manual.Cache { return m.cache }
+
+// Checker 返回内部白名单检查器
+func (m *ManualHandle) Checker() *manual.WhitelistChecker { return m.checker }
+
+// GetWhitelistChecker 返回内部白名单检查器
+func (w *WhitelistHandle) GetWhitelistChecker() *manual.WhitelistChecker {
+	return w.checker
+}
+
 // SetWhitelistChecker 设置白名单检查器（支持延迟注入）
 func (m *ManualHandle) SetWhitelistChecker(checker *manual.WhitelistChecker) {
 	m.checker = checker
@@ -219,6 +230,12 @@ func NewWhitelistHandle(xdp *ebpfs.Xdp, cache *manual.Cache, checker *manual.Whi
 		checker: checker,
 	}
 }
+
+// Cache 返回内部缓存实例
+func (w *WhitelistHandle) Cache() *manual.Cache { return w.cache }
+
+// Checker 返回内部白名单检查器
+func (w *WhitelistHandle) Checker() *manual.WhitelistChecker { return w.checker }
 
 // AddWhitelistRule 添加白名单规则
 func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {

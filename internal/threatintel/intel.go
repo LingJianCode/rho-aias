@@ -27,6 +27,7 @@ type Manager struct {
 	cron    *cron.Cron                // Cron 调度器
 	jobIDs  map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
 	done    chan struct{}             // 停止信号
+	stopOnce sync.Once               // 确保 Stop 只执行一次
 	mu      sync.RWMutex              // 读写锁
 
 	// 状态管理
@@ -347,18 +348,51 @@ func (m *Manager) getEnabledSources() map[SourceID]config.IntelSource {
 	return sources
 }
 
-// GetStatus 获取威胁情报模块状态
+// GetStatus 获取威胁情报模块状态（优先查 DB，DB 无记录返回空）
 func (m *Manager) GetStatus() *Status {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	enabled := m.config.Enabled
+	configSources := m.config.Sources
+	m.mu.RUnlock()
 
-	statusCopy := *m.status
-	statusCopy.Sources = make(map[SourceID]SourceStatus)
-	for k, v := range m.status.Sources {
-		statusCopy.Sources[k] = v
+	result := Status{
+		Enabled: enabled,
+		Sources: make(map[SourceID]SourceStatus),
 	}
 
-	return &statusCopy
+	totalRules := 0
+	var latestUpdate time.Time
+
+	for id, src := range configSources {
+		record, err := feed.GetLatestSourceStatus(m.db, feed.SourceTypeIntel, string(id))
+		if err != nil || record == nil {
+			result.Sources[SourceID(id)] = SourceStatus{Enabled: src.Enabled}
+			continue
+		}
+
+		ss := SourceStatus{
+			Enabled:    src.Enabled,
+			LastUpdate: record.UpdatedAt,
+			Success:    record.Status == "success",
+			RuleCount:  record.RuleCount,
+			Error:      record.ErrorMessage,
+		}
+		result.Sources[SourceID(id)] = ss
+
+		if record.Status == "success" && record.RuleCount > 0 {
+			totalRules += record.RuleCount
+			if record.UpdatedAt.After(latestUpdate) {
+				latestUpdate = record.UpdatedAt
+			}
+		}
+	}
+
+	result.TotalRules = totalRules
+	if !latestUpdate.IsZero() {
+		result.LastUpdate = latestUpdate
+	}
+
+	return &result
 }
 
 // TriggerUpdate 手动触发威胁情报更新
@@ -370,14 +404,16 @@ func (m *Manager) TriggerUpdate() error {
 
 // UpdateSourceConfig 热更新情报源配置（单个源的 enabled/schedule/url）
 func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule string, url string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	wasEnabled := false
 
+	m.mu.Lock()
 	src, exists := m.config.Sources[sourceID]
 	if !exists {
+		m.mu.Unlock()
 		return fmt.Errorf("source %s not found", sourceID)
 	}
 
+	wasEnabled = src.Enabled
 	src.Enabled = enabled
 	if schedule != "" {
 		src.Schedule = schedule
@@ -401,6 +437,43 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule str
 				logger.Warnf("[ThreatIntel] Failed to reschedule %s: %v", sourceID, err)
 			}
 		}
+	}
+	m.mu.Unlock()
+
+	// 状态切换时的即时操作
+	switch {
+	case enabled && !wasEnabled:
+		// 从禁用→启用：立即拉取一次数据并同步到 eBPF map
+		go func() {
+			logger.Infof("[ThreatIntel] [%s] Immediate fetch triggered by config change", sourceID)
+			if err := m.updateSource(SourceID(sourceID), src); err != nil {
+				logger.Errorf("[ThreatIntel] [%s] Immediate fetch failed: %v", sourceID, err)
+				m.updateSourceStatus(SourceID(sourceID), false, 0, err.Error())
+			} else {
+				logger.Infof("[ThreatIntel] [%s] Immediate fetch completed, rules synced to eBPF", sourceID)
+			}
+			if err := m.saveCache(); err != nil {
+				logger.Errorf("[ThreatIntel] Failed to save cache after immediate fetch: %v", err)
+			}
+		}()
+	case !enabled && wasEnabled:
+		// 从启用→禁用：立即清理该源的规则并从 eBPF map 中移除
+		go func() {
+			sourceMask := sourceIDToMask(SourceID(sourceID))
+			logger.Infof("[ThreatIntel] [%s] Immediate cleanup triggered by config change (mask=0x%x)", sourceID, sourceMask)
+			if err := m.syncer.RemoveBySourceMask(sourceMask); err != nil {
+				logger.Errorf("[ThreatIntel] [%s] Cleanup failed: %v", sourceID, err)
+			} else {
+				logger.Infof("[ThreatIntel] [%s] Cleanup completed, rules removed from eBPF", sourceID)
+			}
+			// 清理内存中的源规则缓存
+			m.mu.Lock()
+			delete(m.sourceRules, SourceID(sourceID))
+			m.mu.Unlock()
+			if err := m.saveCache(); err != nil {
+				logger.Errorf("[ThreatIntel] Failed to save cache after cleanup: %v", err)
+			}
+		}()
 	}
 
 	logger.Infof("[ThreatIntel] Source config updated: %s, enabled=%v, schedule=%s", sourceID, enabled, schedule)
@@ -438,14 +511,16 @@ func (m *Manager) GetConfig() map[string]interface{} {
 	}
 }
 
-// Stop 停止威胁情报管理器
+// Stop 停止威胁情报管理器（幂等，多次调用安全）
 func (m *Manager) Stop() {
-	logger.Info("[ThreatIntel] Stopping threat intelligence manager...")
-	if m.cron != nil {
-		m.cron.Stop()
-	}
-	close(m.done)
-	logger.Info("[ThreatIntel] Stopped")
+	m.stopOnce.Do(func() {
+		logger.Info("[ThreatIntel] Stopping threat intelligence manager...")
+		if m.cron != nil {
+			m.cron.Stop()
+		}
+		close(m.done)
+		logger.Info("[ThreatIntel] Stopped")
+	})
 }
 
 // sourceIDToMask 将 SourceID 转换为来源掩码

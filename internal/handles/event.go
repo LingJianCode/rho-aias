@@ -22,7 +22,7 @@ func NewEventHandle(xdp *ebpfs.Xdp) *EventHandle {
 
 // EventConfigRequest 事件配置请求结构
 type EventConfigRequest struct {
-	Enabled    *bool  `json:"enabled"`     // 是否启用事件上报
+	Enabled    *bool   `json:"enabled"`     // 是否启用事件上报
 	SampleRate *uint32 `json:"sample_rate"` // 采样率
 }
 

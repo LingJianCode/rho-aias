@@ -13,7 +13,6 @@ func TestAsyncWriter_Write(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		Enabled:         true,
 		LogDir:          tmpDir,
 		MemoryCacheSize: 100,
 		BufferSize:      10,
@@ -84,7 +83,6 @@ func TestAsyncWriter_Stop(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		Enabled:         true,
 		LogDir:          tmpDir,
 		MemoryCacheSize: 100,
 		BufferSize:      100, // 增大缓冲区以防止记录被丢弃
@@ -138,33 +136,10 @@ func TestAsyncWriter_Stop(t *testing.T) {
 	}
 }
 
-func TestAsyncWriter_Disabled(t *testing.T) {
-	config := Config{
-		Enabled: false,
-	}
-
-	aw, err := NewAsyncWriter(config)
-	if err != nil {
-		t.Fatalf("Failed to create async writer: %v", err)
-	}
-
-	// 禁用时不应该做任何操作
-	record := BlockRecord{SrcIP: "192.168.1.1"}
-	if err := aw.Write(record); err != nil {
-		t.Fatalf("Write should succeed when disabled: %v", err)
-	}
-
-	// Stop 应该安全返回
-	if err := aw.Stop(); err != nil {
-		t.Fatalf("Stop should succeed when disabled: %v", err)
-	}
-}
-
 func TestBlockLog_WithPersistence(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		Enabled:         true,
 		LogDir:          tmpDir,
 		MemoryCacheSize: 100,
 		BufferSize:      10,

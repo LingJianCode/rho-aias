@@ -15,14 +15,26 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/dashboard' },
       { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/dashboard/DashboardView.vue') },
+      
+      // 安全态势（只读监控）
+      { path: 'security', name: 'Security', component: () => import('@/views/security/SecurityView.vue') },
+
+      // 防火墙
       { path: 'firewall/blacklist', name: 'Blacklist', component: () => import('@/views/firewall/BlacklistView.vue') },
       { path: 'firewall/whitelist', name: 'Whitelist', component: () => import('@/views/firewall/WhitelistView.vue') },
-      { path: 'blocklog', name: 'BlockLog', component: () => import('@/views/blocklog/BlockLogView.vue') },
-      { path: 'ban-records', name: 'BanRecords', component: () => import('@/views/ban-records/BanRecordsView.vue') },
-      { path: 'sources', name: 'Sources', component: () => import('@/views/sources/SourcesView.vue') },
-      { path: 'geoblocking', name: 'GeoBlocking', component: () => import('@/views/geoblocking/GeoBlockingView.vue') },
-      { path: 'settings/users', name: 'Users', component: () => import('@/views/settings/UsersView.vue'), meta: { requiresAdmin: true } },
-      { path: 'settings/api-keys', name: 'ApiKeys', component: () => import('@/views/settings/ApiKeysView.vue') },
+
+      // 日志
+      { path: 'logs/blocklog', name: 'BlockLog', component: () => import('@/views/blocklog/BlockLogView.vue') },
+      { path: 'logs/ban-records', name: 'BanRecords', component: () => import('@/views/ban-records/BanRecordsView.vue') },
+
+
+
+      // 系统设置
+      { path: 'settings', redirect: '/settings/config' },
+      { path: 'settings/config', name: 'Config', component: () => import('@/views/settings/ConfigPanel.vue'), meta: { title: '防护策略配置', requiresAdmin: true } },
+      { path: 'settings/users', name: 'Users', component: () => import('@/views/settings/UsersView.vue'), meta: { title: '用户管理', requiresAdmin: true } },
+      { path: 'settings/api-keys', name: 'ApiKeys', component: () => import('@/views/settings/ApiKeysView.vue'), meta: { title: 'API Keys', requiresAdmin: true } },
+      { path: 'settings/audit', name: 'Audit', component: () => import('@/views/settings/AuditPanel.vue'), meta: { title: '审计日志', requiresAdmin: true } },
     ],
   },
   { path: '/403', name: 'Forbidden', component: () => import('@/views/error/403.vue') },
