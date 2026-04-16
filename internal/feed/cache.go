@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"rho-aias/internal/logger"
 	"sync"
 	"time"
 )
@@ -28,7 +29,7 @@ type Cache[T any] struct {
 // filename: 缓存文件名
 func NewCache[T any](dir, filename string) *Cache[T] {
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		fmt.Printf("Warning: failed to create cache dir: %v\n", err)
+		logger.Warnf("Warning: failed to create cache dir: %v\n", err)
 	}
 	return &Cache[T]{dir: dir, filename: filename}
 }

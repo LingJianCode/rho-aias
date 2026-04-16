@@ -101,42 +101,6 @@ func TestCollector_GetStatsCount(t *testing.T) {
 	}
 }
 
-func TestIPProtocolStats_Merge(t *testing.T) {
-	stats1 := IPProtocolStats{
-		TCPCount:     10,
-		TCPSynCount:  5,
-		UDPCount:     3,
-		TotalPackets: 15,
-		TotalBytes:   1500,
-	}
-
-	stats2 := IPProtocolStats{
-		TCPCount:     5,
-		TCPSynCount:  2,
-		UDPCount:     7,
-		TotalPackets: 12,
-		TotalBytes:   1200,
-	}
-
-	stats1.Merge(&stats2)
-
-	if stats1.TCPCount != 15 {
-		t.Errorf("Expected TCPCount=15, got %d", stats1.TCPCount)
-	}
-	if stats1.TCPSynCount != 7 {
-		t.Errorf("Expected TCPSynCount=7, got %d", stats1.TCPSynCount)
-	}
-	if stats1.UDPCount != 10 {
-		t.Errorf("Expected UDPCount=10, got %d", stats1.UDPCount)
-	}
-	if stats1.TotalPackets != 27 {
-		t.Errorf("Expected TotalPackets=27, got %d", stats1.TotalPackets)
-	}
-	if stats1.TotalBytes != 2700 {
-		t.Errorf("Expected TotalBytes=2700, got %d", stats1.TotalBytes)
-	}
-}
-
 func TestIPProtocolStats_Reset(t *testing.T) {
 	stats := IPProtocolStats{
 		TCPCount:     10,

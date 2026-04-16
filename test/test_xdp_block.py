@@ -146,11 +146,9 @@ class RhoAiasProcess:
                 preexec_fn=os.setsid
             )
 
-            # 等待服务启动
-            time.sleep(3)
-
-            if self.process.poll() is not None:
-                logger.error(f"Process exited unexpectedly. Check log: {self.log_path}")
+            # 轮询等待服务就绪（端口可连），替代固定 sleep
+            if not self._wait_for_ready(timeout=15):
+                logger.error("Service did not become ready within 15s. Check log: %s", self.log_path)
                 return False
 
             logger.info(f"rho-aias started (PID: {self.process.pid})")
@@ -162,6 +160,27 @@ class RhoAiasProcess:
                 self.log_file.close()
             return False
     
+    def _wait_for_ready(self, timeout: int = 15) -> bool:
+        """轮询等待 HTTP 服务端口就绪"""
+        import urllib.request
+        import urllib.error
+        health_url = f"http://127.0.0.1:{self.api_port}/api/rules"
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.process.poll() is not None:
+                logger.error(f"Process exited unexpectedly (code={self.process.returncode}). Check log: {self.log_path}")
+                return False
+            try:
+                req = urllib.request.Request(health_url, headers={"X-API-Key": self.api_key})
+                with urllib.request.urlopen(req, timeout=2) as resp:
+                    if resp.status == 200:
+                        return True
+            except Exception:
+                pass
+            time.sleep(0.3)
+        logger.error(f"Timeout ({timeout}s): service not ready on port {self.api_port}")
+        return False
+
     def stop(self):
         """停止 rho-aias 进程"""
         if self.process:
@@ -560,9 +579,6 @@ class TestAPIKeyAuth(unittest.TestCase):
             "Failed to start rho-aias with auth"
         )
 
-        # 等待服务启动
-        time.sleep(2)
-
         # 使用 API Key 添加规则
         success, resp = self.api_client.add_rule("10.0.1.2")
         self.assertTrue(success, f"Failed to add rule with API Key: {resp}")
@@ -585,9 +601,6 @@ class TestAPIKeyAuth(unittest.TestCase):
             "Failed to start rho-aias with auth"
         )
 
-        # 等待服务启动
-        time.sleep(2)
-
         # 使用无效的 API Key 创建客户端
         invalid_client = APIClient(f"http://127.0.0.1:{self.api_port}", "sk_live_invalid-key-123456")
 
@@ -603,9 +616,6 @@ class TestAPIKeyAuth(unittest.TestCase):
             self._start_rho_with_auth("rho_akt_veth0"),
             "Failed to start rho-aias with auth"
         )
-
-        # 等待服务启动
-        time.sleep(2)
 
         # 测试只读权限（查询规则）
         success, resp = self.api_client.get_rules()

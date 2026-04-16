@@ -53,3 +53,24 @@ func CleanOldRecords(db *gorm.DB, sourceType, sourceID string) error {
 
 	return models.CleanOldRecords(db, sourceType, sourceID)
 }
+
+// GetLatestSourceStatus 查询指定数据源最新的状态记录（用于 GetStatus 接口）
+// 返回 nil 表示无历史记录
+func GetLatestSourceStatus(db *gorm.DB, sourceType, sourceID string) (*models.SourceStatusRecord, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database connection is nil")
+	}
+
+	var record models.SourceStatusRecord
+	err := db.Where("source_type = ? AND source_id = ?", sourceType, sourceID).
+		Order("id DESC").
+		First(&record).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to query source status: %w", err)
+	}
+	return &record, nil
+}

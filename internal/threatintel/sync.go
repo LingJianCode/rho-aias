@@ -184,3 +184,58 @@ func (s *Syncer) LoadAll(data *IntelData, sourceMask uint32) error {
 
 	return nil
 }
+
+// RemoveBySourceMask 按来源掩码从内核 eBPF map 中移除规则
+// 用于数据源禁用时立即清理该源的所有恶意 IP
+func (s *Syncer) RemoveBySourceMask(sourceMask uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. 获取当前内核中的所有规则
+	currentRules, err := s.xdp.GetRule()
+	if err != nil {
+		return fmt.Errorf("get current rules failed: %w", err)
+	}
+
+	// 2. 分类：仅该源拥有的（直接删除）vs 多源共有的（更新掩码）
+	var toRemove []string
+	var toUpdateMask []string
+
+	for _, r := range currentRules {
+		if r.Value.SourceMask&sourceMask == 0 {
+			continue // 不属于该源，跳过
+		}
+		if r.Value.SourceMask == sourceMask {
+			// 仅当前源拥有，直接删除
+			toRemove = append(toRemove, r.Key)
+		} else {
+			// 多源共有，按位移除当前源
+			toUpdateMask = append(toUpdateMask, r.Key)
+		}
+	}
+
+	// 3. 执行批量操作
+	if len(toRemove) > 0 {
+		if err := s.batchDelete(toRemove); err != nil {
+			return fmt.Errorf("batch delete failed: %w", err)
+		}
+		logger.Infof("[Syncer] Removed %d rules (source mask 0x%x)", len(toRemove), sourceMask)
+	}
+
+	if len(toUpdateMask) > 0 {
+		if _, err := s.xdp.BatchUpdateRuleSourceMask(toUpdateMask, sourceMask); err != nil {
+			return fmt.Errorf("batch update mask failed: %w", err)
+		}
+		logger.Infof("[Syncer] Updated mask for %d rules (removed source 0x%x)", len(toUpdateMask), sourceMask)
+	}
+
+	totalCleaned := len(toRemove) + len(toUpdateMask)
+	if totalCleaned > 0 {
+		logger.Infof("[Syncer] Cleanup done: removed=%d, updated_mask=%d, total=%d",
+			len(toRemove), len(toUpdateMask), totalCleaned)
+	} else {
+		logger.Infof("[Syncer] No rules found for source mask 0x%x, nothing to clean", sourceMask)
+	}
+
+	return nil
+}

@@ -85,9 +85,8 @@ auth:
 business:
   database_path: ./data/business.db  # 业务数据库路径（封禁记录、情报状态等）
 
-# 阻断日志配置
+# 阻断日志配置（始终持久化）
 blocklog:
-  enabled: true                    # 是否启用文件持久化
   log_dir: ./logs/blocklog       # 日志目录（按小时分割，格式：YYYY-MM-DD_HH.jsonl）
   memory_cache_size: 10000         # 内存缓存大小（用于实时查询）
   buffer_size: 1000                # 异步写入缓冲区大小

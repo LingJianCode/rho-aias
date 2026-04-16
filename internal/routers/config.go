@@ -16,21 +16,21 @@ func RegisterConfigRoutes(group *gin.RouterGroup, configHandle *handles.ConfigHa
 	// 获取所有模块配置 - 需要 config:read 权限
 	config.GET("",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "config:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "config", "read"),
 		configHandle.GetAllConfig,
 	)
 
 	// 获取指定模块配置 - 需要 config:read 权限
 	config.GET("/:module",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "config:read", "read"),
+		middleware.CasbinMiddleware(enforcer, "config", "read"),
 		configHandle.GetModuleConfig,
 	)
 
 	// 更新指定模块配置 - 需要 config:write 权限
 	config.PUT("/:module",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "config:write", "write"),
+		middleware.CasbinMiddleware(enforcer, "config", "write"),
 		configHandle.UpdateModuleConfig,
 	)
 }

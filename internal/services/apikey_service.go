@@ -10,23 +10,53 @@ import (
 
 	"rho-aias/internal/auth/apikey"
 	"rho-aias/internal/casbin"
+	"rho-aias/internal/logger"
 	"rho-aias/internal/models"
 
 	"gorm.io/gorm"
 )
 
-// ValidPermissions 定义有效的权限白名单
-var ValidPermissions = map[string]bool{
-	"firewall:read":  true,
-	"firewall:write": true,
-	"intel:read":     true,
-	"intel:write":    true,
-	"geo:read":       true,
-	"geo:write":      true,
-	"blocklog:read":  true,
-	"blocklog:clear": true,
-	"api_key:manage": true,
-	"admin:*":        true,
+// PermissionInfo 权限信息（单一数据源，同时用于校验和前端展示）
+type PermissionInfo struct {
+	Value string `json:"value"` // "firewall:read"
+	Label string `json:"label"` // "防火墙-读取"
+}
+
+// AllPermissions 定义全部有效权限（单一事实来源）
+// 新增权限只需在此处添加一行，校验和前端展示自动同步
+var allPermissions = []PermissionInfo{
+	{"firewall:read",    "防火墙-读取"},
+	{"firewall:write",   "防火墙-写入"},
+	{"intel:read",       "威胁情报-读取"},
+	{"intel:write",      "威胁情报-更新"},
+	{"geo:read",         "地理位置-读取"},
+	{"geo:write",        "地理位置-更新配置"},
+	{"blocklog:read",    "阻断日志-读取"},
+	{"blocklog:write",   "阻断日志-清除"},
+	{"config:read",      "系统配置-读取"},
+	{"config:write",     "系统配置-修改"},
+	{"source:read",      "数据源状态-读取"},
+	{"source:write",     "数据源状态-刷新"},
+	{"ban_record:read",  "封禁记录-读取"},
+	{"ban_record:write", "封禁记录-解封"},
+	{"api_key:read",     "API Key-查看"},
+	{"api_key:write",    "API Key-管理"},
+	{"admin:*",          "管理员全部权限"},
+}
+
+// ValidPermissions 从 allPermissions 派生的快速查找集合
+// 用于 CreateAPIKey 中 O(1) 校验前端传入的 permissions 字段
+var ValidPermissions = func() map[string]bool {
+	m := make(map[string]bool, len(allPermissions))
+	for _, p := range allPermissions {
+		m[p.Value] = true
+	}
+	return m
+}()
+
+// GetValidPermissions 返回有效权限列表（供前端渲染权限选择器）
+func (s *APIKeyService) GetValidPermissions() []PermissionInfo {
+	return allPermissions
 }
 
 var (
@@ -202,9 +232,16 @@ func (s *APIKeyService) ValidateAPIKey(key string) (*models.APIKey, error) {
 		return nil, errors.New("api key has expired")
 	}
 
-	// 更新最后使用时间
+	// 更新最后使用时间（原子操作：基于主键更新并检查影响行数）
 	now := time.Now()
-	s.db.Model(&apiKey).Update("last_used_at", now)
+	result := s.db.Model(&apiKey).Update("last_used_at", now)
+	if result.Error != nil {
+		logger.Warnf("[APIKey] Failed to update last_used_at for key %s: %v", apiKey.KeyPrefix, result.Error)
+	} else if result.RowsAffected == 0 {
+		logger.Warnf("[APIKey] last_updated update affected 0 rows (key may have been deleted): %s", apiKey.KeyPrefix)
+	}
 
+	// 清除敏感字段后再返回，防止哈希值泄露
+	apiKey.Key = ""
 	return &apiKey, nil
 }

@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -36,8 +38,11 @@ func AuthMiddleware(authService *services.AuthService, apiKeyService *services.A
 			keyRecord, err := apiKeyService.ValidateAPIKey(apiKey)
 			if err == nil {
 				// API Key 认证成功
+				// 用原始 key 计算 hash 构造 subject（keyRecord.Key 已被清空为安全考虑）
+				hash := sha256.Sum256([]byte(apiKey))
+				subject := fmt.Sprintf("apikey:%s", hex.EncodeToString(hash[:]))
 				c.Set(ContextKeyUserID, keyRecord.UserID)
-				c.Set(ContextKeySubject, fmt.Sprintf("apikey:%s", keyRecord.Key))
+				c.Set(ContextKeySubject, subject)
 				c.Set(ContextKeyAuthType, "api_key")
 				c.Set(ContextKeyUserRole, "api_key") // API Key 没有角色概念
 				c.Next()
