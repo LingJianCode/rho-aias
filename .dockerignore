@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# 前端（node_modules 不需要，dist 由多阶段构建生成）
+web/node_modules
+
+# 文档
+README.md
+*.md
+
+# 临时文件
+*.log
+.env*
+!.env.production
+
+# 测试
+test/
+
+# OS
+.DS_Store
+Thumbs.db

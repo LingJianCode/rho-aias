@@ -7,6 +7,7 @@ import (
 
 	"rho-aias/internal/bootstrap"
 	"rho-aias/internal/config"
+	"rho-aias/internal/frontend"
 	"rho-aias/internal/handles"
 	"rho-aias/internal/kernel"
 	"rho-aias/internal/logger"
@@ -101,6 +102,9 @@ func main() {
 
 	// Phase 6: 统一路由注册
 	bootstrap.RegisterAllRoutes(api, core, dbDeps, detectors, anomalyDeps, authDeps)
+
+	// Phase 6.5: 注册前端静态文件（SPA fallback）
+	frontend.RegisterFrontend(r)
 
 	// ConfigHandle (含 RestoreAll) + 注册路由
 	var configHandle *handles.ConfigHandle
