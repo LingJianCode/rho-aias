@@ -45,7 +45,7 @@ func (x *Xdp) AddGeoIPRule(cidrWithCountry string) error {
 		countryValue = uint32(countryCode[0])<<24 | uint32(countryCode[1])<<16
 	}
 
-	return x.objects.GeoIpv4Whitelist.Put(&key, &countryValue)
+	return x.objects.GeoIpv4Rules.Put(&key, &countryValue)
 }
 
 // BatchAddGeoIPRules 批量添加 GeoIP 规则
@@ -89,7 +89,7 @@ func (x *Xdp) BatchAddGeoIPRules(cidrs []string) error {
 	}
 
 	for i := range keys {
-		if err := x.objects.GeoIpv4Whitelist.Put(&keys[i], &values[i]); err != nil {
+		if err := x.objects.GeoIpv4Rules.Put(&keys[i], &values[i]); err != nil {
 			return fmt.Errorf("put GeoIP rule %d failed: %w", i, err)
 		}
 	}
@@ -120,7 +120,7 @@ func (x *Xdp) BatchDeleteGeoIPRules(cidrs []string) error {
 		ones, _ := ipNet.Mask.Size()
 		key.PrefixLen = uint32(ones)
 
-		if err := x.objects.GeoIpv4Whitelist.Delete(&key); err != nil {
+		if err := x.objects.GeoIpv4Rules.Delete(&key); err != nil {
 			errs = append(errs, fmt.Errorf("delete %s failed: %w", cidr, err))
 		}
 	}
@@ -133,7 +133,7 @@ func (x *Xdp) BatchDeleteGeoIPRules(cidrs []string) error {
 // GetGeoIPRules 获取所有 GeoIP 规则
 func (x *Xdp) GetGeoIPRules() ([]string, error) {
 	var rules []string
-	iter := x.objects.GeoIpv4Whitelist.Iterate()
+	iter := x.objects.GeoIpv4Rules.Iterate()
 
 	var key IPv4TrieKey
 	var countryValue uint32

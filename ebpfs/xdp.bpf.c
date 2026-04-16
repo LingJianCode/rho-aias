@@ -203,14 +203,14 @@ struct {
     __uint(max_entries, 1);
 } feature_flags SEC(".maps");
 
-// IPv4 GeoIP whitelist LPM trie
+// IPv4 GeoIP rules LPM trie (supports both whitelist and blacklist modes)
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
     __type(key, struct ipv4_trie_key);
     __type(value, __u32);  /* Country code as value */
     __uint(max_entries, 500000);  /* GeoLite2-Country.mmdb has ~500K+ networks */
     __uint(map_flags, BPF_F_NO_PREALLOC);
-} geo_ipv4_whitelist SEC(".maps");
+} geo_ipv4_rules SEC(".maps");
 
 // ============================================
 // IP Whitelist eBPF Maps
@@ -391,7 +391,7 @@ static __always_inline int check_geo_blocking(struct packet_info *pi) {
             .prefixlen = DEFAULT_IPV4_PREFIX,
             .addr = pi->src_ip
         };
-        __u32 *country = bpf_map_lookup_elem(&geo_ipv4_whitelist, &v4_key);
+        __u32 *country = bpf_map_lookup_elem(&geo_ipv4_rules, &v4_key);
 
         if (config->mode == 0) {  // Whitelist mode
             // Block if country not found
@@ -576,7 +576,7 @@ submit:
         int geo_result = check_geo_blocking(pkt_info);
         if (UNLIKELY(!geo_result)) {
             pkt_info->match_type = MATCH_BY_GEO_BLOCK;
-            return XDP_DROP;
+            goto drop_and_report;
         }
     }
 
@@ -591,7 +591,7 @@ submit:
             __u32 config_key = 0;
             struct anomaly_config *cfg = bpf_map_lookup_elem(&anomaly_config, &config_key);
             
-            // 只有在配置启用时才上报采样事件
+            // 只有在配置启用时才上报采样事件, 异常流量检测采样
             if (cfg && cfg->enabled) {
                 __u32 sample_rate = cfg->sample_rate;
                 if (sample_rate == 0) {
@@ -626,7 +626,9 @@ submit:
         return XDP_PASS;
     }
 
-    // 匹配规则则丢弃，并根据配置决定是否上报事件
+    // 匹配规则则丢弃（阻断日志），并根据配置决定是否上报事件
+    // 统一处理: Geo-blocking 和规则匹配的阻断都走此路径
+drop_and_report:
     {
         __u32 config_key = 0;
         struct event_config *cfg = bpf_map_lookup_elem(&event_config, &config_key);
