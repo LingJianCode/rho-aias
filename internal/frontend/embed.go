@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -65,7 +66,7 @@ var distFS embed.FS
 
 func RegisterFrontend(r *gin.Engine) {
 	// 全局中间件：仅匹配真实存在的普通文件，目录自动放行
-	r.Use(Serve("/", EmbedFolder(distFS, ".")))
+	r.Use(Serve("/", EmbedFolder(distFS, "dist")))
 
 	// SPA fallback
 	r.NoRoute(func(c *gin.Context) {
@@ -73,9 +74,9 @@ func RegisterFrontend(r *gin.Engine) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "API endpoint not found"})
 			return
 		}
-		data, err := fs.ReadFile(distFS, indexFile)
+		data, err := fs.ReadFile(distFS, path.Join("dist", indexFile))
 		if err != nil {
-			c.String(http.StatusInternalServerError, "frontend not built")
+			c.String(http.StatusInternalServerError, "frontend not built: %v", err)
 			return
 		}
 		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
