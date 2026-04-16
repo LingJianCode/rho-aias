@@ -28,6 +28,12 @@ func RegisterFrontend(r *gin.Engine) {
 	staticFiles, _ := fs.Sub(distContentFS, "assets")
 	r.StaticFS("/assets", http.FS(staticFiles))
 
+	// 根路径直接返回 index.html（避免 NoRoute 触发 301 目录重定向）
+	r.GET("/", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.FileFromFS("index.html", http.FS(distContentFS))
+	})
+
 	// favicon 等根级静态文件
 	r.GET("/favicon.svg", func(c *gin.Context) {
 		c.FileFromFS("favicon.svg", http.FS(distContentFS))
