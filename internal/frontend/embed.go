@@ -2,7 +2,6 @@ package frontend
 
 import (
 	"embed"
-	"io/fs"
 	"net/http"
 	"strings"
 
@@ -11,12 +10,6 @@ import (
 
 //go:embed dist/*
 var distFS embed.FS
-
-func init() {
-	if _, err := fs.Stat(distFS, "index.html"); err != nil {
-		panic("frontend: embedded dist/index.html not found, run 'npm run build' first")
-	}
-}
 
 // RegisterFrontend 将前端静态文件注册到 Gin 路由
 // 所有非 /api 开头的请求都会返回前端资源，支持 SPA history 模式
