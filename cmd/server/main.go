@@ -7,6 +7,7 @@ import (
 
 	"rho-aias/internal/bootstrap"
 	"rho-aias/internal/config"
+	"rho-aias/internal/frontend"
 	"rho-aias/internal/handles"
 	"rho-aias/internal/kernel"
 	"rho-aias/internal/logger"
@@ -112,6 +113,9 @@ func main() {
 		defer configHandle.GetLifecycle().ShutdownAll()
 		routers.RegisterConfigRoutes(api, configHandle, authDeps.Enforcer, authDeps.AuthService, authDeps.APIKeyService)
 	}
+
+	// Phase 6.5: 注册前端静态文件（SPA fallback）
+	frontend.RegisterFrontend(r)
 
 	// Phase 7: 启动 Server + 优雅退出
 	bootstrap.StartServer(cfg, r, ctx, cancel, dbDeps.BizDB)

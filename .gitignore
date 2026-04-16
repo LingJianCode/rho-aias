@@ -22,3 +22,4 @@ caddy/data
 caddy/.local
 
 *.mmdb
+dist
