@@ -1,0 +1,22 @@
+html.dark {
+  --el-bg-color: #141414;
+  --el-bg-color-page: #0a0a0a;
+  --el-text-color-primary: #e5eaf3;
+  --el-text-color-regular: #cfd3dc;
+  --el-border-color: #4c4d4f;
+  --el-border-color-light: #414243;
+  --el-border-color-lighter: #363637;
+  --el-fill-color: #1d1d1d;
+  --el-fill-color-light: #262727;
+  --el-fill-color-lighter: #1d1d1d;
+}
+
+html.dark .default-layout {
+  .sidebar {
+    background-color: #1d1d1d;
+  }
+  .header {
+    background-color: #1d1d1d;
+    border-bottom-color: #4c4d4f;
+  }
+}
