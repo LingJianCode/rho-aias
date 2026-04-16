@@ -45,8 +45,8 @@ RUN go mod download
 # 复制源代码（不含 web 目录中的 node_modules 等冗余文件）
 COPY . .
 
-# 将前一阶段的前端构建产物复制到 frontend/web/dist（供 go:embed 引用）
-COPY --from=frontend-builder /web/dist ./internal/frontend/dist
+# 将前一阶段前端产物内容复制到 internal/frontend/dist/（供 go:embed 引用）
+COPY --from=frontend-builder /web/dist/. ./internal/frontend/dist/
 
 # 生成 vmlinux.h（CO-RE 头文件）
 RUN if [ -f /sys/kernel/btf/vmlinux ]; then \
