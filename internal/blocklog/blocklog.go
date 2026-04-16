@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"rho-aias/internal/logger"
+
+	"gorm.io/gorm"
 )
 
 // BlockRecord 阻断记录
@@ -155,6 +157,7 @@ func (c *blockLogCounters) snapshot() Stats {
 }
 
 // NewBlockLogWithPersistence 创建带持久化的阻断日志管理器
+// StatsStore 延迟注入，由调用方在 bizDB 就绪后通过 AttachStatsStore 注入
 func NewBlockLogWithPersistence(maxSize int, config Config) (*BlockLog, error) {
 	bl := NewBlockLog(maxSize)
 
@@ -165,15 +168,14 @@ func NewBlockLogWithPersistence(maxSize int, config Config) (*BlockLog, error) {
 	}
 	bl.asyncWriter = asyncWriter
 
-	// 初始化统计存储（SQLite，失败不阻塞启动）
-	statsStore, err := NewStatsStore(config.LogDir)
-	if err != nil {
-		logger.Warnf("[BlockLog] init stats store failed (non-fatal): %v", err)
-	} else {
-		bl.statsStore = statsStore
-	}
+	// StatsStore 不再在此创建，等待 AttachStatsStore 注入
 
 	return bl, nil
+}
+
+// AttachStatsStore 注入统计存储（需在业务数据库初始化后调用）
+func (bl *BlockLog) AttachStatsStore(db *gorm.DB) {
+	bl.statsStore = NewStatsStore(db)
 }
 
 // AddRecord 添加阻断记录
@@ -324,11 +326,8 @@ func (bl *BlockLog) Clear() {
 	}
 }
 
-// Close 关闭阻断日志管理器（停止异步写入器、关闭统计存储）
+// Close 关闭阻断日志管理器（停止异步写入器）
 func (bl *BlockLog) Close() error {
-	if bl.statsStore != nil {
-		bl.statsStore.Close()
-	}
 	if bl.asyncWriter != nil {
 		return bl.asyncWriter.Stop()
 	}

@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestAsyncWriter_Write(t *testing.T) {
@@ -29,7 +32,6 @@ func TestAsyncWriter_Write(t *testing.T) {
 		}
 	}()
 
-	// 写入测试记录
 	record := BlockRecord{
 		Timestamp:  time.Now().UnixNano(),
 		SrcIP:      "192.168.1.1",
@@ -41,13 +43,10 @@ func TestAsyncWriter_Write(t *testing.T) {
 		t.Fatalf("Failed to write record: %v", err)
 	}
 
-	// 等待写入完成
 	time.Sleep(200 * time.Millisecond)
 
-	// 手动刷新
 	aw.Flush()
 
-	// 验证文件
 	files, err := os.ReadDir(tmpDir)
 	if err != nil {
 		t.Fatalf("Failed to read directory: %v", err)
@@ -57,7 +56,6 @@ func TestAsyncWriter_Write(t *testing.T) {
 		t.Errorf("Expected 1 file, got %d", len(files))
 	}
 
-	// 验证内容
 	file, err := os.Open(filepath.Join(tmpDir, files[0].Name()))
 	if err != nil {
 		t.Fatalf("Failed to open file: %v", err)
@@ -85,7 +83,7 @@ func TestAsyncWriter_Stop(t *testing.T) {
 	config := Config{
 		LogDir:          tmpDir,
 		MemoryCacheSize: 100,
-		BufferSize:      100, // 增大缓冲区以防止记录被丢弃
+		BufferSize:      100,
 		FlushInterval:   time.Second,
 	}
 
@@ -94,7 +92,6 @@ func TestAsyncWriter_Stop(t *testing.T) {
 		t.Fatalf("Failed to create async writer: %v", err)
 	}
 
-	// 写入一些记录
 	for i := 0; i < 10; i++ {
 		record := BlockRecord{
 			Timestamp:  time.Now().UnixNano(),
@@ -107,21 +104,17 @@ func TestAsyncWriter_Stop(t *testing.T) {
 		}
 	}
 
-	// 等待一下让写入协程处理记录
 	time.Sleep(100 * time.Millisecond)
 
-	// 停止应该等待所有记录写入
 	if err := aw.Stop(); err != nil {
 		t.Fatalf("Failed to stop: %v", err)
 	}
 
-	// 验证文件
 	files, _ := os.ReadDir(tmpDir)
 	if len(files) != 1 {
 		t.Errorf("Expected 1 file, got %d", len(files))
 	}
 
-	// 计算行数
 	file, _ := os.Open(filepath.Join(tmpDir, files[0].Name()))
 	defer file.Close()
 
@@ -151,42 +144,45 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 		t.Fatalf("Failed to create block log with persistence: %v", err)
 	}
 
-	// 添加记录
+	// 注入内存中的 GORM SQLite 连接（模拟两阶段初始化）
+	testDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("Failed to open test db: %v", err)
+	}
+	testDB.AutoMigrate(&struct {
+		Hour       string `gorm:"primaryKey;size:13"`
+		RuleSource string `gorm:"primaryKey;size:50"`
+		Count      int64
+	}{})
+	bl.AttachStatsStore(testDB)
+
 	record := BlockRecord{
 		Timestamp:  time.Now().UnixNano(),
 		SrcIP:      "192.168.1.1",
 		MatchType:  "ip4_exact",
 		PacketSize: 64,
+		RuleSource: "test_source",
 	}
 	bl.AddRecord(record)
 
-	// 验证内存中有记录
 	if bl.Count() != 1 {
 		t.Errorf("Expected 1 record in memory, got %d", bl.Count())
 	}
 
-	// 等待异步写入
 	time.Sleep(200 * time.Millisecond)
 	bl.Flush()
 
-	// 关闭
 	if err := bl.Close(); err != nil {
 		t.Fatalf("Failed to close: %v", err)
 	}
 
-	// 验证文件（AsyncWriter 日志 + StatsStore SQLite 数据库）
 	files, _ := os.ReadDir(tmpDir)
-	if len(files) < 2 {
-		t.Errorf("Expected at least 2 files (log + sqlite), got %d", len(files))
-	}
-
-	// 验证日志文件存在且内容正确
-	var foundLog bool
+	var logFileFound bool
 	for _, f := range files {
 		if f.Name() == "blocklog_stats.db" {
-			continue // 跳过 SQLite 数据库文件
+			t.Errorf("StatsStore should not create its own database file anymore, but found: %s", f.Name())
 		}
-		foundLog = true
+		logFileFound = true
 
 		file, err := os.Open(filepath.Join(tmpDir, f.Name()))
 		if err != nil {
@@ -212,7 +208,7 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 		break
 	}
 
-	if !foundLog {
+	if !logFileFound {
 		t.Error("Expected to find a log file, but none found")
 	}
 }

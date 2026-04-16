@@ -63,6 +63,7 @@ func (db *Database) AutoMigrateBusiness() error {
 		&models.SourceStatusRecord{},
 		&models.BanRecord{},
 		&models.DynamicConfig{},
+		&models.HourlyStat{},
 	); err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import (
 	"rho-aias/internal/response"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // BlockLogHandle 阻断日志 API 处理器
@@ -18,6 +19,13 @@ type BlockLogHandle struct {
 func NewBlockLogHandle(blockLog *blocklog.BlockLog) *BlockLogHandle {
 	return &BlockLogHandle{
 		blockLog: blockLog,
+	}
+}
+
+// AttachStatsStore 注入统计存储（两阶段初始化：bizDB 就绪后调用）
+func (h *BlockLogHandle) AttachStatsStore(db *gorm.DB) {
+	if h.blockLog != nil {
+		h.blockLog.AttachStatsStore(db)
 	}
 }
 
