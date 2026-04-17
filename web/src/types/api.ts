@@ -91,7 +91,7 @@ export interface BlockLog {
 }
 
 export interface BlockLogListResponse {
-  items: BlockLog[]
+  records: BlockLog[]
   total: number
 }
 

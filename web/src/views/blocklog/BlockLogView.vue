@@ -189,7 +189,11 @@ async function fetchLogs() {
       ip: filters.ip || undefined,
       source: filters.source || undefined,
     })
-    logs.value = res.data.items
+    logs.value = res.data.records.map((r: any) => ({
+      ...r,
+      source: r.source || r.rule_source,
+      timestamp: typeof r.timestamp === 'number' ? new Date(r.timestamp / 1e6).toISOString() : r.timestamp,
+    }))
     total.value = res.data.total
   } catch {
     logs.value = []
