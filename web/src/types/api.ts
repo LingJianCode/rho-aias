@@ -144,24 +144,6 @@ export interface BanRecordStats {
 }
 
 // ============================================
-// 数据源状态
-// ============================================
-
-export interface SourceStatusRecord {
-  id: number
-  source_type: string
-  source_id: string
-  source_name: string
-  status: 'success' | 'failed'
-  rule_count: number
-  error_message: string
-  duration: number
-  updated_at: string
-}
-
-export type SourcesStatusResponse = Record<string, Record<string, SourceStatusRecord>>
-
-// ============================================
 // 威胁情报
 // ============================================
 
@@ -280,11 +262,9 @@ export interface BlockLogEventStatus {
 export interface DashboardStats {
   total_blocks: number
   active_rules: number
-  healthy_sources: number
   today_bans: number
   block_trend: { date: string; count: number }[]
   recent_blocks: BlockLog[]
-  source_status: { name: string; status: string }[]
 }
 
 // ============================================

@@ -58,9 +58,6 @@ func registerBizRoutes(
 		return
 	}
 
-	sourceHandle := handles.NewSourceHandle(bizDB.DB, intelMgr, geoMgr)
-	routers.RegisterSourceRoutes(api, sourceHandle, enforcer, authSvc, apiKeySvc)
-
 	if intelMgr != nil {
 		intelHandle := handles.NewIntelHandle(intelMgr)
 		routers.RegisterIntelRoutes(api, intelHandle, enforcer, authSvc, apiKeySvc)

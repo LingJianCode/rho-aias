@@ -149,11 +149,13 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test db: %v", err)
 	}
-	testDB.AutoMigrate(&struct {
+	if err := testDB.AutoMigrate(&struct {
 		Hour       string `gorm:"primaryKey;size:13"`
 		RuleSource string `gorm:"primaryKey;size:50"`
 		Count      int64
-	}{})
+	}{}); err != nil {
+		t.Fatalf("Failed to migrate test db: %v", err)
+	}
 	bl.AttachStatsStore(testDB)
 
 	record := BlockRecord{
@@ -178,7 +180,8 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 
 	files, _ := os.ReadDir(tmpDir)
 	var logFileFound bool
-	for _, f := range files {
+	if len(files) > 0 {
+		f := files[0]
 		if f.Name() == "blocklog_stats.db" {
 			t.Errorf("StatsStore should not create its own database file anymore, but found: %s", f.Name())
 		}
@@ -205,7 +208,6 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 		if readRecord.SrcIP != record.SrcIP {
 			t.Errorf("Expected SrcIP %s, got %s", record.SrcIP, readRecord.SrcIP)
 		}
-		break
 	}
 
 	if !logFileFound {

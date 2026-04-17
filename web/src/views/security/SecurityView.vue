@@ -11,11 +11,8 @@
       </el-col>
     </el-row>
     <el-row :gutter="20" style="margin-top: 20px">
-      <el-col :span="12">
+      <el-col :span="24">
         <GeoPanel />
-      </el-col>
-      <el-col :span="12">
-        <SourcesPanel />
       </el-col>
     </el-row>
   </div>
@@ -24,7 +21,7 @@
 <script setup lang="ts">
 import IntelEventPanel from './IntelEventPanel.vue'
 import GeoPanel from './GeoPanel.vue'
-import SourcesPanel from './SourcesPanel.vue'
+
 </script>
 
 <style lang="scss" scoped>
