@@ -63,9 +63,6 @@
         <el-form-item>
           <el-button type="primary" @click="handleSearch">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
-          <el-button type="danger" v-if="authStore.hasPermission('blocklog:clear')" @click="handleClear">
-            清除日志
-          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -126,7 +123,7 @@ function formatNanoTimestamp(ts: number | string): string {
 }
 import { useConfirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
-import { getBlockLogs, getBlockLogStats, clearBlockLogs } from '@/api/blocklog'
+import { getBlockLogs, getBlockLogStats } from '@/api/blocklog'
 import type { BlockLog, BlockLogStats } from '@/types/api'
 
 const { confirm } = useConfirm()
@@ -213,17 +210,6 @@ function handleReset() {
   fetchLogs()
 }
 
-async function handleClear() {
-  if (!(await confirm({ title: '清除日志', message: '确定要清除所有阻断日志吗？此操作不可恢复。' }))) return
-  try {
-    await clearBlockLogs()
-    ElMessage.success('清除成功')
-    fetchStats()
-    fetchLogs()
-  } catch {
-    // Error handled
-  }
-}
 
 onMounted(() => {
   fetchStats()

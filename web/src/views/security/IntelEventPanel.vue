@@ -77,9 +77,9 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Monitor } from '@element-plus/icons-vue'
 import { getIntelStatus, triggerIntelUpdate } from '@/api/intel'
-import { getEventStatus } from '@/api/events'
+import { getBlockLogEventStatus } from '@/api/blocklog'
 import { formatDateTime, formatNumber, formatRelativeTime } from '@/utils/format'
-import type { IntelStatus, EventStatus } from '@/types/api'
+import type { IntelStatus, BlockLogEventStatus } from '@/types/api'
 
 const loading = ref(false)
 const refreshing = ref(false)
@@ -89,7 +89,7 @@ const intelStatus = ref<IntelStatus>({
   total_rules: 0,
   sources: {},
 })
-const eventStatus = ref<EventStatus>({
+const eventStatus = ref<BlockLogEventStatus>({
   enabled: false,
   sample_rate: 0,
 })
@@ -106,7 +106,7 @@ async function fetchData() {
   try {
     const [intelRes, eventRes] = await Promise.all([
       getIntelStatus(),
-      getEventStatus(),
+      getBlockLogEventStatus(),
     ])
     intelStatus.value = intelRes.data
     eventStatus.value = eventRes.data

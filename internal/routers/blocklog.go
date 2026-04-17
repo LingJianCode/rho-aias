@@ -54,4 +54,11 @@ func RegisterBlockLogRoutes(group *gin.RouterGroup, blockLogHandle *handles.Bloc
 		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
 		blockLogHandle.GetDroppedSummary,
 	)
+
+	// 查看阻断事件上报状态 - 需要 blocklog:read 权限
+	blocklog.GET("/event-status",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
+		blockLogHandle.GetEventStatus,
+	)
 }

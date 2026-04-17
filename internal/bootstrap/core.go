@@ -59,7 +59,7 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 		record := blocklog.CreateRecord(srcIP, dstIP, matchType, ruleSource, countryCode, packetSize)
 		blockLog.AddRecord(record)
 	})
-	blockLogHandle := handles.NewBlockLogHandle(blockLog)
+	blockLogHandle := handles.NewBlockLogHandle(blockLog, xdp)
 
 	return &CoreDependencies{
 		XDP:             xdp,

@@ -273,14 +273,9 @@ export interface AuditLogsResponse {
 // XDP 事件
 // ============================================
 
-export interface EventStatus {
+export interface BlockLogEventStatus {
   enabled: boolean
   sample_rate: number
-}
-
-export interface EventConfigRequest {
-  enabled?: boolean
-  sample_rate?: number
 }
 
 // ============================================

@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"rho-aias/internal/blocklog"
+	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/response"
 
 	"github.com/gin-gonic/gin"
@@ -13,12 +14,14 @@ import (
 // BlockLogHandle 阻断日志 API 处理器
 type BlockLogHandle struct {
 	blockLog *blocklog.BlockLog
+	xdp      *ebpfs.Xdp
 }
 
 // NewBlockLogHandle 创建新的阻断日志处理器
-func NewBlockLogHandle(blockLog *blocklog.BlockLog) *BlockLogHandle {
+func NewBlockLogHandle(blockLog *blocklog.BlockLog, xdp *ebpfs.Xdp) *BlockLogHandle {
 	return &BlockLogHandle{
 		blockLog: blockLog,
+		xdp:      xdp,
 	}
 }
 
@@ -164,4 +167,28 @@ func (h *BlockLogHandle) GetDroppedSummary(c *gin.Context) {
 
 func parseInt(s string) (int, error) {
 	return strconv.Atoi(s)
+}
+
+// EventStatusResponse 事件状态响应结构
+type EventStatusResponse struct {
+	Enabled    bool   `json:"enabled"`     // 是否启用
+	SampleRate uint32 `json:"sample_rate"` // 采样率
+}
+
+// GetEventStatus 获取阻断事件上报状态
+// GET /api/blocklog/event-status
+func (h *BlockLogHandle) GetEventStatus(c *gin.Context) {
+	if h.xdp == nil {
+		response.OK(c, EventStatusResponse{Enabled: false, SampleRate: 0})
+		return
+	}
+	config, err := h.xdp.GetEventConfig()
+	if err != nil {
+		config = ebpfs.DefaultEventConfig()
+	}
+
+	response.OK(c, EventStatusResponse{
+		Enabled:    config.Enabled == 1,
+		SampleRate: config.SampleRate,
+	})
 }

@@ -1,5 +1,5 @@
 import request from './request'
-import type { ApiResponse, BlockLogListResponse, BlockLogStats, CountryCount } from '@/types/api'
+import type { ApiResponse, BlockLogListResponse, BlockLogStats, CountryCount,BlockLogEventStatus } from '@/types/api'
 
 export interface BlockLogFilter {
   hour?: string
@@ -27,6 +27,6 @@ export function getBlockedCountries(limit?: number): Promise<ApiResponse<{ total
   return request.get('/api/blocklog/blocked-countries', { params: { limit } }).then((res) => res.data)
 }
 
-export function clearBlockLogs(): Promise<ApiResponse<void>> {
-  return request.delete('/api/blocklog/records').then((res) => res.data)
+export function getBlockLogEventStatus(): Promise<ApiResponse<BlockLogEventStatus>> {
+  return request.get('/api/blocklog/event-status').then((res) => res.data)
 }
