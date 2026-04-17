@@ -4,39 +4,7 @@
       <h2>仪表盘</h2>
     </div>
 
-    <!-- 第一行：系统运行状态概览 -->
-    <el-row :gutter="12" class="stats-row">
-      <el-col :span="5">
-        <div class="stat-card-clickable">
-          <StatsCard label="XDP 事件上报" :value="systemStatus.eventEnabled ? Number((100 / systemStatus.eventSampleRate).toFixed(1)) : 0" :icon="Connection" icon-color="#409eff">
-            <template #extra>{{ systemStatus.eventEnabled ? `${Number((100 / systemStatus.eventSampleRate).toFixed(1))}% · 运行中` : '已停止' }}</template>
-          </StatsCard>
-        </div>
-      </el-col>
-      <el-col :span="5">
-        <div class="stat-card-clickable">
-          <StatsCard label="威胁情报规则" :value="systemStatus.intelTotalRules" :icon="Cpu" icon-color="#67c23a">
-            <template #extra>{{ systemStatus.intelEnabled ? '已启用' : '未启用' }}</template>
-          </StatsCard>
-        </div>
-      </el-col>
-      <el-col :span="5">
-        <div class="stat-card-clickable">
-          <StatsCard label="地域封禁规则" :value="systemStatus.geoTotalRules" :icon="Location" icon-color="#e6a23c">
-            <template #extra>{{ systemStatus.geoMode === 'whitelist' ? '白名单' : systemStatus.geoMode === 'blacklist' ? '黑名单' : '未启用' }}</template>
-          </StatsCard>
-        </div>
-      </el-col>
-      <el-col :span="5">
-        <div class="stat-card-clickable">
-          <StatsCard label="生效封禁数" :value="systemStatus.activeBans" :icon="Lock" icon-color="#f56c6c">
-            <template #extra>共 {{ systemStatus.totalBans }} 条</template>
-          </StatsCard>
-        </div>
-      </el-col>
-    </el-row>
-
-    <!-- 第二行：阻断态势图 + TOP 被封国家/来源 -->
+    <!-- 阻断态势图 + TOP 被封国家/来源 -->
     <el-row :gutter="20">
       <el-col :span="16">
         <el-card>
@@ -104,36 +72,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
-import { Connection, Cpu, Location, Lock } from '@element-plus/icons-vue'
-import StatsCard from '@/components/StatsCard.vue'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
 import { formatDateTime, formatNumber } from '@/utils/format'
-// 系统状态类 API
-import { getEventStatus } from '@/api/events'
-import { getIntelStatus } from '@/api/intel'
-import { getGeoBlockingStatus } from '@/api/geoblocking'
 // 统计与趋势
 import { getBlockLogStats, getBlockLogs, getBlockedCountries } from '@/api/blocklog'
-import { getBanRecordStats } from '@/api/ban-records'
 import type { BlockLog } from '@/types/api'
 
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
-
-const systemStatus = reactive({
-  eventEnabled: false,
-  eventSampleRate: 0,
-  intelEnabled: false,
-  intelTotalRules: 0,
-  geoEnabled: false,
-  geoMode: '' as string,
-  geoTotalRules: 0,
-  activeBans: 0,
-  totalBans: 0,
-})
 
 const topCountries = ref<{ country: string; count: number }[]>([])
 const recentBlocks = ref<BlockLog[]>([])
@@ -141,53 +90,11 @@ const blockTrend = ref<{ date: string; count: number }[]>([])
 
 async function fetchDashboardData() {
   await Promise.all([
-    fetchSystemStatus(),
-    fetchBanStats(),
     fetchBlockStatsAndTrend(),
     fetchTopCountries(),
     fetchRecentBlocks(),
   ])
   updateChart()
-}
-
-async function fetchSystemStatus() {
-  try {
-    const [eventRes, intelRes, geoRes] = await Promise.all([
-      getEventStatus(),
-      getIntelStatus(),
-      getGeoBlockingStatus(),
-    ])
-    // XDP 上报状态
-    if (eventRes.data) {
-      systemStatus.eventEnabled = eventRes.data.enabled
-      systemStatus.eventSampleRate = eventRes.data.sample_rate || 0
-    }
-    // 威胁情报状态
-    if (intelRes.data) {
-      systemStatus.intelEnabled = intelRes.data.enabled
-      systemStatus.intelTotalRules = intelRes.data.total_rules || 0
-    }
-    // 地域封禁状态
-    if (geoRes.data) {
-      systemStatus.geoEnabled = geoRes.data.enabled
-      systemStatus.geoMode = geoRes.data.mode || ''
-      systemStatus.geoTotalRules = geoRes.data.total_rules || 0
-    }
-  } catch {
-    // Error handled
-  }
-}
-
-async function fetchBanStats() {
-  try {
-    const res = await getBanRecordStats()
-    if (res.data) {
-      systemStatus.activeBans = res.data.active || 0
-      systemStatus.totalBans = res.data.total || 0
-    }
-  } catch {
-    // Error handled
-  }
 }
 
 async function fetchBlockStatsAndTrend() {
@@ -266,15 +173,6 @@ onUnmounted(() => {
 </script>
 
 <style lang="scss" scoped>
-.stat-card-clickable {
-  cursor: pointer;
-  transition: transform 0.15s;
-
-  &:hover {
-    transform: translateY(-2px);
-  }
-}
-
 .rank-list {
   max-height: 300px;
   overflow-y: auto;
