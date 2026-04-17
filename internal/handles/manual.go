@@ -1,32 +1,36 @@
 package handles
 
 import (
+	"os"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
 	"rho-aias/internal/response"
 	"rho-aias/utils"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
 type rule struct {
-	Value string
+	Value  string `json:"value"`
+	Remark string `json:"remark"`
 }
 
-// ManualHandle 手动规则管理 API 处理器
-type ManualHandle struct {
+// BlocklistHandle 手动规则管理 API 处理器
+type BlocklistHandle struct {
 	xdp     *ebpfs.Xdp
 	cache   *manual.Cache
-	mu      sync.Mutex // 保护缓存 read-modify-write 的原子性
+	mu      sync.Mutex               // 保护缓存 read-modify-write 的原子性
 	checker *manual.WhitelistChecker // 用户态白名单检查器（可选）
 }
 
-// NewManualHandle 创建新的手动规则处理器
-func NewManualHandle(xdp *ebpfs.Xdp, cache *manual.Cache, checker *manual.WhitelistChecker) *ManualHandle {
-	return &ManualHandle{
+// NewBlocklistHandle 创建新的手动规则处理器
+func NewBlocklistHandle(xdp *ebpfs.Xdp, cache *manual.Cache, checker *manual.WhitelistChecker) *BlocklistHandle {
+	return &BlocklistHandle{
 		xdp:     xdp,
 		cache:   cache,
 		checker: checker,
@@ -34,10 +38,10 @@ func NewManualHandle(xdp *ebpfs.Xdp, cache *manual.Cache, checker *manual.Whitel
 }
 
 // Cache 返回内部缓存实例
-func (m *ManualHandle) Cache() *manual.Cache { return m.cache }
+func (m *BlocklistHandle) Cache() *manual.Cache { return m.cache }
 
 // Checker 返回内部白名单检查器
-func (m *ManualHandle) Checker() *manual.WhitelistChecker { return m.checker }
+func (m *BlocklistHandle) Checker() *manual.WhitelistChecker { return m.checker }
 
 // GetWhitelistChecker 返回内部白名单检查器
 func (w *WhitelistHandle) GetWhitelistChecker() *manual.WhitelistChecker {
@@ -45,12 +49,12 @@ func (w *WhitelistHandle) GetWhitelistChecker() *manual.WhitelistChecker {
 }
 
 // SetWhitelistChecker 设置白名单检查器（支持延迟注入）
-func (m *ManualHandle) SetWhitelistChecker(checker *manual.WhitelistChecker) {
+func (m *BlocklistHandle) SetWhitelistChecker(checker *manual.WhitelistChecker) {
 	m.checker = checker
 }
 
-// AddRule 添加过滤规则
-func (m *ManualHandle) AddRule(c *gin.Context) {
+// AddBlocklistRule 添加过滤规则
+func (m *BlocklistHandle) AddBlocklistRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -73,6 +77,15 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 		return
 	}
 
+	// 重复检查：阻止添加已在磁盘缓存中的规则
+	if m.cache != nil && m.cache.DataExists(manual.CacheFileBlocklist) {
+		if cacheData, err := m.cache.LoadData(manual.CacheFileBlocklist); err == nil && cacheData.HasRule(value) {
+			logger.Warnf("[Manual] IP/CIDR %s already exists in cache, skipping", value)
+			response.Conflict(c, response.CodeRuleConflict, "IP/CIDR already exists in blacklist")
+			return
+		}
+	}
+
 	//1. 添加到 eBPF map
 	err := m.xdp.AddRule(value)
 	if err != nil {
@@ -82,7 +95,7 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 
 	// 2. 保存到缓存（如果启用了持久化）
 	if m.cache != nil {
-		if err := m.saveRuleToCache(value); err != nil {
+		if err := m.saveRuleToCache(value, req.Remark); err != nil {
 			logger.Warnf("[Manual] Failed to save rule to cache: %v", err)
 			// 不影响 API 响应，因为 eBPF 已经添加成功
 		}
@@ -91,8 +104,8 @@ func (m *ManualHandle) AddRule(c *gin.Context) {
 	response.OKMsg(c, "ok")
 }
 
-// DelRule 删除过滤规则
-func (m *ManualHandle) DelRule(c *gin.Context) {
+// DelBlocklistRule 删除过滤规则
+func (m *BlocklistHandle) DelBlocklistRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -119,43 +132,43 @@ func (m *ManualHandle) DelRule(c *gin.Context) {
 }
 
 // saveRuleToCache 保存规则到缓存
-func (m *ManualHandle) saveRuleToCache(value string) error {
+func (m *BlocklistHandle) saveRuleToCache(value, remark string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// 加载现有缓存
-	var cacheData *manual.CacheData
-	if m.cache.Exists() {
-		data, err := m.cache.Load()
+	var cacheData *manual.RuleCacheData
+	if m.cache.DataExists(manual.CacheFileBlocklist) {
+		data, err := m.cache.LoadData(manual.CacheFileBlocklist)
 		if err != nil {
 			// 如果加载失败，创建新的缓存数据
-			cacheData = manual.NewCacheData()
+			cacheData = manual.NewRuleCacheData()
 		} else {
 			cacheData = data
 		}
 	} else {
-		cacheData = manual.NewCacheData()
+		cacheData = manual.NewRuleCacheData()
 	}
 
 	// 添加规则
-	cacheData.AddRule(*manual.NewManualRuleEntry(value))
+	cacheData.AddRule(*manual.NewRuleEntryWithRemark(value, remark))
 
 	// 保存到文件
-	return m.cache.Save(cacheData)
+	return m.cache.SaveData(cacheData, manual.CacheFileBlocklist)
 }
 
 // removeRuleFromCache 从缓存中删除规则
-func (m *ManualHandle) removeRuleFromCache(value string) error {
+func (m *BlocklistHandle) removeRuleFromCache(value string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// 如果缓存不存在，无需删除
-	if !m.cache.Exists() {
+	if !m.cache.DataExists(manual.CacheFileBlocklist) {
 		return nil
 	}
 
 	// 加载现有缓存
-	cacheData, err := m.cache.Load()
+	cacheData, err := m.cache.LoadData(manual.CacheFileBlocklist)
 	if err != nil {
 		return err
 	}
@@ -165,28 +178,32 @@ func (m *ManualHandle) removeRuleFromCache(value string) error {
 
 	// 如果没有规则了，清空缓存文件
 	if cacheData.RuleCount() == 0 {
-		return m.cache.Clear()
+		return m.cache.ClearData(manual.CacheFileBlocklist)
 	}
 
 	// 保存到文件
-	return m.cache.Save(cacheData)
+	return m.cache.SaveData(cacheData, manual.CacheFileBlocklist)
 }
 
-// ListManualRules 查询手动黑名单规则列表（从磁盘缓存查询，避免遍历 eBPF map）
-func (m *ManualHandle) ListManualRules(c *gin.Context) {
+// ListBlocklistRules 查询手动黑名单规则列表（从磁盘缓存查询，避免遍历 eBPF map）
+func (m *BlocklistHandle) ListBlocklistRules(c *gin.Context) {
 	// 响应结构
 	type ruleWithTime struct {
 		Value   string `json:"value"`
+		Remark  string `json:"remark"`
 		AddedAt string `json:"added_at,omitempty"`
 	}
 
 	result := make([]ruleWithTime, 0)
 
-	// 从磁盘缓存加载
-	if m.cache != nil && m.cache.Exists() {
-		cacheData, err := m.cache.Load()
+	// 从磁盘缓存加载（直接 Load，避免 Exists+Load 竞态窗口）
+	if m.cache != nil {
+		cacheData, err := m.cache.LoadData(manual.CacheFileBlocklist)
 		if err != nil {
-			// 缓存加载失败，返回空列表
+			// 缓存文件不存在属正常（首次运行无规则），其他错误需记录
+			if !os.IsNotExist(err) {
+				logger.Warnf("[Manual] Failed to load cache: %v", err)
+			}
 			response.OK(c, gin.H{
 				"rules": result,
 				"total": 0,
@@ -197,9 +214,14 @@ func (m *ManualHandle) ListManualRules(c *gin.Context) {
 		for _, entry := range cacheData.Rules {
 			result = append(result, ruleWithTime{
 				Value:   entry.Value,
-				AddedAt: entry.AddedAt.Format("2006-01-02T15:04:05Z"),
+				Remark:  entry.Remark,
+				AddedAt: entry.AddedAt.Format(time.RFC3339),
 			})
 		}
+		// 排序保证输出顺序稳定（map 遍历随机）
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].Value < result[j].Value
+		})
 	}
 
 	response.OK(c, gin.H{
@@ -263,7 +285,7 @@ func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {
 
 	// 2. 保存到缓存（如果启用了持久化）
 	if w.cache != nil {
-		if err := w.saveWhitelistRuleToCache(value); err != nil {
+		if err := w.saveWhitelistRuleToCache(value, req.Remark); err != nil {
 			logger.Warnf("[Whitelist] Failed to save rule to cache: %v", err)
 		}
 	}
@@ -284,6 +306,13 @@ func (w *WhitelistHandle) DelWhitelistRule(c *gin.Context) {
 		return
 	}
 	logger.Infof("[Whitelist] Delete rule: %s", req.Value)
+
+	// 内置保护网段检查：禁止删除受保护的网段
+	if manual.IsProtectedNet(req.Value) {
+		logger.Warnf("[Whitelist] Refusing to delete protected net: %s", req.Value)
+		response.Forbidden(c, "cannot delete built-in protected network segment")
+		return
+	}
 
 	// 1. 从白名单 eBPF map 删除
 	err := w.xdp.DeleteWhitelistRule(req.Value)
@@ -307,37 +336,55 @@ func (w *WhitelistHandle) DelWhitelistRule(c *gin.Context) {
 	response.OKMsg(c, "ok")
 }
 
-// ListWhitelistRules 查询白名单规则列表
+// ListWhitelistRules 查询白名单规则列表（从磁盘缓存加载，合并内置保护网段）
 func (w *WhitelistHandle) ListWhitelistRules(c *gin.Context) {
-	rules, err := w.xdp.GetWhitelistRules()
-	if err != nil {
-		response.InternalError(c, err.Error())
-		return
-	}
-
-	// 如果有缓存，补充 AddedAt 信息
 	type ruleWithTime struct {
-		Value   string `json:"value"`
-		AddedAt string `json:"added_at,omitempty"`
+		Value     string `json:"value"`
+		Remark    string `json:"remark"`
+		AddedAt   string `json:"added_at,omitempty"`
+		Protected bool   `json:"protected"` // 是否为内置保护网段（不可删除）
 	}
 
-	result := make([]ruleWithTime, 0, len(rules))
+	result := make([]ruleWithTime, 0)
 
-	// 从缓存加载时间信息
-	var cacheData *manual.WhitelistCacheData
-	if w.cache != nil && w.cache.WhitelistExists() {
-		cacheData, _ = w.cache.LoadWhitelist()
+	// 添加内置保护网段
+	for _, ipNet := range manual.ProtectedNets() {
+		result = append(result, ruleWithTime{
+			Value:     ipNet.String(),
+			Remark:    "system",
+			Protected: true,
+		})
 	}
 
-	for _, rule := range rules {
-		item := ruleWithTime{Value: rule}
-		if cacheData != nil {
-			if entry, ok := cacheData.Rules[rule]; ok {
-				item.AddedAt = entry.AddedAt.Format("2006-01-02T15:04:05Z")
-			}
+	// 从磁盘缓存加载用户添加的规则
+	if w.cache != nil && w.cache.DataExists(manual.CacheFileWhitelist) {
+		cacheData, err := w.cache.LoadData(manual.CacheFileWhitelist)
+		if err != nil {
+			// 缓存加载失败，仍返回保护网段
+			sort.Slice(result, func(i, j int) bool {
+				return result[i].Value < result[j].Value
+			})
+			response.OK(c, gin.H{
+				"rules": result,
+				"total": len(result),
+			})
+			return
 		}
-		result = append(result, item)
+
+		for _, entry := range cacheData.Rules {
+			result = append(result, ruleWithTime{
+				Value:     entry.Value,
+				Remark:    entry.Remark,
+				AddedAt:   entry.AddedAt.Format(time.RFC3339),
+				Protected: false,
+			})
+		}
 	}
+
+	// 排序保证输出顺序稳定
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Value < result[j].Value
+	})
 
 	response.OK(c, gin.H{
 		"rules": result,
@@ -346,24 +393,24 @@ func (w *WhitelistHandle) ListWhitelistRules(c *gin.Context) {
 }
 
 // saveWhitelistRuleToCache 保存白名单规则到缓存
-func (w *WhitelistHandle) saveWhitelistRuleToCache(value string) error {
+func (w *WhitelistHandle) saveWhitelistRuleToCache(value, remark string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	var cacheData *manual.WhitelistCacheData
-	if w.cache.WhitelistExists() {
-		data, err := w.cache.LoadWhitelist()
+	var cacheData *manual.RuleCacheData
+	if w.cache.DataExists(manual.CacheFileWhitelist) {
+		data, err := w.cache.LoadData(manual.CacheFileWhitelist)
 		if err != nil {
-			cacheData = manual.NewWhitelistCacheData()
+			cacheData = manual.NewRuleCacheData()
 		} else {
 			cacheData = data
 		}
 	} else {
-		cacheData = manual.NewWhitelistCacheData()
+		cacheData = manual.NewRuleCacheData()
 	}
 
-	cacheData.AddWhitelistRule(*manual.NewWhitelistRuleEntry(value))
-	return w.cache.SaveWhitelist(cacheData)
+	cacheData.AddRule(*manual.NewRuleEntryWithRemark(value, remark))
+	return w.cache.SaveData(cacheData, manual.CacheFileWhitelist)
 }
 
 // removeWhitelistRuleFromCache 从缓存中删除白名单规则
@@ -371,20 +418,20 @@ func (w *WhitelistHandle) removeWhitelistRuleFromCache(value string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if !w.cache.WhitelistExists() {
+	if !w.cache.DataExists(manual.CacheFileWhitelist) {
 		return nil
 	}
 
-	cacheData, err := w.cache.LoadWhitelist()
+	cacheData, err := w.cache.LoadData(manual.CacheFileWhitelist)
 	if err != nil {
 		return err
 	}
 
-	cacheData.RemoveWhitelistRule(value)
+	cacheData.RemoveRule(value)
 
-	if cacheData.WhitelistRuleCount() == 0 {
-		return w.cache.ClearWhitelist()
+	if cacheData.RuleCount() == 0 {
+		return w.cache.ClearData(manual.CacheFileWhitelist)
 	}
 
-	return w.cache.SaveWhitelist(cacheData)
+	return w.cache.SaveData(cacheData, manual.CacheFileWhitelist)
 }

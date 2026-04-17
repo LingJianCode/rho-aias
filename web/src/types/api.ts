@@ -58,15 +58,21 @@ export type RuleSource = 'manual' | 'ipsum' | 'spamhaus' | 'waf' | 'ddos' | 'ano
 
 export interface ManualRuleRequest {
   value: string
+  remark?: string
 }
 
 export interface ManualRuleItem {
   value: string
+  remark?: string
   added_at?: string
 }
 
+export interface WhitelistRuleItem extends ManualRuleItem {
+  protected?: boolean
+}
+
 export interface WhitelistResponse {
-  rules: ManualRuleItem[]
+  rules: WhitelistRuleItem[]
   total: number
 }
 

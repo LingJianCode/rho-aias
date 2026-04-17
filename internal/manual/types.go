@@ -1,128 +1,85 @@
-// Package manual 手动规则持久化模块
-// 负责手动添加规则的本地持久化，实现重启后恢复功能
+// Package manual 规则持久化模块
+// 负责手动添加规则（黑名单/白名单）的本地持久化，实现重启后恢复功能
 package manual
 
 import (
 	"time"
 )
 
-// SourceID 手动规则源标识符
-const SourceManual = "manual"
+// 缓存文件名常量
+const (
+	CacheFileBlocklist = "manual_cache.bin"
+	CacheFileWhitelist = "whitelist_cache.bin"
+)
 
-// ManualRuleEntry 单个手动规则条目
-type ManualRuleEntry struct {
+// RuleEntry 统一规则条目（黑名单/白名单通用）
+type RuleEntry struct {
 	Value   string    // IP/CIDR 值
-	AddedAt time.Time // 添加时间
-	Source  string    // 来源 (始终为 "manual")
+	AddedAt time.Time // 添加时间 (使用 time.RFC3339 格式化输出)
+	Remark  string    // 备注/说明
 }
 
-// CacheData 持久化缓存数据结构（使用 gob 二进制格式）
-type CacheData struct {
-	Version   uint32                       // 版本号
-	Timestamp int64                        // Unix 时间戳
-	Rules     map[string]ManualRuleEntry  // key: value (IP/CIDR), value: 规则条目
+// RuleCacheData 统一规则缓存数据结构
+type RuleCacheData struct {
+	Version   uint32                 // 版本号
+	Timestamp int64                  // Unix 时间戳
+	Rules     map[string]RuleEntry   // key: value (IP/CIDR), value: 规则条目
 }
 
-// NewCacheData 创建新的缓存数据
-func NewCacheData() *CacheData {
-	return &CacheData{
+// NewRuleCacheData 创建新的缓存数据
+func NewRuleCacheData() *RuleCacheData {
+	return &RuleCacheData{
 		Version:   1,
 		Timestamp: time.Now().Unix(),
-		Rules:     make(map[string]ManualRuleEntry),
+		Rules:     make(map[string]RuleEntry),
 	}
 }
 
-// NewManualRuleEntry 创建新的手动规则条目
-func NewManualRuleEntry(value string) *ManualRuleEntry {
-	return &ManualRuleEntry{
+// NewRuleEntry 创建新的规则条目
+func NewRuleEntry(value string) *RuleEntry {
+	return &RuleEntry{
 		Value:   value,
 		AddedAt: time.Now(),
-		Source:  SourceManual,
+	}
+}
+
+// NewRuleEntryWithRemark 创建带备注的规则条目
+func NewRuleEntryWithRemark(value, remark string) *RuleEntry {
+	return &RuleEntry{
+		Value:   value,
+		AddedAt: time.Now(),
+		Remark:  remark,
 	}
 }
 
 // AddRule 添加规则到缓存数据
-func (d *CacheData) AddRule(entry ManualRuleEntry) {
+func (d *RuleCacheData) AddRule(entry RuleEntry) {
 	d.Rules[entry.Value] = entry
 	d.Timestamp = time.Now().Unix()
 }
 
 // RemoveRule 从缓存数据中移除规则
-func (d *CacheData) RemoveRule(value string) {
+func (d *RuleCacheData) RemoveRule(value string) {
 	delete(d.Rules, value)
 	d.Timestamp = time.Now().Unix()
 }
 
 // HasRule 检查规则是否存在
-func (d *CacheData) HasRule(value string) bool {
+func (d *RuleCacheData) HasRule(value string) bool {
 	_, exists := d.Rules[value]
 	return exists
 }
 
 // RuleCount 返回规则总数
-func (d *CacheData) RuleCount() int {
+func (d *RuleCacheData) RuleCount() int {
 	return len(d.Rules)
 }
 
 // GetValues 获取所有规则的值列表
-func (d *CacheData) GetValues() []string {
+func (d *RuleCacheData) GetValues() []string {
 	values := make([]string, 0, len(d.Rules))
 	for _, entry := range d.Rules {
 		values = append(values, entry.Value)
 	}
 	return values
 }
-
-// SourceWhitelist 白名单源标识符
-const SourceWhitelist = "whitelist"
-
-// WhitelistRuleEntry 白名单规则条目
-type WhitelistRuleEntry struct {
-	Value   string    // IP/CIDR 值
-	AddedAt time.Time // 添加时间
-	Source  string    // 来源 (始终为 "whitelist")
-}
-
-// WhitelistCacheData 白名单持久化缓存数据结构
-type WhitelistCacheData struct {
-	Version   uint32                          // 版本号
-	Timestamp int64                           // Unix 时间戳
-	Rules     map[string]WhitelistRuleEntry   // key: value (IP/CIDR), value: 规则条目
-}
-
-// NewWhitelistCacheData 创建新的白名单缓存数据
-func NewWhitelistCacheData() *WhitelistCacheData {
-	return &WhitelistCacheData{
-		Version:   1,
-		Timestamp: time.Now().Unix(),
-		Rules:     make(map[string]WhitelistRuleEntry),
-	}
-}
-
-// NewWhitelistRuleEntry 创建新的白名单规则条目
-func NewWhitelistRuleEntry(value string) *WhitelistRuleEntry {
-	return &WhitelistRuleEntry{
-		Value:   value,
-		AddedAt: time.Now(),
-		Source:  SourceWhitelist,
-	}
-}
-
-// AddWhitelistRule 添加白名单规则到缓存数据
-func (d *WhitelistCacheData) AddWhitelistRule(entry WhitelistRuleEntry) {
-	d.Rules[entry.Value] = entry
-	d.Timestamp = time.Now().Unix()
-}
-
-// RemoveWhitelistRule 从缓存数据中移除白名单规则
-func (d *WhitelistCacheData) RemoveWhitelistRule(value string) {
-	delete(d.Rules, value)
-	d.Timestamp = time.Now().Unix()
-}
-
-// WhitelistRuleCount 返回白名单规则总数
-func (d *WhitelistCacheData) WhitelistRuleCount() int {
-	return len(d.Rules)
-}
-
-

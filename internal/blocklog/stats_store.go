@@ -17,9 +17,9 @@ type StatsStore struct {
 
 // HourlyTrendItem 单小时趋势数据
 type HourlyTrendItem struct {
-	Hour       string           `json:"hour"`        // 格式: "2026-04-10T14"
-	Total      int64            `json:"total"`       // 该小时总计数
-	Breakdown  map[string]int64 `json:"breakdown"`   // 按规则来源细分
+	Hour      string           `json:"hour"`      // 格式: "2026-04-10T14"
+	Total     int64            `json:"total"`     // 该小时总计数
+	Breakdown map[string]int64 `json:"breakdown"` // 按规则来源细分
 }
 
 // NewStatsStore 创建统计存储实例（接收外部注入的 *gorm.DB）
@@ -164,7 +164,7 @@ func (ss *StatsStore) GetAggregatedStats(retentionDays int) Stats {
 	}
 	stats.TopBlockedCountries = make([]CountryCount, len(countries))
 	for i, c := range countries {
-		stats.TopBlockedCountries[i] = CountryCount{Country: c.Country, Count: c.Count}
+		stats.TopBlockedCountries[i] = CountryCount(c)
 	}
 
 	return stats

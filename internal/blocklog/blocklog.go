@@ -364,7 +364,7 @@ func (bl *BlockLog) GetStats() Stats {
 	}
 	dbStats.TopBlockedCountries = make([]CountryCount, len(countries))
 	for i, c := range countries {
-		dbStats.TopBlockedCountries[i] = CountryCount{Country: c.Country, Count: c.Count}
+		dbStats.TopBlockedCountries[i] = CountryCount(c)
 	}
 
 	return dbStats
@@ -468,7 +468,7 @@ func (bl *BlockLog) GetTopCountries(limit int) ([]CountryCount, int) {
 
 	result := make([]CountryCount, len(merged))
 	for i, c := range merged {
-		result[i] = CountryCount{Country: c.Country, Count: c.Count}
+		result[i] = CountryCount(c)
 	}
 
 	return result, totalCountries

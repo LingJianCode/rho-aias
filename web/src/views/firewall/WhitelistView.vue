@@ -19,12 +19,20 @@
 
       <el-table :data="rules" v-loading="loading" stripe>
         <el-table-column prop="value" label="IP/CIDR" min-width="200" />
+        <el-table-column prop="remark" label="备注" min-width="150">
+          <template #default="{ row }">{{ row.remark || '-' }}</template>
+        </el-table-column>
         <el-table-column prop="added_at" label="添加时间" width="180">
           <template #default="{ row }">{{ row.added_at ? formatDateTime(row.added_at) : '-' }}</template>
         </el-table-column>
+        <el-table-column prop="protected" label="受保护" width="80">
+          <template #default="{ row }">
+            <el-tag v-if="row.protected" type="warning" size="small">内置</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="100">
           <template #default="{ row }">
-            <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
+            <el-button type="danger" link @click="handleDelete(row)" :disabled="row.protected">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -38,6 +46,9 @@
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px">
         <el-form-item label="IP/CIDR" prop="value">
           <el-input v-model="form.value" placeholder="例如: 192.168.1.1 或 10.0.0.0/24" />
+        </el-form-item>
+        <el-form-item label="备注" prop="remark">
+          <el-input v-model="form.remark" placeholder="可选备注" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -55,12 +66,12 @@ import { Plus } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/format'
 import { useConfirm } from '@/composables/useConfirm'
 import { getWhitelist, addWhitelistRule, deleteWhitelistRule } from '@/api/manual'
-import type { ManualRuleItem } from '@/types/api'
+import type { WhitelistRuleItem } from '@/types/api'
 
 const { confirmDelete } = useConfirm()
 
 const loading = ref(false)
-const rules = ref<ManualRuleItem[]>([])
+const rules = ref<WhitelistRuleItem[]>([])
 const total = ref(0)
 
 const showAddDialog = ref(false)
@@ -68,6 +79,7 @@ const formRef = ref<FormInstance>()
 
 const form = reactive({
   value: '',
+  remark: '',
 })
 
 const formRules: FormRules = {
@@ -93,7 +105,7 @@ async function handleAdd() {
   if (!valid) return
 
   try {
-    await addWhitelistRule(form.value)
+    await addWhitelistRule({ value: form.value, remark: form.remark })
     ElMessage.success('添加成功')
     showAddDialog.value = false
     formRef.value?.resetFields()
@@ -103,7 +115,7 @@ async function handleAdd() {
   }
 }
 
-async function handleDelete(row: ManualRuleItem) {
+async function handleDelete(row: WhitelistRuleItem) {
   if (!(await confirmDelete(row.value))) return
   try {
     await deleteWhitelistRule(row.value)

@@ -19,6 +19,24 @@ func InitProtectedNets(logFunc func(format string, args ...interface{})) []*net.
 	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
 	nets = append(nets, loopback)
 
+	// 添加云平台元数据/内网服务网段（误封会导致实例不可用）
+	cloudNets := []struct {
+		cidr   string
+		reason string
+	}{
+		{"169.254.0.0/16", "cloud metadata (link-local)"},
+		{"100.100.0.0/16", "Alibaba Cloud internal DNS"},
+	}
+	for _, cn := range cloudNets {
+		_, ipNet, err := net.ParseCIDR(cn.cidr)
+		if err == nil && ipNet != nil {
+			nets = append(nets, ipNet)
+			if logFunc != nil {
+				logFunc("[Whitelist] Adding protected net %s (%s)", cn.cidr, cn.reason)
+			}
+		}
+	}
+
 	// 添加本机 IP
 	if localNets, err := utils.GetLocalIPNets(); err == nil && len(localNets) > 0 {
 		ips := make([]string, 0, len(localNets))
@@ -33,6 +51,36 @@ func InitProtectedNets(logFunc func(format string, args ...interface{})) []*net.
 
 	protectedNets = nets
 	return nets
+}
+
+// ProtectedNets 返回当前内置保护网段列表
+func ProtectedNets() []*net.IPNet {
+	return protectedNets
+}
+
+// IsProtectedNet 检查给定值是否属于内置保护网段
+// 支持精确 IP 和 CIDR 格式输入
+func IsProtectedNet(value string) bool {
+	ip := net.ParseIP(value)
+	if ip != nil {
+		for _, n := range protectedNets {
+			if n.Contains(ip) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// CIDR 格式：检查是否有保护网段完全包含该 CIDR
+	_, ipNet, err := net.ParseCIDR(value)
+	if err == nil && ipNet != nil {
+		for _, n := range protectedNets {
+			if n.Contains(ipNet.IP) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func init() {
@@ -60,7 +108,7 @@ func NewWhitelistChecker() *WhitelistChecker {
 }
 
 // LoadFromCache 从白名单缓存数据批量加载规则
-func (wc *WhitelistChecker) LoadFromCache(data *WhitelistCacheData) {
+func (wc *WhitelistChecker) LoadFromCache(data *RuleCacheData) {
 	if data == nil {
 		return
 	}
