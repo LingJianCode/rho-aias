@@ -475,8 +475,8 @@ class TestXDPIpBlocking(unittest.TestCase):
         
         # 尝试重复添加同一规则
         success, resp = self.api_client.add_rule(test_ip)
-        # 重复添加应该成功（更新操作）
-        self.assertTrue(success, f"Duplicate add failed: {resp}")
+        # 重复添加应该失败（更新操作）
+        self.assertFalse(success, f"Duplicate add failed: {resp}")
         
         # 删除不存在的规则
         success, resp = self.api_client.delete_rule("1.2.3.4")
