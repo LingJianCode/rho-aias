@@ -205,11 +205,6 @@ export interface GeoBlockingStatus {
   }>
 }
 
-export interface GeoBlockingConfigRequest {
-  mode: 'whitelist' | 'blacklist'
-  allowed_countries: string[]
-}
-
 // ============================================
 // API Key
 // ============================================
