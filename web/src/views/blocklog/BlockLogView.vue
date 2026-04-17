@@ -5,17 +5,17 @@
     </div>
 
     <el-row :gutter="12" class="stats-row">
-      <el-col :span="5">
-        <StatsCard label="阻断总数" :value="stats.total_blocks" :icon="DataLine" icon-color="#409eff" />
+      <el-col :span="6">
+        <StatsCard label="阻断总数" :value="stats.total_blocked" :icon="DataLine" icon-color="#409eff" />
       </el-col>
-      <el-col :span="5">
-        <StatsCard label="阻断 IP 数" :value="stats.unique_ips" :icon="Monitor" icon-color="#67c23a" />
+      <el-col :span="6">
+        <StatsCard label="阻断 IP 数" :value="stats.top_blocked_ips.length" :icon="Monitor" icon-color="#67c23a" />
       </el-col>
-      <el-col :span="5">
-        <StatsCard label="涉及国家" :value="stats.top_countries.length" :icon="Location" icon-color="#e6a23c" />
+      <el-col :span="6">
+        <StatsCard label="涉及国家" :value="stats.top_blocked_countries.length" :icon="Location" icon-color="#e6a23c" />
       </el-col>
-      <el-col :span="5">
-        <StatsCard label="数据来源" :value="stats.top_sources.length" :icon="Connection" icon-color="#909399" />
+      <el-col :span="6">
+        <StatsCard label="数据来源" :value="Object.keys(stats.by_rule_source).length" :icon="Connection" icon-color="#909399" />
       </el-col>
     </el-row>
 
@@ -74,15 +74,14 @@
 
       <el-table :data="logs" v-loading="loading" stripe>
         <el-table-column prop="timestamp" label="时间" width="180">
-          <template #default="{ row }">{{ formatDateTime(row.timestamp) }}</template>
+          <template #default="{ row }">{{ formatNanoTimestamp(row.timestamp) }}</template>
         </el-table-column>
         <el-table-column prop="src_ip" label="源 IP" min-width="140" />
         <el-table-column prop="dst_ip" label="目的 IP" min-width="140" />
-        <el-table-column prop="protocol" label="协议" width="80" />
         <el-table-column prop="match_type" label="匹配类型" width="100" />
-        <el-table-column prop="source" label="来源" width="100">
+        <el-table-column prop="rule_source" label="来源" width="100">
           <template #default="{ row }">
-            <RuleSourceTag :source="row.source" />
+            <RuleSourceTag :source="row.rule_source" />
           </template>
         </el-table-column>
         <el-table-column prop="country_code" label="国家" width="100">
@@ -118,6 +117,13 @@ import StatsCard from '@/components/StatsCard.vue'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
 import { formatDateTime, formatBytes } from '@/utils/format'
+
+function formatNanoTimestamp(ts: number | string): string {
+  if (typeof ts === 'number') {
+    return formatDateTime(new Date(ts / 1e6).toISOString())
+  }
+  return formatDateTime(ts)
+}
 import { useConfirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import { getBlockLogs, getBlockLogStats, clearBlockLogs } from '@/api/blocklog'
@@ -144,11 +150,12 @@ const filters = reactive({
 })
 
 const stats = reactive<BlockLogStats>({
-  total_blocks: 0,
-  unique_ips: 0,
-  top_countries: [],
-  top_sources: [],
-  hourly_trend: [],
+  total_blocked: 0,
+  by_match_type: {},
+  by_rule_source: {},
+  by_country: {},
+  top_blocked_ips: [],
+  top_blocked_countries: [],
 })
 
 async function fetchStats() {
@@ -179,7 +186,6 @@ async function fetchLogs() {
     })
     logs.value = res.data.records.map((r: any) => ({
       ...r,
-      source: r.source || r.rule_source,
       timestamp: typeof r.timestamp === 'number' ? new Date(r.timestamp / 1e6).toISOString() : r.timestamp,
     }))
     total.value = res.data.total

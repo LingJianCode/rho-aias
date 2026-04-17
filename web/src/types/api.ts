@@ -80,12 +80,11 @@ export interface BlacklistResponse {
 // ============================================
 
 export interface BlockLog {
-  timestamp: string
+  timestamp: number
   src_ip: string
   dst_ip: string
-  protocol: string
   match_type: string
-  source: string
+  rule_source: string
   country_code: string
   packet_size: number
 }
@@ -93,6 +92,8 @@ export interface BlockLog {
 export interface BlockLogListResponse {
   records: BlockLog[]
   total: number
+  page: number
+  page_size: number
 }
 
 export interface IPCount {
@@ -105,22 +106,13 @@ export interface CountryCount {
   count: number
 }
 
-export interface SourceCount {
-  source: string
-  count: number
-}
-
 export interface BlockLogStats {
-  total_blocks: number
-  unique_ips: number
-  top_countries: CountryCount[]
-  top_sources: SourceCount[]
-  hourly_trend: { hour: string; count: number }[]
-}
-
-export interface BlockedIPsResponse {
-  total_blocked_ips: number
+  total_blocked: number
+  by_match_type: Record<string, number>
+  by_rule_source: Record<string, number>
+  by_country: Record<string, number>
   top_blocked_ips: IPCount[]
+  top_blocked_countries: CountryCount[]
 }
 
 // ============================================

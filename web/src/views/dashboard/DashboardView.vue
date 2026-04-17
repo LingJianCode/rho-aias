@@ -52,15 +52,15 @@
       </template>
       <el-table :data="recentBlocks" stripe>
         <el-table-column prop="timestamp" label="时间" width="180">
-          <template #default="{ row }">{{ formatDateTime(row.timestamp) }}</template>
+          <template #default="{ row }">{{ formatNanoTimestamp(row.timestamp) }}</template>
         </el-table-column>
         <el-table-column prop="src_ip" label="源 IP" min-width="140" />
-        <el-table-column prop="dst_ip" label="目的 IP" min-width="140" />
-        <el-table-column prop="source" label="来源" width="100">
+        <el-table-column prop="rule_source" label="来源" width="100">
           <template #default="{ row }">
-            <RuleSourceTag :source="row.source" />
+            <RuleSourceTag :source="row.rule_source" />
           </template>
         </el-table-column>
+        <el-table-column prop="match_type" label="匹配类型" width="100" />
         <el-table-column prop="country_code" label="国家" width="100">
           <template #default="{ row }">
             <CountryFlag :code="row.country_code" />
@@ -77,8 +77,15 @@ import * as echarts from 'echarts'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
 import { formatDateTime, formatNumber } from '@/utils/format'
+
+function formatNanoTimestamp(ts: number | string): string {
+  if (typeof ts === 'number') {
+    return formatDateTime(new Date(ts / 1e6).toISOString())
+  }
+  return formatDateTime(ts)
+}
 // 统计与趋势
-import { getBlockLogStats, getBlockLogs, getBlockedCountries } from '@/api/blocklog'
+import { getBlockLogStats, getBlockLogs, getBlockedCountries, getHourlyTrend } from '@/api/blocklog'
 import type { BlockLog } from '@/types/api'
 
 const chartRef = ref<HTMLElement>()
@@ -99,11 +106,11 @@ async function fetchDashboardData() {
 
 async function fetchBlockStatsAndTrend() {
   try {
-    const res = await getBlockLogStats()
-    if (res.data) {
-      blockTrend.value = (res.data.hourly_trend || []).map((item) => ({
+    const res = await getHourlyTrend(24)
+    if (res.data?.hourly_data) {
+      blockTrend.value = res.data.hourly_data.map((item) => ({
         date: item.hour,
-        count: item.count,
+        count: item.total,
       }))
     }
   } catch {
@@ -125,8 +132,8 @@ async function fetchTopCountries() {
 async function fetchRecentBlocks() {
   try {
     const res = await getBlockLogs({ page_size: 5 })
-    if (res.data?.items) {
-      recentBlocks.value = res.data.items
+    if (res.data?.records) {
+      recentBlocks.value = res.data.records
     }
   } catch {
     // Error handled
