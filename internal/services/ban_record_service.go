@@ -207,56 +207,65 @@ func (s *BanRecordService) CleanupExpired() (int64, error) {
 
 // GetBanStats 获取封禁统计
 type BanStats struct {
-	Total    int64            `json:"total"`
-	Active   int64            `json:"active"`
-	BySource map[string]int64 `json:"by_source"`
-	ByStatus map[string]int64 `json:"by_status"`
-	TopIPs   []TopIPStat      `json:"top_ips"`
+	Total      int64 `json:"total"`
+	Active     int64 `json:"active"`
+	Expired    int64 `json:"expired"`
+	TodayCount int64 `json:"today_count"`
 }
 
+func (s *BanRecordService) GetBanStats() (*BanStats, error) {
+	stats := &BanStats{}
+
+	// 按 status 分组统计
+	type statusRow struct {
+		Status string
+		Count  int64
+	}
+	var rows []statusRow
+	if err := s.db.Model(&models.BanRecord{}).
+		Select("status, count(*) as count").
+		Group("status").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("failed to get ban record statistics: %w", err)
+	}
+
+	for _, row := range rows {
+		stats.Total += row.Count
+		if row.Status == models.BanStatusActive {
+			stats.Active = row.Count
+		} else if row.Status == models.BanStatusExpired {
+			stats.Expired = row.Count
+		}
+	}
+
+	// 今日新增记录数
+	today := time.Now().In(chinaLocation).Truncate(24 * time.Hour)
+	if err := s.db.Model(&models.BanRecord{}).
+		Where("created_at >= ?", today).
+		Count(&stats.TodayCount).Error; err != nil {
+		return nil, fmt.Errorf("failed to get today ban count: %w", err)
+	}
+
+	return stats, nil
+}
+
+// TopIPStat Top 封禁 IP 统计
 type TopIPStat struct {
 	IP    string `json:"ip"`
 	Count int64  `json:"count"`
 }
 
-func (s *BanRecordService) GetBanStats() (*BanStats, error) {
-	stats := &BanStats{
-		BySource: make(map[string]int64),
-		ByStatus: make(map[string]int64),
+// GetTopBannedIPs 获取封禁次数最多的 IP
+func (s *BanRecordService) GetTopBannedIPs(limit int) ([]TopIPStat, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 10
 	}
-
-	// 合并查询：一次 GROUP BY source, status 同时获取来源和状态分布
-	type groupedRow struct {
-		Source string
-		Status string
-		Count  int64
-	}
-	var grouped []groupedRow
-	if err := s.db.Model(&models.BanRecord{}).
-		Select("source, status, count(*) as count").
-		Group("source, status").Find(&grouped).Error; err != nil {
-		return nil, fmt.Errorf("failed to get ban record statistics: %w", err)
-	}
-
-	var total int64
-	for _, row := range grouped {
-		total += row.Count
-		stats.BySource[row.Source] += row.Count
-		stats.ByStatus[row.Status] += row.Count
-	}
-	stats.Total = total
-	stats.Active = stats.ByStatus["active"]
-
-	// Top 封禁 IP（需要独立排序，无法合并）
 	var topIPs []TopIPStat
 	if err := s.db.Model(&models.BanRecord{}).Select("ip, count(*) as count").
-		Group("ip").Order("count DESC").Limit(10).
+		Group("ip").Order("count DESC").Limit(limit).
 		Find(&topIPs).Error; err != nil {
 		return nil, fmt.Errorf("failed to get top banned IPs: %w", err)
 	}
-	stats.TopIPs = topIPs
-
-	return stats, nil
+	return topIPs, nil
 }
 
 // UpsertActiveBan 插入或忽略：如果同一 IP+来源已存在 active 记录则跳过
