@@ -34,7 +34,10 @@ func (h *BlockLogHandle) AttachStatsStore(db *gorm.DB) {
 
 // GetRecords 获取阻断记录
 // GET /api/blocklog/records?hour=2026-04-17_14&page=1&page_size=20&match_type=&rule_source=&src_ip=&country_code=
-// hour 参数存在时从 JSONL 文件查询，否则从内存查询
+// hour 参数存在时：
+//   - 当前小时 → 从内存查询（数据最完整，避免异步写入延迟导致数据缺失）
+//   - 历史小时 → 从 JSONL 文件查询
+// 无 hour 参数时从内存查询
 func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 	var filter blocklog.RecordFilter
 	if err := c.ShouldBindQuery(&filter); err != nil {
@@ -42,18 +45,29 @@ func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 		return
 	}
 
-	// 如果指定了 hour 参数，从 JSONL 文件查询
+	// 如果指定了 hour 参数，判断是当前小时还是历史小时
 	if filter.Hour != "" {
-		result, err := h.blockLog.QueryJSONLRecords(filter)
-		if err != nil {
-			response.BadRequest(c, err.Error())
-			return
+		if blocklog.IsCurrentHour(filter.Hour) {
+			// 当前小时 → 从内存查询，数据最完整
+			h.queryFromMemory(c, filter)
+		} else {
+			// 历史小时 → 从 JSONL 文件查询
+			result, err := h.blockLog.QueryJSONLRecords(filter)
+			if err != nil {
+				response.BadRequest(c, err.Error())
+				return
+			}
+			response.OK(c, result)
 		}
-		response.OK(c, result)
 		return
 	}
 
-	// 兼容旧的内存查询模式
+	// 无 hour 参数，从内存查询
+	h.queryFromMemory(c, filter)
+}
+
+// queryFromMemory 从内存查询阻断记录
+func (h *BlockLogHandle) queryFromMemory(c *gin.Context, filter blocklog.RecordFilter) {
 	if filter.Limit == 0 {
 		filter.Limit = 100
 	}

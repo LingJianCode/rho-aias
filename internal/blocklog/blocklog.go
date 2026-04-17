@@ -267,6 +267,13 @@ func (bl *BlockLog) GetRecordsByFilter(filter RecordFilter) []BlockRecord {
 	return result
 }
 
+// IsCurrentHour 判断 hour 字符串（格式 YYYY-MM-DD_HH）是否是当前小时
+func IsCurrentHour(hour string) bool {
+	now := time.Now()
+	expected := fmt.Sprintf("%s_%02d", now.Format("2006-01-02"), now.Hour())
+	return hour == expected
+}
+
 // QueryJSONLRecords 从 JSONL 文件分页查询记录
 func (bl *BlockLog) QueryJSONLRecords(filter RecordFilter) (*PageResult, error) {
 	if bl.jsonReader == nil {

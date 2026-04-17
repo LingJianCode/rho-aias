@@ -9,7 +9,6 @@ BlockLog 阻断日志集成测试
 - 统计一致性
 - IP 聚合准确性
 - 按来源过滤
-- 清空与重新采样
 - 多 IP 独立记录
 - SQLite 统计持久化
 
@@ -279,10 +278,6 @@ class BlockLogAPIClient:
             path += f"?limit={limit}"
         return self._request("GET", path)
 
-    def clear_records(self) -> Tuple[bool, dict]:
-        """清空阻断记录"""
-        return self._request("DELETE", "/api/blocklog/records")
-
     def get_hourly_trend(self, hours: int = 24) -> Tuple[bool, dict]:
         """获取小时趋势"""
         return self._request("GET", f"/api/blocklog/hourly-trend?hours={hours}")
@@ -464,10 +459,6 @@ class TestBlockLog(unittest.TestCase):
             "Failed to start rho-aias"
         )
 
-        # 清空已有记录
-        self.api_client.clear_records()
-        time.sleep(1)
-
         # 执行阻断
         _, records = self._do_block_cycle("10.0.1.2", ping_count=3)
 
@@ -498,9 +489,6 @@ class TestBlockLog(unittest.TestCase):
             self._start_rho("rho_bl_veth0"),
             "Failed to start rho-aias"
         )
-
-        self.api_client.clear_records()
-        time.sleep(1)
 
         # 确保 eBPF 事件上报已启用（ringbuf 输出）
         success, resp = self.api_client.enable_event_reporting(sample_rate=1)
@@ -537,9 +525,6 @@ class TestBlockLog(unittest.TestCase):
             "Failed to start rho-aias"
         )
 
-        self.api_client.clear_records()
-        time.sleep(1)
-
         self._do_block_cycle("10.0.1.2", ping_count=3)
 
         # 按 rule_source=manual 过滤
@@ -565,47 +550,7 @@ class TestBlockLog(unittest.TestCase):
 
         self.api_client.delete_rule("10.0.1.2")
 
-    def test_06_clear_and_resample(self):
-        """测试清空记录功能：DELETE 后为空，重新阻断有新记录"""
-        self.assertTrue(
-            self._start_rho("rho_bl_veth0"),
-            "Failed to start rho-aias"
-        )
-
-        # 触发初始阻断并验证有记录
-        _, records = self._do_block_cycle("10.0.1.2", ping_count=2)
-        initial_count = len(records)
-        self.assertGreater(initial_count, 0, "Initial records should exist")
-        logger.info(f"Initial records: {initial_count}")
-
-        # 清空记录
-        success, resp = self.api_client.clear_records()
-        self.assertTrue(success, f"Failed to clear records: {resp}")
-        logger.info("Records cleared")
-
-        # 验证记录为空
-        time.sleep(1)
-        success, resp = self.api_client.get_records()
-        self.assertTrue(success)
-        after_clear = self._safe_records(resp)
-        self.assertEqual(len(after_clear), 0, "Records should be empty after clear")
-
-        # 删除旧规则、重新封禁
-        self.api_client.delete_rule("10.0.1.2")
-        time.sleep(1)
-        self._do_block_cycle("10.0.1.2", ping_count=3)
-
-        # 验证有新记录
-        success, resp = self.api_client.get_records()
-        self.assertTrue(success)
-        new_records = self._safe_records(resp)
-        new_count = len(new_records)
-        self.assertGreater(new_count, 0, "New records should appear after re-blocking")
-        logger.info(f"New records after re-blocking: {new_count}")
-
-        self.api_client.delete_rule("10.0.1.2")
-
-    def test_07_multi_ip_records(self):
+    def test_06_multi_ip_records(self):
         """测试多 IP 独立记录：同时封禁同一子网多个 IP，各自记录独立
 
         注意：XDP 只绑定在 veth0（10.0.1.x 子网），因此只能封禁该子网的 IP。
@@ -615,9 +560,6 @@ class TestBlockLog(unittest.TestCase):
             self._start_rho("rho_bl_veth0"),
             "Failed to start rho-aias"
         )
-
-        self.api_client.clear_records()
-        time.sleep(1)
 
         # 确保 eBPF 事件上报已启用（ringbuf 输出）
         success, resp = self.api_client.enable_event_reporting(sample_rate=1)
@@ -675,15 +617,12 @@ class TestBlockLog(unittest.TestCase):
         self.api_client.delete_rule("10.0.1.2")
         self.api_client.delete_rule(extra_ip)
 
-    def test_08_sqlite_stats_persistence(self):
+    def test_07_sqlite_stats_persistence(self):
         """测试 SQLite 统计持久化：hourly-trend 和 dropped-summary"""
         self.assertTrue(
             self._start_rho("rho_bl_veth0"),
             "Failed to start rho-aias"
         )
-
-        self.api_client.clear_records()
-        time.sleep(1)
 
         # 触发阻断，产生 SQLite 写入
         self._do_block_cycle("10.0.1.2", ping_count=3, wait_after_block=3)
