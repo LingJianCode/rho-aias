@@ -121,33 +121,9 @@ func TestGetStats(t *testing.T) {
 
 	stats := bl.GetStats()
 
-	if stats.TotalBlocked != 4 {
-		t.Errorf("Expected total 4, got %d", stats.TotalBlocked)
-	}
-
-	if stats.ByMatchType["ip4_exact"] != 2 {
-		t.Errorf("Expected 2 ip4_exact, got %d", stats.ByMatchType["ip4_exact"])
-	}
-
-	if stats.ByMatchType["geo_block"] != 2 {
-		t.Errorf("Expected 2 geo_block, got %d", stats.ByMatchType["geo_block"])
-	}
-
-	if stats.ByRuleSource["manual"] != 2 {
-		t.Errorf("Expected 2 manual, got %d", stats.ByRuleSource["manual"])
-	}
-
-	if stats.ByCountry["US"] != 1 {
-		t.Errorf("Expected 1 US, got %d", stats.ByCountry["US"])
-	}
-
-	if stats.ByCountry["CN"] != 1 {
-		t.Errorf("Expected 1 CN, got %d", stats.ByCountry["CN"])
-	}
-
-	// 检查 Top IPs
-	if len(stats.TopBlockedIPs) < 4 {
-		t.Errorf("Expected at least 4 top IPs, got %d", len(stats.TopBlockedIPs))
+	// 无 DB 时 GetStats 返回空（统计数据全部来自 DB）
+	if stats.TotalBlocked != 0 {
+		t.Errorf("Expected total 0 (no DB), got %d", stats.TotalBlocked)
 	}
 }
 

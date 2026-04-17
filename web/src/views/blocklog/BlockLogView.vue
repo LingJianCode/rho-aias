@@ -148,7 +148,6 @@ const filters = reactive({
 
 const stats = reactive<BlockLogStats>({
   total_blocked: 0,
-  by_match_type: {},
   by_rule_source: {},
   by_country: {},
   top_blocked_ips: [],

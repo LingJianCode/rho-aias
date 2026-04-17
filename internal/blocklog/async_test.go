@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"rho-aias/internal/models"
+
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -22,7 +24,7 @@ func TestAsyncWriter_Write(t *testing.T) {
 		FlushInterval:   100 * time.Millisecond,
 	}
 
-	aw, err := NewAsyncWriter(config)
+	aw, err := NewAsyncWriter(config, nil)
 	if err != nil {
 		t.Fatalf("Failed to create async writer: %v", err)
 	}
@@ -87,7 +89,7 @@ func TestAsyncWriter_Stop(t *testing.T) {
 		FlushInterval:   time.Second,
 	}
 
-	aw, err := NewAsyncWriter(config)
+	aw, err := NewAsyncWriter(config, nil)
 	if err != nil {
 		t.Fatalf("Failed to create async writer: %v", err)
 	}
@@ -149,11 +151,7 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test db: %v", err)
 	}
-	if err := testDB.AutoMigrate(&struct {
-		Hour       string `gorm:"primaryKey;size:13"`
-		RuleSource string `gorm:"primaryKey;size:50"`
-		Count      int64
-	}{}); err != nil {
+	if err := testDB.AutoMigrate(&models.BlocklogHourlyStat{}, &models.BlocklogTopIP{}); err != nil {
 		t.Fatalf("Failed to migrate test db: %v", err)
 	}
 	bl.AttachStatsStore(testDB)

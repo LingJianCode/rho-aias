@@ -108,7 +108,6 @@ export interface CountryCount {
 
 export interface BlockLogStats {
   total_blocked: number
-  by_match_type: Record<string, number>
   by_rule_source: Record<string, number>
   by_country: Record<string, number>
   top_blocked_ips: IPCount[]

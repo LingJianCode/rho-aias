@@ -26,9 +26,9 @@ type BlockRecord struct {
 }
 
 // blockLogCounters 增量统计计数器（原子操作，无锁热路径）
+// 仅作为写缓冲区，整点轮转时刷入 DB 后归零，不参与查询
 type blockLogCounters struct {
 	totalBlocked int64
-	byMatchType  map[string]*int64 // 每种匹配类型的计数指针
 	byRuleSource map[string]*int64 // 每种规则来源的计数指针
 	byCountry    map[string]*int64 // 每个国家的计数指针
 	topIPs       map[string]*int64 // 每个 IP 的计数指针
@@ -58,7 +58,6 @@ func NewBlockLog(maxSize int) *BlockLog {
 // newBlockLogCounters 创建增量统计计数器
 func newBlockLogCounters() *blockLogCounters {
 	return &blockLogCounters{
-		byMatchType:  make(map[string]*int64),
 		byRuleSource: make(map[string]*int64),
 		byCountry:    make(map[string]*int64),
 		topIPs:       make(map[string]*int64),
@@ -82,11 +81,10 @@ func (c *blockLogCounters) increment(m map[string]*int64, key string) {
 	atomic.AddInt64(ptr, 1)
 }
 
-// snapshot 读取当前计数器快照（用于 GetStats）
+// snapshot 读取当前计数器快照（用于整点轮转时刷入 DB）
 func (c *blockLogCounters) snapshot() Stats {
 	stats := Stats{
 		TotalBlocked:        int(atomic.LoadInt64(&c.totalBlocked)),
-		ByMatchType:         make(map[string]int),
 		ByRuleSource:        make(map[string]int),
 		ByCountry:           make(map[string]int),
 		TopBlockedIPs:       []IPCount{},
@@ -94,11 +92,6 @@ func (c *blockLogCounters) snapshot() Stats {
 	}
 
 	c.mu.RLock()
-	for k, v := range c.byMatchType {
-		if cnt := atomic.LoadInt64(v); cnt > 0 {
-			stats.ByMatchType[k] = int(cnt)
-		}
-	}
 	for k, v := range c.byRuleSource {
 		if cnt := atomic.LoadInt64(v); cnt > 0 {
 			stats.ByRuleSource[k] = int(cnt)
@@ -119,8 +112,8 @@ func (c *blockLogCounters) snapshot() Stats {
 	sort.Slice(stats.TopBlockedIPs, func(i, j int) bool {
 		return stats.TopBlockedIPs[i].Count > stats.TopBlockedIPs[j].Count
 	})
-	if len(stats.TopBlockedIPs) > 10 {
-		stats.TopBlockedIPs = stats.TopBlockedIPs[:10]
+	if len(stats.TopBlockedIPs) > 50 {
+		stats.TopBlockedIPs = stats.TopBlockedIPs[:50]
 	}
 
 	// 国家 Top 排序
@@ -133,9 +126,6 @@ func (c *blockLogCounters) snapshot() Stats {
 		countries = append(countries, cn{country, count})
 	}
 	sort.Slice(countries, func(i, j int) bool { return countries[i].Count > countries[j].Count })
-	if len(countries) > 10 {
-		countries = countries[:10]
-	}
 	stats.TopBlockedCountries = make([]CountryCount, len(countries))
 	for i, c := range countries {
 		stats.TopBlockedCountries[i] = CountryCount(c)
@@ -144,13 +134,26 @@ func (c *blockLogCounters) snapshot() Stats {
 	return stats
 }
 
+// reset 重置所有计数器（整点轮转刷入 DB 后调用）
+func (c *blockLogCounters) reset() {
+	atomic.StoreInt64(&c.totalBlocked, 0)
+
+	c.mu.Lock()
+	c.byRuleSource = make(map[string]*int64)
+	c.byCountry = make(map[string]*int64)
+	c.topIPs = make(map[string]*int64)
+	c.mu.Unlock()
+}
+
 // NewBlockLogWithPersistence 创建带持久化的阻断日志管理器
 // StatsStore 延迟注入，由调用方在 bizDB 就绪后通过 AttachStatsStore 注入
 func NewBlockLogWithPersistence(maxSize int, config Config) (*BlockLog, error) {
 	bl := NewBlockLog(maxSize)
 
-	// 创建异步写入器
-	asyncWriter, err := NewAsyncWriter(config)
+	// 创建异步写入器（注入 onRotate 回调）
+	asyncWriter, err := NewAsyncWriter(config, func(t time.Time) {
+		bl.SnapshotHourlyCounters(t)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -171,12 +174,6 @@ func (bl *BlockLog) AttachStatsStore(db *gorm.DB) {
 
 // AddRecord 添加阻断记录
 func (bl *BlockLog) AddRecord(record BlockRecord) {
-	// 统计写入在锁外执行（SQLite 磁盘 I/O），避免阻塞热路径
-	var ruleSource string
-	if bl.statsStore != nil {
-		ruleSource = record.RuleSource
-	}
-
 	bl.mu.Lock()
 
 	// 如果超过最大记录数，删除最旧的记录
@@ -197,19 +194,13 @@ func (bl *BlockLog) AddRecord(record BlockRecord) {
 
 	bl.mu.Unlock()
 
-	// 增量计数器更新（原子操作，无锁，与 records slice 解耦）
+	// 增量计数器更新（原子操作，无锁，仅用于整点轮转时的写缓冲）
 	if bl.counters != nil {
 		c := bl.counters
 		atomic.AddInt64(&c.totalBlocked, 1)
-		c.increment(c.byMatchType, record.MatchType)
 		c.increment(c.byRuleSource, record.RuleSource)
 		c.increment(c.byCountry, record.CountryCode)
 		c.increment(c.topIPs, record.SrcIP)
-	}
-
-	// 统计存储写操作移至锁外（SQLite INSERT），避免 DDoS 场景下锁争用
-	if ruleSource != "" {
-		bl.statsStore.Record(ruleSource)
 	}
 }
 
@@ -290,7 +281,6 @@ type RecordFilter struct {
 // Stats 统计信息
 type Stats struct {
 	TotalBlocked        int            `json:"total_blocked"`         // 总阻断数
-	ByMatchType         map[string]int `json:"by_match_type"`         // 按匹配类型统计
 	ByRuleSource        map[string]int `json:"by_rule_source"`        // 按规则来源统计
 	ByCountry           map[string]int `json:"by_country"`            // 按国家统计
 	TopBlockedIPs       []IPCount      `json:"top_blocked_ips"`       // 被阻断最多的 IP
@@ -309,12 +299,25 @@ type CountryCount struct {
 	Count   int    `json:"count"`
 }
 
-// GetStats 获取统计信息（使用增量计数器快照，O(1) 无需遍历 records）
+// GetStats 获取统计信息（纯 DB 查询）
 func (bl *BlockLog) GetStats() Stats {
-	if bl.counters != nil {
-		return bl.counters.snapshot()
+	if bl.statsStore != nil {
+		return bl.statsStore.GetAggregatedStats()
 	}
 	return Stats{}
+}
+
+// SnapshotHourlyCounters 将当前内存计数器快照写入 DB 并重置（整点轮转时由回调调用）
+func (bl *BlockLog) SnapshotHourlyCounters(t time.Time) {
+	if bl.counters == nil || bl.statsStore == nil {
+		return
+	}
+	hourKey := t.Format("2006-01-02T15")
+	snap := bl.counters.snapshot()
+	if snap.TotalBlocked > 0 {
+		bl.statsStore.SnapshotHour(hourKey, snap)
+	}
+	bl.counters.reset()
 }
 
 // Close 关闭阻断日志管理器（停止异步写入器）

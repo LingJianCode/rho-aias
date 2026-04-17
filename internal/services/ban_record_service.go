@@ -238,7 +238,9 @@ func (s *BanRecordService) GetBanStats() (*BanStats, error) {
 	}
 
 	// 今日新增记录数
-	today := time.Now().In(chinaLocation).Truncate(24 * time.Hour)
+	now := time.Now().In(chinaLocation)
+	year, month, day := now.Date()
+	today := time.Date(year, month, day, 0, 0, 0, 0, chinaLocation)
 	if err := s.db.Model(&models.BanRecord{}).
 		Where("created_at >= ?", today).
 		Count(&stats.TodayCount).Error; err != nil {

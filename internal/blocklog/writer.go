@@ -18,6 +18,7 @@ type FileWriter struct {
 	currentHour time.Time     // 当前小时
 	currentFile *os.File      // 当前文件
 	writer      *bufio.Writer // 缓冲写入器
+	OnRotate    func(time.Time) // 整点轮转时的回调（由外部注入）
 }
 
 // NewFileWriter 创建新的文件写入器
@@ -113,6 +114,11 @@ func (fw *FileWriter) shouldRotate(now time.Time) bool {
 
 // rotateFile 切换到新的日志文件
 func (fw *FileWriter) rotateFile(now time.Time) error {
+	// 触发轮转回调（在关闭旧文件前，让上层将当前小时的统计刷入 DB）
+	if fw.OnRotate != nil {
+		fw.OnRotate(now)
+	}
+
 	// 关闭旧文件
 	if fw.writer != nil {
 		if err := fw.writer.Flush(); err != nil {
