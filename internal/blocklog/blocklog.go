@@ -3,6 +3,7 @@
 package blocklog
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -40,7 +41,8 @@ type BlockLog struct {
 	records     []BlockRecord
 	maxSize     int
 	asyncWriter *AsyncWriter
-	statsStore  *StatsStore // 统计存储（可选）
+	statsStore  *StatsStore    // 统计存储（可选）
+	jsonReader  *JsonLogReader // JSONL 文件查询器
 	counters    *blockLogCounters
 }
 
@@ -78,25 +80,6 @@ func (c *blockLogCounters) increment(m map[string]*int64, key string) {
 	}
 	c.mu.Unlock()
 	atomic.AddInt64(ptr, 1)
-}
-
-// reset 重置所有计数器（Clear 时使用）
-func (c *blockLogCounters) reset() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.totalBlocked = 0
-	for _, v := range c.byMatchType {
-		atomic.StoreInt64(v, 0)
-	}
-	for _, v := range c.byRuleSource {
-		atomic.StoreInt64(v, 0)
-	}
-	for _, v := range c.byCountry {
-		atomic.StoreInt64(v, 0)
-	}
-	for _, v := range c.topIPs {
-		atomic.StoreInt64(v, 0)
-	}
 }
 
 // snapshot 读取当前计数器快照（用于 GetStats）
@@ -141,13 +124,18 @@ func (c *blockLogCounters) snapshot() Stats {
 	}
 
 	// 国家 Top 排序
-	type cn struct{ Country string; Count int }
+	type cn struct {
+		Country string
+		Count   int
+	}
 	var countries []cn
 	for country, count := range stats.ByCountry {
 		countries = append(countries, cn{country, count})
 	}
 	sort.Slice(countries, func(i, j int) bool { return countries[i].Count > countries[j].Count })
-	if len(countries) > 10 { countries = countries[:10] }
+	if len(countries) > 10 {
+		countries = countries[:10]
+	}
 	stats.TopBlockedCountries = make([]CountryCount, len(countries))
 	for i, c := range countries {
 		stats.TopBlockedCountries[i] = CountryCount(c)
@@ -167,6 +155,9 @@ func NewBlockLogWithPersistence(maxSize int, config Config) (*BlockLog, error) {
 		return nil, err
 	}
 	bl.asyncWriter = asyncWriter
+
+	// 创建 JSONL 查询器（复用同一个 logDir）
+	bl.jsonReader = NewJsonLogReader(config.LogDir)
 
 	// StatsStore 不再在此创建，等待 AttachStatsStore 注入
 
@@ -241,7 +232,7 @@ func (bl *BlockLog) GetRecords(limit int) []BlockRecord {
 	return result
 }
 
-// GetRecordsByFilter 按条件筛选阻断记录
+// GetRecordsByFilter 按条件筛选阻断记录（内存查询）
 func (bl *BlockLog) GetRecordsByFilter(filter RecordFilter) []BlockRecord {
 	bl.mu.RLock()
 	defer bl.mu.RUnlock()
@@ -276,13 +267,24 @@ func (bl *BlockLog) GetRecordsByFilter(filter RecordFilter) []BlockRecord {
 	return result
 }
 
+// QueryJSONLRecords 从 JSONL 文件分页查询记录
+func (bl *BlockLog) QueryJSONLRecords(filter RecordFilter) (*PageResult, error) {
+	if bl.jsonReader == nil {
+		return nil, fmt.Errorf("json reader not initialized")
+	}
+	return bl.jsonReader.QueryPage(filter.Hour, filter)
+}
+
 // RecordFilter 记录过滤条件
 type RecordFilter struct {
+	Hour        string `form:"hour"`         // 小时查询 (格式: 2026-04-17_14)
 	MatchType   string `form:"match_type"`   // 匹配类型过滤
 	RuleSource  string `form:"rule_source"`  // 规则来源过滤
 	SrcIP       string `form:"src_ip"`       // 源 IP 过滤
 	CountryCode string `form:"country_code"` // 国家代码过滤
-	Limit       int    `form:"limit"`        // 返回数量限制
+	Page        int    `form:"page"`         // 页码 (从1开始)
+	PageSize    int    `form:"page_size"`    // 每页数量
+	Limit       int    `form:"limit"`        // 返回数量限制 (内存查询模式)
 }
 
 // Stats 统计信息
@@ -313,17 +315,6 @@ func (bl *BlockLog) GetStats() Stats {
 		return bl.counters.snapshot()
 	}
 	return Stats{}
-}
-
-// Clear 清空所有记录
-func (bl *BlockLog) Clear() {
-	bl.mu.Lock()
-	defer bl.mu.Unlock()
-
-	bl.records = make([]BlockRecord, 0, bl.maxSize)
-	if bl.counters != nil {
-		bl.counters.reset()
-	}
 }
 
 // Close 关闭阻断日志管理器（停止异步写入器）

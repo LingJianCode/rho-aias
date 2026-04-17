@@ -41,13 +41,6 @@ func RegisterBlockLogRoutes(group *gin.RouterGroup, blockLogHandle *handles.Bloc
 		blockLogHandle.GetBlockedCountries,
 	)
 
-	// 清除记录 - 需要 blocklog:clear 权限
-	blocklog.DELETE("/records",
-		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "blocklog", "write"),
-		blockLogHandle.ClearRecords,
-	)
-
 	// 查看小时趋势 - 需要 blocklog:read 权限
 	blocklog.GET("/hourly-trend",
 		middleware.AuthMiddleware(authService, apiKeyService),

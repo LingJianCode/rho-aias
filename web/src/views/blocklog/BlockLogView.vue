@@ -21,22 +21,22 @@
 
     <el-card class="filter-card">
       <el-form :inline="true" :model="filters" class="filter-form">
-        <el-form-item label="时间范围">
+        <el-form-item label="查询时间">
           <el-date-picker
-            v-model="dateRange"
-            type="datetimerange"
-            range-separator="至"
-            start-placeholder="开始时间"
-            end-placeholder="结束时间"
-            format="YYYY-MM-DD HH:mm:ss"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            :shortcuts="timeShortcuts"
-            style="width: 360px"
+            v-model="selectedHour"
+            type="datetime"
+            placeholder="选择小时"
+            format="YYYY-MM-DD HH:00"
+            value-format="YYYY-MM-DD_HH"
+            :disabled-hours="() => []"
+            :disabled-minutes="() => Array.from({ length: 60 }, (_, i) => i)"
+            :disabled-seconds="() => Array.from({ length: 60 }, (_, i) => i)"
+            style="width: 200px"
           />
         </el-form-item>
         <el-form-item label="搜索 IP">
           <el-input
-            v-model="filters.ip"
+            v-model="filters.src_ip"
             placeholder="输入 IP"
             clearable
             style="width: 180px"
@@ -44,10 +44,16 @@
             @keyup.enter="handleSearch"
           />
         </el-form-item>
+        <el-form-item label="匹配类型">
+          <el-select v-model="filters.match_type" placeholder="全部" clearable style="width: 140px" @change="handleSearch">
+            <el-option label="精确匹配" value="ip4_exact" />
+            <el-option label="CIDR 匹配" value="ip4_cidr" />
+            <el-option label="地域封禁" value="geo_block" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="来源">
-          <el-select v-model="filters.source" placeholder="全部来源" clearable style="width: 140px" @change="handleSearch">
+          <el-select v-model="filters.rule_source" placeholder="全部来源" clearable style="width: 140px" @change="handleSearch">
             <el-option label="手动" value="manual" />
-            <!-- 注：大数据源（ipsum、spamhaus）规则量巨大，不在列表页展示 -->
             <el-option label="WAF" value="waf" />
             <el-option label="DDoS" value="ddos" />
             <el-option label="异常检测" value="anomaly" />
@@ -126,40 +132,16 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 
-const dateRange = ref<[string, string] | null>(null)
+// 默认当前小时
+const now = new Date()
+const defaultHour = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}`
+const selectedHour = ref<string>(defaultHour)
 const filters = reactive({
-  ip: '',
-  source: '',
+  src_ip: '',
+  match_type: '',
+  rule_source: '',
+  country_code: '',
 })
-
-const timeShortcuts = [
-  {
-    text: '今天',
-    value: () => {
-      const start = new Date()
-      start.setHours(0, 0, 0, 0)
-      return [start, new Date()]
-    },
-  },
-  {
-    text: '最近7天',
-    value: () => {
-      const end = new Date()
-      const start = new Date()
-      start.setTime(start.getTime() - 7 * 24 * 3600 * 1000)
-      return [start, end]
-    },
-  },
-  {
-    text: '最近30天',
-    value: () => {
-      const end = new Date()
-      const start = new Date()
-      start.setTime(start.getTime() - 30 * 24 * 3600 * 1000)
-      return [start, end]
-    },
-  },
-]
 
 const stats = reactive<BlockLogStats>({
   total_blocks: 0,
@@ -179,15 +161,21 @@ async function fetchStats() {
 }
 
 async function fetchLogs() {
+  if (!selectedHour.value) {
+    logs.value = []
+    total.value = 0
+    return
+  }
   loading.value = true
   try {
     const res = await getBlockLogs({
+      hour: selectedHour.value,
       page: page.value,
       page_size: pageSize.value,
-      start_time: dateRange.value?.[0],
-      end_time: dateRange.value?.[1],
-      ip: filters.ip || undefined,
-      source: filters.source || undefined,
+      src_ip: filters.src_ip || undefined,
+      match_type: filters.match_type || undefined,
+      rule_source: filters.rule_source || undefined,
+      country_code: filters.country_code || undefined,
     })
     logs.value = res.data.records.map((r: any) => ({
       ...r,
@@ -209,9 +197,12 @@ function handleSearch() {
 }
 
 function handleReset() {
-  dateRange.value = null
-  filters.ip = ''
-  filters.source = ''
+  const now = new Date()
+  selectedHour.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}`
+  filters.src_ip = ''
+  filters.match_type = ''
+  filters.rule_source = ''
+  filters.country_code = ''
   page.value = 1
   fetchLogs()
 }

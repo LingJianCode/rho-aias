@@ -151,23 +151,6 @@ func TestGetStats(t *testing.T) {
 	}
 }
 
-func TestClear(t *testing.T) {
-	bl := NewBlockLog(100)
-
-	// 添加记录
-	bl.AddRecord(BlockRecord{SrcIP: "192.168.1.1"})
-	bl.AddRecord(BlockRecord{SrcIP: "192.168.1.2"})
-
-	if bl.Count() != 2 {
-		t.Fatalf("Expected 2 records, got %d", bl.Count())
-	}
-
-	bl.Clear()
-
-	if bl.Count() != 0 {
-		t.Errorf("Expected 0 records after clear, got %d", bl.Count())
-	}
-}
 
 func TestCreateRecord(t *testing.T) {
 	record := CreateRecord("192.168.1.1", "10.0.0.1", "ip4_exact", "manual", "CN", 64)

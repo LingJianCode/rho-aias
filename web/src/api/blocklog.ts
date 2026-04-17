@@ -2,12 +2,13 @@ import request from './request'
 import type { ApiResponse, BlockLogListResponse, BlockLogStats, BlockedIPsResponse } from '@/types/api'
 
 export interface BlockLogFilter {
+  hour?: string
   page?: number
   page_size?: number
-  start_time?: string
-  end_time?: string
-  ip?: string
-  source?: string
+  match_type?: string
+  rule_source?: string
+  src_ip?: string
+  country_code?: string
 }
 
 export function getBlockLogs(params: BlockLogFilter): Promise<ApiResponse<BlockLogListResponse>> {

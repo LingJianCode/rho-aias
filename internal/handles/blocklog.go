@@ -30,7 +30,8 @@ func (h *BlockLogHandle) AttachStatsStore(db *gorm.DB) {
 }
 
 // GetRecords 获取阻断记录
-// GET /api/blocklog/records?limit=100&match_type=ip4_exact&rule_source=manual
+// GET /api/blocklog/records?hour=2026-04-17_14&page=1&page_size=20&match_type=&rule_source=&src_ip=&country_code=
+// hour 参数存在时从 JSONL 文件查询，否则从内存查询
 func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 	var filter blocklog.RecordFilter
 	if err := c.ShouldBindQuery(&filter); err != nil {
@@ -38,7 +39,18 @@ func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 		return
 	}
 
-	// 默认限制为 100 条
+	// 如果指定了 hour 参数，从 JSONL 文件查询
+	if filter.Hour != "" {
+		result, err := h.blockLog.QueryJSONLRecords(filter)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		response.OK(c, result)
+		return
+	}
+
+	// 兼容旧的内存查询模式
 	if filter.Limit == 0 {
 		filter.Limit = 100
 	}
@@ -62,14 +74,6 @@ func (h *BlockLogHandle) GetStats(c *gin.Context) {
 	stats := h.blockLog.GetStats()
 
 	response.OK(c, stats)
-}
-
-// ClearRecords 清空阻断记录
-// DELETE /api/blocklog/records
-func (h *BlockLogHandle) ClearRecords(c *gin.Context) {
-	h.blockLog.Clear()
-
-	response.OKMsg(c, "Block log cleared")
 }
 
 // GetBlockedIPs 获取被阻断的 IP 列表（聚合）
@@ -133,7 +137,7 @@ func (h *BlockLogHandle) GetHourlyTrend(c *gin.Context) {
 	trend := h.blockLog.GetHourlyTrend(hours)
 
 	response.OK(c, gin.H{
-		"hours":      hours,
+		"hours":       hours,
 		"hourly_data": trend,
 	})
 }
