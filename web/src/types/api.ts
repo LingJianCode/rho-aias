@@ -107,17 +107,10 @@ export interface IPCount {
   count: number
 }
 
-export interface CountryCount {
-  country: string
-  count: number
-}
-
 export interface BlockLogStats {
   total_blocked: number
   by_rule_source: Record<string, number>
-  by_country: Record<string, number>
   top_blocked_ips: IPCount[]
-  top_blocked_countries: CountryCount[]
 }
 
 // ============================================

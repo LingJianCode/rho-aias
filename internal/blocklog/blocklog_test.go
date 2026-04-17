@@ -131,12 +131,6 @@ func TestGetStats(t *testing.T) {
 	if stats.ByRuleSource["geo"] != 2 {
 		t.Errorf("Expected by_rule_source.geo=2, got %d", stats.ByRuleSource["geo"])
 	}
-	if stats.ByCountry["US"] != 1 {
-		t.Errorf("Expected by_country.US=1, got %d", stats.ByCountry["US"])
-	}
-	if stats.ByCountry["CN"] != 1 {
-		t.Errorf("Expected by_country.CN=1, got %d", stats.ByCountry["CN"])
-	}
 }
 
 

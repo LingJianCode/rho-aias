@@ -34,13 +34,6 @@ func RegisterBlockLogRoutes(group *gin.RouterGroup, blockLogHandle *handles.Bloc
 		blockLogHandle.GetBlockedTopIPs,
 	)
 
-	// 查看阻断国家列表 - 需要 blocklog:read 权限
-	blocklog.GET("/blocked-countries",
-		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
-		blockLogHandle.GetBlockedCountries,
-	)
-
 	// 查看小时趋势 - 需要 blocklog:read 权限
 	blocklog.GET("/hourly-trend",
 		middleware.AuthMiddleware(authService, apiKeyService),

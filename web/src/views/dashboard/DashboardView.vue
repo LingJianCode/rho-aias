@@ -4,7 +4,7 @@
       <h2>仪表盘</h2>
     </div>
 
-    <!-- 阻断态势图 + TOP 被封国家/来源 -->
+    <!-- 阻断态势图 + TOP 被封 IP -->
     <el-row :gutter="20">
       <el-col :span="16">
         <el-card>
@@ -20,16 +20,16 @@
         <el-card>
           <template #header>
             <div class="card-header">
-              <span>TOP 被封国家</span>
+              <span>TOP 被封 IP</span>
             </div>
           </template>
-          <div v-if="topCountries.length" class="rank-list">
-            <div v-for="(item, index) in topCountries" :key="item.country" class="rank-item">
+          <div v-if="topIPs.length" class="rank-list">
+            <div v-for="(item, index) in topIPs" :key="item.ip" class="rank-item">
               <span class="rank-index" :class="{ 'top3': index < 3 }">{{ index + 1 }}</span>
-              <CountryFlag :code="item.country" />
+              <span class="rank-ip">{{ item.ip }}</span>
               <span class="rank-value">{{ formatNumber(item.count) }}</span>
               <el-progress
-                :percentage="getPercentage(item.count)"
+                :percentage="getIPPercentage(item.count)"
                 :show-text="false"
                 :stroke-width="6"
                 :color="index === 0 ? '#409eff' : index === 1 ? '#67c23a' : index === 2 ? '#e6a23c' : '#909399'"
@@ -85,20 +85,20 @@ function formatNanoTimestamp(ts: number | string): string {
   return formatDateTime(ts)
 }
 // 统计与趋势
-import { getBlockLogStats, getBlockLogs, getBlockedCountries, getHourlyTrend } from '@/api/blocklog'
+import { getBlockLogStats, getBlockLogs, getBlockedTopIPs, getHourlyTrend } from '@/api/blocklog'
 import type { BlockLog } from '@/types/api'
 
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
 
-const topCountries = ref<{ country: string; count: number }[]>([])
+const topIPs = ref<{ ip: string; count: number }[]>([])
 const recentBlocks = ref<BlockLog[]>([])
 const blockTrend = ref<{ date: string; count: number }[]>([])
 
 async function fetchDashboardData() {
   await Promise.all([
     fetchBlockStatsAndTrend(),
-    fetchTopCountries(),
+    fetchTopIPs(),
     fetchRecentBlocks(),
   ])
   updateChart()
@@ -118,11 +118,11 @@ async function fetchBlockStatsAndTrend() {
   }
 }
 
-async function fetchTopCountries() {
+async function fetchTopIPs() {
   try {
-    const res = await getBlockedCountries(10)
-    if (res.data?.top_blocked_countries) {
-      topCountries.value = res.data.top_blocked_countries
+    const res = await getBlockedTopIPs(10)
+    if (res.data?.top_blocked_ips) {
+      topIPs.value = res.data.top_blocked_ips
     }
   } catch {
     // Error handled
@@ -140,8 +140,8 @@ async function fetchRecentBlocks() {
   }
 }
 
-function getPercentage(count: number): number {
-  const max = topCountries.value[0]?.count || 1
+function getIPPercentage(count: number): number {
+  const max = topIPs.value[0]?.count || 1
   return Math.round((count / max) * 100)
 }
 
@@ -222,6 +222,14 @@ onUnmounted(() => {
   color: var(--el-text-color-primary);
   min-width: 48px;
   text-align: right;
+  flex-shrink: 0;
+}
+
+.rank-ip {
+  font-size: 13px;
+  font-family: monospace;
+  color: var(--el-text-color-primary);
+  min-width: 100px;
   flex-shrink: 0;
 }
 </style>

@@ -86,24 +86,6 @@ func (h *BlockLogHandle) GetBlockedTopIPs(c *gin.Context) {
 	})
 }
 
-// GetBlockedCountries 获取被阻断的国家/地区列表（直接从 DB 查询）
-// GET /api/blocklog/blocked-countries?limit=20
-func (h *BlockLogHandle) GetBlockedCountries(c *gin.Context) {
-	limit := 20
-	if l := c.Query("limit"); l != "" {
-		if parsed, err := parseInt(l); err == nil && parsed > 0 {
-			limit = parsed
-		}
-	}
-
-	topCountries, total := h.blockLog.GetTopCountries(limit)
-
-	response.OK(c, gin.H{
-		"total_blocked_countries": total,
-		"top_blocked_countries":   topCountries,
-	})
-}
-
 // GetHourlyTrend 获取丢弃计数小时趋势
 // GET /api/blocklog/hourly-trend?hours=24&by=source
 func (h *BlockLogHandle) GetHourlyTrend(c *gin.Context) {

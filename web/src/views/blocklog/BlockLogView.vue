@@ -12,9 +12,6 @@
         <StatsCard label="阻断 IP 数" :value="stats.top_blocked_ips.length" :icon="Monitor" icon-color="#67c23a" />
       </el-col>
       <el-col :span="5">
-        <StatsCard label="涉及国家" :value="stats.top_blocked_countries.length" :icon="Location" icon-color="#e6a23c" />
-      </el-col>
-      <el-col :span="5">
         <StatsCard label="数据来源" :value="Object.keys(stats.by_rule_source).length" :icon="Connection" icon-color="#909399" />
       </el-col>
     </el-row>
@@ -109,7 +106,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { DataLine, Monitor, Location, Connection } from '@element-plus/icons-vue'
+import { DataLine, Monitor, Connection } from '@element-plus/icons-vue'
 import StatsCard from '@/components/StatsCard.vue'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
@@ -149,9 +146,7 @@ const filters = reactive({
 const stats = reactive<BlockLogStats>({
   total_blocked: 0,
   by_rule_source: {},
-  by_country: {},
   top_blocked_ips: [],
-  top_blocked_countries: [],
 })
 
 async function fetchStats() {

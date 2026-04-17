@@ -30,7 +30,6 @@ type BlockRecord struct {
 type blockLogCounters struct {
 	totalBlocked int64
 	byRuleSource map[string]*int64 // 每种规则来源的计数指针
-	byCountry    map[string]*int64 // 每个国家的计数指针
 	topIPs       map[string]*int64 // 每个 IP 的计数指针
 	mu           sync.RWMutex      // 写端保护 map 结构变更，读端 RLock 无阻塞
 }
@@ -59,7 +58,6 @@ func NewBlockLog(maxSize int) *BlockLog {
 func newBlockLogCounters() *blockLogCounters {
 	return &blockLogCounters{
 		byRuleSource: make(map[string]*int64),
-		byCountry:    make(map[string]*int64),
 		topIPs:       make(map[string]*int64),
 	}
 }
@@ -84,22 +82,15 @@ func (c *blockLogCounters) increment(m map[string]*int64, key string) {
 // snapshot 读取当前计数器快照（用于整点轮转时刷入 DB）
 func (c *blockLogCounters) snapshot() Stats {
 	stats := Stats{
-		TotalBlocked:        int(atomic.LoadInt64(&c.totalBlocked)),
-		ByRuleSource:        make(map[string]int),
-		ByCountry:           make(map[string]int),
-		TopBlockedIPs:       []IPCount{},
-		TopBlockedCountries: []CountryCount{},
+		TotalBlocked:  int(atomic.LoadInt64(&c.totalBlocked)),
+		ByRuleSource:  make(map[string]int),
+		TopBlockedIPs: []IPCount{},
 	}
 
 	c.mu.RLock()
 	for k, v := range c.byRuleSource {
 		if cnt := atomic.LoadInt64(v); cnt > 0 {
 			stats.ByRuleSource[k] = int(cnt)
-		}
-	}
-	for k, v := range c.byCountry {
-		if cnt := atomic.LoadInt64(v); cnt > 0 {
-			stats.ByCountry[k] = int(cnt)
 		}
 	}
 	for k, v := range c.topIPs {
@@ -116,21 +107,6 @@ func (c *blockLogCounters) snapshot() Stats {
 		stats.TopBlockedIPs = stats.TopBlockedIPs[:50]
 	}
 
-	// 国家 Top 排序
-	type cn struct {
-		Country string
-		Count   int
-	}
-	var countries []cn
-	for country, count := range stats.ByCountry {
-		countries = append(countries, cn{country, count})
-	}
-	sort.Slice(countries, func(i, j int) bool { return countries[i].Count > countries[j].Count })
-	stats.TopBlockedCountries = make([]CountryCount, len(countries))
-	for i, c := range countries {
-		stats.TopBlockedCountries[i] = CountryCount(c)
-	}
-
 	return stats
 }
 
@@ -140,7 +116,6 @@ func (c *blockLogCounters) reset() {
 
 	c.mu.Lock()
 	c.byRuleSource = make(map[string]*int64)
-	c.byCountry = make(map[string]*int64)
 	c.topIPs = make(map[string]*int64)
 	c.mu.Unlock()
 }
@@ -199,7 +174,6 @@ func (bl *BlockLog) AddRecord(record BlockRecord) {
 		c := bl.counters
 		atomic.AddInt64(&c.totalBlocked, 1)
 		c.increment(c.byRuleSource, record.RuleSource)
-		c.increment(c.byCountry, record.CountryCode)
 		c.increment(c.topIPs, record.SrcIP)
 	}
 }
@@ -280,23 +254,15 @@ type RecordFilter struct {
 
 // Stats 统计信息
 type Stats struct {
-	TotalBlocked        int            `json:"total_blocked"`         // 总阻断数
-	ByRuleSource        map[string]int `json:"by_rule_source"`        // 按规则来源统计
-	ByCountry           map[string]int `json:"by_country"`            // 按国家统计
-	TopBlockedIPs       []IPCount      `json:"top_blocked_ips"`       // 被阻断最多的 IP
-	TopBlockedCountries []CountryCount `json:"top_blocked_countries"` // 被阻断最多的国家
+	TotalBlocked  int            `json:"total_blocked"`   // 总阻断数
+	ByRuleSource  map[string]int `json:"by_rule_source"`  // 按规则来源统计
+	TopBlockedIPs []IPCount      `json:"top_blocked_ips"` // 被阻断最多的 IP
 }
 
 // IPCount IP 计数
 type IPCount struct {
 	IP    string `json:"ip"`
 	Count int    `json:"count"`
-}
-
-// CountryCount 国家计数
-type CountryCount struct {
-	Country string `json:"country"`
-	Count   int    `json:"count"`
 }
 
 // defaultRetentionDays 默认查询最近天数
@@ -326,11 +292,6 @@ func (bl *BlockLog) GetStats() Stats {
 		dbStats.ByRuleSource[k] += v
 	}
 
-	// 合并 ByCountry
-	for k, v := range memSnap.ByCountry {
-		dbStats.ByCountry[k] += v
-	}
-
 	// 合并 TopBlockedIPs：map 聚合后排序
 	ipMap := make(map[string]int)
 	for _, ip := range dbStats.TopBlockedIPs {
@@ -348,24 +309,6 @@ func (bl *BlockLog) GetStats() Stats {
 		mergedIPs = mergedIPs[:10]
 	}
 	dbStats.TopBlockedIPs = mergedIPs
-
-	// 重建 TopBlockedCountries（合并后重排序）
-	type cn struct {
-		Country string
-		Count   int
-	}
-	var countries []cn
-	for country, count := range dbStats.ByCountry {
-		countries = append(countries, cn{country, count})
-	}
-	sort.Slice(countries, func(i, j int) bool { return countries[i].Count > countries[j].Count })
-	if len(countries) > 10 {
-		countries = countries[:10]
-	}
-	dbStats.TopBlockedCountries = make([]CountryCount, len(countries))
-	for i, c := range countries {
-		dbStats.TopBlockedCountries[i] = CountryCount(c)
-	}
 
 	return dbStats
 }
@@ -429,49 +372,6 @@ func (bl *BlockLog) GetTopIPs(limit int) ([]IPCount, int64) {
 	}
 
 	return mergedIPs, total
-}
-
-// GetTopCountries 从数据库查询 Top N 被阻断国家（融合查询：DB + 内存）
-func (bl *BlockLog) GetTopCountries(limit int) ([]CountryCount, int) {
-	if bl.statsStore == nil {
-		return nil, 0
-	}
-
-	dbCountries, totalCountries := bl.statsStore.GetTopCountries(defaultRetentionDays, limit)
-
-	// 融合内存计数器
-	memSnap := bl.counters.snapshot()
-
-	countryMap := make(map[string]int)
-	for _, c := range dbCountries {
-		countryMap[c.Country] += c.Count
-	}
-	for country, count := range memSnap.ByCountry {
-		if _, exists := countryMap[country]; !exists {
-			totalCountries++
-		}
-		countryMap[country] += count
-	}
-
-	type cn struct {
-		Country string
-		Count   int
-	}
-	var merged []cn
-	for country, count := range countryMap {
-		merged = append(merged, cn{country, count})
-	}
-	sort.Slice(merged, func(i, j int) bool { return merged[i].Count > merged[j].Count })
-	if len(merged) > limit {
-		merged = merged[:limit]
-	}
-
-	result := make([]CountryCount, len(merged))
-	for i, c := range merged {
-		result[i] = CountryCount(c)
-	}
-
-	return result, totalCountries
 }
 
 // Flush 刷新缓冲区到磁盘

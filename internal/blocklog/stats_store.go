@@ -1,7 +1,6 @@
 package blocklog
 
 import (
-	"sort"
 	"time"
 
 	"rho-aias/internal/logger"
@@ -54,16 +53,6 @@ func (ss *StatsStore) SnapshotHour(hour string, stats Stats) {
 		})
 	}
 
-	// country 维度
-	for country, cnt := range stats.ByCountry {
-		records = append(records, models.BlocklogHourlyStat{
-			Hour:      hour,
-			Dimension: "country",
-			DimValue:  country,
-			Count:     int64(cnt),
-		})
-	}
-
 	// 批量 UPSERT
 	for _, rec := range records {
 		err := ss.db.Exec(
@@ -99,10 +88,8 @@ func (ss *StatsStore) GetAggregatedStats(retentionDays int) Stats {
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).Format("2006-01-02T15")
 
 	stats := Stats{
-		ByRuleSource:        make(map[string]int),
-		ByCountry:           make(map[string]int),
-		TopBlockedIPs:       []IPCount{},
-		TopBlockedCountries: []CountryCount{},
+		ByRuleSource:  make(map[string]int),
+		TopBlockedIPs: []IPCount{},
 	}
 
 	// Total
@@ -123,16 +110,6 @@ func (ss *StatsStore) GetAggregatedStats(retentionDays int) Stats {
 		stats.ByRuleSource[r.DimValue] = int(r.Count)
 	}
 
-	// ByCountry
-	var countryResults []models.BlocklogHourlyStat
-	ss.db.Select("dim_value, SUM(count) as count").
-		Where("dimension = ? AND hour >= ?", "country", cutoff).
-		Group("dim_value").
-		Find(&countryResults)
-	for _, r := range countryResults {
-		stats.ByCountry[r.DimValue] = int(r.Count)
-	}
-
 	// TopBlockedIPs (from blocklog_top_ips, with time filter)
 	var topIPResults []struct {
 		IP    string `json:"ip"`
@@ -147,24 +124,6 @@ func (ss *StatsStore) GetAggregatedStats(retentionDays int) Stats {
 		Scan(&topIPResults)
 	for _, r := range topIPResults {
 		stats.TopBlockedIPs = append(stats.TopBlockedIPs, IPCount{IP: r.IP, Count: int(r.Total)})
-	}
-
-	// TopBlockedCountries (从 ByCountry 排序取 Top10)
-	type cn struct {
-		Country string
-		Count   int
-	}
-	var countries []cn
-	for country, count := range stats.ByCountry {
-		countries = append(countries, cn{country, count})
-	}
-	sort.Slice(countries, func(i, j int) bool { return countries[i].Count > countries[j].Count })
-	if len(countries) > 10 {
-		countries = countries[:10]
-	}
-	stats.TopBlockedCountries = make([]CountryCount, len(countries))
-	for i, c := range countries {
-		stats.TopBlockedCountries[i] = CountryCount(c)
 	}
 
 	return stats
@@ -234,36 +193,6 @@ func (ss *StatsStore) GetTopIPs(retentionDays int, limit int) ([]IPCount, int64)
 		ips[i] = IPCount{IP: r.IP, Count: int(r.Total)}
 	}
 	return ips, total
-}
-
-// GetTopCountries 从 blocklog_hourly_stats 聚合查询时间范围内 Top N 国家
-// retentionDays: 查询最近 N 天的数据
-func (ss *StatsStore) GetTopCountries(retentionDays int, limit int) ([]CountryCount, int) {
-	if ss.db == nil {
-		return nil, 0
-	}
-
-	cutoff := time.Now().AddDate(0, 0, -retentionDays).Format("2006-01-02T15")
-
-	var results []models.BlocklogHourlyStat
-	ss.db.Select("dim_value, SUM(count) as count").
-		Where("dimension = ? AND hour >= ?", "country", cutoff).
-		Group("dim_value").
-		Order("count DESC").
-		Limit(limit).
-		Find(&results)
-
-	// 总国家数
-	var totalCountries []models.BlocklogHourlyStat
-	ss.db.Select("DISTINCT dim_value").
-		Where("dimension = ? AND hour >= ?", "country", cutoff).
-		Find(&totalCountries)
-
-	countries := make([]CountryCount, len(results))
-	for i, r := range results {
-		countries[i] = CountryCount{Country: r.DimValue, Count: int(r.Count)}
-	}
-	return countries, len(totalCountries)
 }
 
 // Cleanup 清理 N 天前的历史数据
