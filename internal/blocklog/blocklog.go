@@ -26,7 +26,7 @@ type BlockRecord struct {
 }
 
 // blockLogCounters 增量统计计数器（原子操作，无锁热路径）
-// 仅作为写缓冲区，整点轮转时刷入 DB 后归零，不参与查询
+// 整点轮转时刷入 DB 后归零；查询时通过融合查询（DB + 内存快照）实现实时统计
 type blockLogCounters struct {
 	totalBlocked int64
 	byRuleSource map[string]*int64 // 每种规则来源的计数指针
@@ -299,12 +299,75 @@ type CountryCount struct {
 	Count   int    `json:"count"`
 }
 
-// GetStats 获取统计信息（纯 DB 查询）
+// defaultRetentionDays 默认查询最近天数
+const defaultRetentionDays = 30
+
+// GetStats 获取统计信息（融合查询：DB 历史数据 + 内存实时计数器）
 func (bl *BlockLog) GetStats() Stats {
-	if bl.statsStore != nil {
-		return bl.statsStore.GetAggregatedStats()
+	if bl.statsStore == nil {
+		// 无 DB 时直接返回内存快照
+		if bl.counters != nil {
+			return bl.counters.snapshot()
+		}
+		return Stats{}
 	}
-	return Stats{}
+
+	// 从 DB 获取历史数据（带时间边界）
+	dbStats := bl.statsStore.GetAggregatedStats(defaultRetentionDays)
+
+	// 融合内存计数器（当前小时，尚未 flush 到 DB）
+	memSnap := bl.counters.snapshot()
+
+	// 合并 TotalBlocked
+	dbStats.TotalBlocked += memSnap.TotalBlocked
+
+	// 合并 ByRuleSource
+	for k, v := range memSnap.ByRuleSource {
+		dbStats.ByRuleSource[k] += v
+	}
+
+	// 合并 ByCountry
+	for k, v := range memSnap.ByCountry {
+		dbStats.ByCountry[k] += v
+	}
+
+	// 合并 TopBlockedIPs：map 聚合后排序
+	ipMap := make(map[string]int)
+	for _, ip := range dbStats.TopBlockedIPs {
+		ipMap[ip.IP] += ip.Count
+	}
+	for _, ip := range memSnap.TopBlockedIPs {
+		ipMap[ip.IP] += ip.Count
+	}
+	mergedIPs := make([]IPCount, 0, len(ipMap))
+	for ip, count := range ipMap {
+		mergedIPs = append(mergedIPs, IPCount{IP: ip, Count: count})
+	}
+	sort.Slice(mergedIPs, func(i, j int) bool { return mergedIPs[i].Count > mergedIPs[j].Count })
+	if len(mergedIPs) > 10 {
+		mergedIPs = mergedIPs[:10]
+	}
+	dbStats.TopBlockedIPs = mergedIPs
+
+	// 重建 TopBlockedCountries（合并后重排序）
+	type cn struct {
+		Country string
+		Count   int
+	}
+	var countries []cn
+	for country, count := range dbStats.ByCountry {
+		countries = append(countries, cn{country, count})
+	}
+	sort.Slice(countries, func(i, j int) bool { return countries[i].Count > countries[j].Count })
+	if len(countries) > 10 {
+		countries = countries[:10]
+	}
+	dbStats.TopBlockedCountries = make([]CountryCount, len(countries))
+	for i, c := range countries {
+		dbStats.TopBlockedCountries[i] = CountryCount{Country: c.Country, Count: c.Count}
+	}
+
+	return dbStats
 }
 
 // SnapshotHourlyCounters 将当前内存计数器快照写入 DB 并重置（整点轮转时由回调调用）
@@ -336,20 +399,79 @@ func (bl *BlockLog) GetHourlyTrend(hours int) []HourlyTrendItem {
 	return bl.statsStore.GetHourlyTrend(hours)
 }
 
-// GetTopIPs 从数据库查询 Top N 被阻断 IP
+// GetTopIPs 从数据库查询 Top N 被阻断 IP（融合查询：DB + 内存）
 func (bl *BlockLog) GetTopIPs(limit int) ([]IPCount, int64) {
 	if bl.statsStore == nil {
 		return nil, 0
 	}
-	return bl.statsStore.GetTopIPs(limit)
+
+	dbIPs, total := bl.statsStore.GetTopIPs(defaultRetentionDays, limit)
+
+	// 融合内存计数器
+	memSnap := bl.counters.snapshot()
+
+	ipMap := make(map[string]int)
+	for _, ip := range dbIPs {
+		ipMap[ip.IP] += ip.Count
+	}
+	for _, ip := range memSnap.TopBlockedIPs {
+		ipMap[ip.IP] += ip.Count
+		total++
+	}
+
+	mergedIPs := make([]IPCount, 0, len(ipMap))
+	for ip, count := range ipMap {
+		mergedIPs = append(mergedIPs, IPCount{IP: ip, Count: count})
+	}
+	sort.Slice(mergedIPs, func(i, j int) bool { return mergedIPs[i].Count > mergedIPs[j].Count })
+	if len(mergedIPs) > limit {
+		mergedIPs = mergedIPs[:limit]
+	}
+
+	return mergedIPs, total
 }
 
-// GetTopCountries 从数据库查询 Top N 被阻断国家
+// GetTopCountries 从数据库查询 Top N 被阻断国家（融合查询：DB + 内存）
 func (bl *BlockLog) GetTopCountries(limit int) ([]CountryCount, int) {
 	if bl.statsStore == nil {
 		return nil, 0
 	}
-	return bl.statsStore.GetTopCountries(limit)
+
+	dbCountries, totalCountries := bl.statsStore.GetTopCountries(defaultRetentionDays, limit)
+
+	// 融合内存计数器
+	memSnap := bl.counters.snapshot()
+
+	countryMap := make(map[string]int)
+	for _, c := range dbCountries {
+		countryMap[c.Country] += c.Count
+	}
+	for country, count := range memSnap.ByCountry {
+		if _, exists := countryMap[country]; !exists {
+			totalCountries++
+		}
+		countryMap[country] += count
+	}
+
+	type cn struct {
+		Country string
+		Count   int
+	}
+	var merged []cn
+	for country, count := range countryMap {
+		merged = append(merged, cn{country, count})
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].Count > merged[j].Count })
+	if len(merged) > limit {
+		merged = merged[:limit]
+	}
+
+	result := make([]CountryCount, len(merged))
+	for i, c := range merged {
+		result[i] = CountryCount{Country: c.Country, Count: c.Count}
+	}
+
+	return result, totalCountries
 }
 
 // Flush 刷新缓冲区到磁盘

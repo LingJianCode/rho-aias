@@ -282,10 +282,6 @@ class BlockLogAPIClient:
         """获取小时趋势"""
         return self._request("GET", f"/api/blocklog/hourly-trend?hours={hours}")
 
-    def get_dropped_summary(self, hours: int = 168) -> Tuple[bool, dict]:
-        """获取丢弃概览"""
-        return self._request("GET", f"/api/blocklog/dropped-summary?hours={hours}")
-
 
 class TestBlockLog(unittest.TestCase):
     """BlockLog 阻断日志功能测试
@@ -541,6 +537,16 @@ class TestBlockLog(unittest.TestCase):
 
         logger.info(f"rule_source filter validated: {len(records)} manual records")
 
+        # 交叉验证：stats.by_rule_source.manual 应与过滤记录数一致
+        success, resp = self.api_client.get_stats()
+        self.assertTrue(success, f"Failed to get stats: {resp}")
+        stats = resp.get("data", {})
+        by_source = stats.get("by_rule_source", {})
+        manual_stats = by_source.get("manual", 0)
+        self.assertGreater(manual_stats, 0,
+                           "stats.by_rule_source.manual should be > 0 after blocking")
+        logger.info(f"Stats cross-validation: by_rule_source.manual={manual_stats}")
+
         # 验证过滤非法来源返回空
         success, resp = self.api_client.get_records({"rule_source": "nonexistent_source", "limit": 100})
         self.assertTrue(success)
@@ -618,42 +624,46 @@ class TestBlockLog(unittest.TestCase):
         self.api_client.delete_rule(extra_ip)
 
     def test_07_sqlite_stats_persistence(self):
-        """测试 SQLite 统计持久化：hourly-trend 和 dropped-summary"""
+        """测试统计持久化：hourly-trend 和 stats 联合验证"""
         self.assertTrue(
             self._start_rho("rho_bl_veth0"),
             "Failed to start rho-aias"
         )
 
-        # 触发阻断，产生 SQLite 写入
-        self._do_block_cycle("10.0.1.2", ping_count=3, wait_after_block=3)
+        # 触发阻断
+        _, records = self._do_block_cycle("10.0.1.2", ping_count=3, wait_after_block=3)
+        records_count = len(records)
 
-        # 查询 hourly-trend（只查最近 1 小时）
+        # 查询 hourly-trend（最近 1 小时）
         success, resp = self.api_client.get_hourly_trend(hours=1)
         self.assertTrue(success, f"Failed to get hourly-trend: {resp}")
 
         hourly_data = (resp.get("data") or {}).get("hourly_data")
         logger.info(f"hourly-trend data: {hourly_data}")
 
-        # 查询 dropped-summary
-        success, resp = self.api_client.get_dropped_summary(hours=24)
-        self.assertTrue(success, f"Failed to get dropped-summary: {resp}")
+        # 查询 stats 验证融合查询
+        success, resp = self.api_client.get_stats()
+        self.assertTrue(success, f"Failed to get stats: {resp}")
 
-        summary = resp.get("data") or {}
-        logger.info(f"dropped-summary: total={summary.get('total')}, sources={summary.get('sources')}")
+        stats = resp.get("data", {})
+        total_blocked = stats.get("total_blocked", 0)
+        by_source = stats.get("by_rule_source", {})
+        manual_count = by_source.get("manual", 0)
 
-        # 验证响应结构
-        self.assertIn("total", summary)
-        self.assertIn("sources", summary)
-        self.assertIn("hourly", summary)
+        # 验证 stats 一致性（融合查询应实时可用，无需等待 flush）
+        self.assertGreater(total_blocked, 0, "stats.total_blocked should be > 0 after blocking")
+        self.assertEqual(total_blocked, records_count,
+                         f"stats.total_blocked ({total_blocked}) != records ({records_count})")
+        self.assertEqual(manual_count, records_count,
+                         f"by_rule_source.manual ({manual_count}) != records ({records_count})")
 
-        sources = summary.get("sources") or {}
-        if sources:
-            self.assertIn("manual", sources,
-                          "SQLite should have recorded manual source")
-            logger.info("SQLite stats persistence validated")
-        else:
-            logger.warning("SQLite stats store may not be initialized (sources empty)")
+        # 查询 blocked-top-ips
+        success, resp = self.api_client.get_blocked_ips(limit=10)
+        self.assertTrue(success, f"Failed to get blocked-top-ips: {resp}")
+        top_ips = (resp.get("data") or {}).get("top_blocked_ips") or []
+        self.assertGreater(len(top_ips), 0, "blocked-top-ips should have results after blocking")
 
+        logger.info(f"Stats persistence validated: total_blocked={total_blocked}, manual={manual_count}")
         self.api_client.delete_rule("10.0.1.2")
 
 

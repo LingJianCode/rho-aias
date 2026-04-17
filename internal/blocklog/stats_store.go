@@ -76,27 +76,27 @@ func (ss *StatsStore) SnapshotHour(hour string, stats Stats) {
 		}
 	}
 
-	// 写入 TopIPs（count > 10 才写入）
+	// 写入 TopIPs（带 hour 列，支持按时间范围查询）
 	for _, ipCount := range stats.TopBlockedIPs {
-		if ipCount.Count <= 10 {
-			continue
-		}
 		err := ss.db.Exec(
-			`INSERT INTO blocklog_top_ips (ip, count) VALUES (?, ?)
-			 ON CONFLICT(ip) DO UPDATE SET count = count + excluded.count`,
-			ipCount.IP, ipCount.Count,
+			`INSERT INTO blocklog_top_ips (hour, ip, count) VALUES (?, ?, ?)
+			 ON CONFLICT(hour, ip) DO UPDATE SET count = count + excluded.count`,
+			hour, ipCount.IP, ipCount.Count,
 		).Error
 		if err != nil {
-			logger.Warnf("[StatsStore] SnapshotTopIP upsert failed (%s): %v", ipCount.IP, err)
+			logger.Warnf("[StatsStore] SnapshotTopIP upsert failed (%s/%s): %v", hour, ipCount.IP, err)
 		}
 	}
 }
 
-// GetAggregatedStats 从数据库聚合全量统计（纯 DB 查询）
-func (ss *StatsStore) GetAggregatedStats() Stats {
+// GetAggregatedStats 从数据库聚合指定时间范围内的统计（DB 历史数据）
+// retentionDays: 查询最近 N 天的数据
+func (ss *StatsStore) GetAggregatedStats(retentionDays int) Stats {
 	if ss.db == nil {
 		return Stats{}
 	}
+
+	cutoff := time.Now().AddDate(0, 0, -retentionDays).Format("2006-01-02T15")
 
 	stats := Stats{
 		ByRuleSource:        make(map[string]int),
@@ -109,14 +109,14 @@ func (ss *StatsStore) GetAggregatedStats() Stats {
 	var totalResult struct{ Total int64 }
 	ss.db.Model(&models.BlocklogHourlyStat{}).
 		Select("COALESCE(SUM(count), 0) as total").
-		Where("dimension = ?", "total").
+		Where("dimension = ? AND hour >= ?", "total", cutoff).
 		Scan(&totalResult)
 	stats.TotalBlocked = int(totalResult.Total)
 
 	// ByRuleSource
 	var sourceResults []models.BlocklogHourlyStat
 	ss.db.Select("dim_value, SUM(count) as count").
-		Where("dimension = ?", "rule_source").
+		Where("dimension = ? AND hour >= ?", "rule_source", cutoff).
 		Group("dim_value").
 		Find(&sourceResults)
 	for _, r := range sourceResults {
@@ -126,18 +126,27 @@ func (ss *StatsStore) GetAggregatedStats() Stats {
 	// ByCountry
 	var countryResults []models.BlocklogHourlyStat
 	ss.db.Select("dim_value, SUM(count) as count").
-		Where("dimension = ?", "country").
+		Where("dimension = ? AND hour >= ?", "country", cutoff).
 		Group("dim_value").
 		Find(&countryResults)
 	for _, r := range countryResults {
 		stats.ByCountry[r.DimValue] = int(r.Count)
 	}
 
-	// TopBlockedIPs (from blocklog_top_ips)
-	var topIPResults []models.BlocklogTopIP
-	ss.db.Order("count DESC").Limit(10).Find(&topIPResults)
+	// TopBlockedIPs (from blocklog_top_ips, with time filter)
+	var topIPResults []struct {
+		IP    string `json:"ip"`
+		Total int64  `json:"total"`
+	}
+	ss.db.Model(&models.BlocklogTopIP{}).
+		Select("ip, SUM(count) as total").
+		Where("hour >= ?", cutoff).
+		Group("ip").
+		Order("total DESC").
+		Limit(10).
+		Scan(&topIPResults)
 	for _, r := range topIPResults {
-		stats.TopBlockedIPs = append(stats.TopBlockedIPs, IPCount{IP: r.IP, Count: int(r.Count)})
+		stats.TopBlockedIPs = append(stats.TopBlockedIPs, IPCount{IP: r.IP, Count: int(r.Total)})
 	}
 
 	// TopBlockedCountries (从 ByCountry 排序取 Top10)
@@ -196,34 +205,49 @@ func (ss *StatsStore) GetHourlyTrend(hours int) []HourlyTrendItem {
 	return result
 }
 
-// GetTopIPs 从 blocklog_top_ips 表直接查询 Top N IP
-func (ss *StatsStore) GetTopIPs(limit int) ([]IPCount, int64) {
+// GetTopIPs 从 blocklog_top_ips 表查询时间范围内 Top N IP
+// retentionDays: 查询最近 N 天的数据
+func (ss *StatsStore) GetTopIPs(retentionDays int, limit int) ([]IPCount, int64) {
 	if ss.db == nil {
 		return nil, 0
 	}
 
-	var total int64
-	ss.db.Model(&models.BlocklogTopIP{}).Count(&total)
+	cutoff := time.Now().AddDate(0, 0, -retentionDays).Format("2006-01-02T15")
 
-	var results []models.BlocklogTopIP
-	ss.db.Order("count DESC").Limit(limit).Find(&results)
+	var total int64
+	ss.db.Model(&models.BlocklogTopIP{}).Where("hour >= ?", cutoff).Count(&total)
+
+	var results []struct {
+		IP    string `json:"ip"`
+		Total int64  `json:"total"`
+	}
+	ss.db.Model(&models.BlocklogTopIP{}).
+		Select("ip, SUM(count) as total").
+		Where("hour >= ?", cutoff).
+		Group("ip").
+		Order("total DESC").
+		Limit(limit).
+		Scan(&results)
 
 	ips := make([]IPCount, len(results))
 	for i, r := range results {
-		ips[i] = IPCount{IP: r.IP, Count: int(r.Count)}
+		ips[i] = IPCount{IP: r.IP, Count: int(r.Total)}
 	}
 	return ips, total
 }
 
-// GetTopCountries 从 blocklog_hourly_stats 聚合查询 Top N 国家
-func (ss *StatsStore) GetTopCountries(limit int) ([]CountryCount, int) {
+// GetTopCountries 从 blocklog_hourly_stats 聚合查询时间范围内 Top N 国家
+// retentionDays: 查询最近 N 天的数据
+func (ss *StatsStore) GetTopCountries(retentionDays int, limit int) ([]CountryCount, int) {
 	if ss.db == nil {
 		return nil, 0
 	}
 
+	cutoff := time.Now().AddDate(0, 0, -retentionDays).Format("2006-01-02T15")
+
 	var results []models.BlocklogHourlyStat
 	ss.db.Select("dim_value, SUM(count) as count").
-		Where("dimension = ?", "country").
+		Where("dimension = ? AND hour >= ?", "country", cutoff).
 		Group("dim_value").
 		Order("count DESC").
 		Limit(limit).
@@ -232,7 +256,7 @@ func (ss *StatsStore) GetTopCountries(limit int) ([]CountryCount, int) {
 	// 总国家数
 	var totalCountries []models.BlocklogHourlyStat
 	ss.db.Select("DISTINCT dim_value").
-		Where("dimension = ?", "country").
+		Where("dimension = ? AND hour >= ?", "country", cutoff).
 		Find(&totalCountries)
 
 	countries := make([]CountryCount, len(results))
@@ -248,10 +272,19 @@ func (ss *StatsStore) Cleanup(retainDays int) error {
 		return nil
 	}
 	cutoffTime := time.Now().AddDate(0, 0, -retainDays).Format("2006-01-02T15")
+
 	result := ss.db.Where("hour < ?", cutoffTime).Delete(&models.BlocklogHourlyStat{})
 	if result.Error != nil {
 		return result.Error
 	}
-	logger.Infof("[StatsStore] Cleaned up %d rows older than %s days", result.RowsAffected, retainDays)
+	deleted := result.RowsAffected
+
+	result = ss.db.Where("hour < ?", cutoffTime).Delete(&models.BlocklogTopIP{})
+	if result.Error != nil {
+		return result.Error
+	}
+	deleted += result.RowsAffected
+
+	logger.Infof("[StatsStore] Cleaned up %d rows older than %d days", deleted, retainDays)
 	return nil
 }
