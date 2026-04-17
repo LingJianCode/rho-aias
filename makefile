@@ -23,10 +23,11 @@ frontend:
 gen: vmlinux.h
 	$(GO) generate $(BPF_GEN_DIR)
 
-# 完整构建：确保前端产物就绪后再编译
-build: frontend gen
+backend: gen
 	@echo "==> Building"
 	$(GO) build -o $(APP) ./cmd/server
+
+build: frontend gen backend
 
 run: all
 	@echo "==> Running"

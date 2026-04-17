@@ -27,6 +27,13 @@ func RegisterBanRecordRoutes(group *gin.RouterGroup, handle *handles.BanRecordHa
 		handle.GetBanStats,
 	)
 
+	// Top 封禁 IP - 需要 ban_record:read 权限
+	banRecords.GET("/top-ips",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "ban_record", "read"),
+		handle.GetTopBannedIPs,
+	)
+
 	// 查询单条封禁记录 - 需要 ban_record:read 权限
 	banRecords.GET("/:id",
 		middleware.AuthMiddleware(authService, apiKeyService),

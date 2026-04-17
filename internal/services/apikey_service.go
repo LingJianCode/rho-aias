@@ -35,8 +35,7 @@ var allPermissions = []PermissionInfo{
 	{"blocklog:write",   "阻断日志-清除"},
 	{"config:read",      "系统配置-读取"},
 	{"config:write",     "系统配置-修改"},
-	{"source:read",      "数据源状态-读取"},
-	{"source:write",     "数据源状态-刷新"},
+
 	{"ban_record:read",  "封禁记录-读取"},
 	{"ban_record:write", "封禁记录-解封"},
 	{"api_key:read",     "API Key-查看"},

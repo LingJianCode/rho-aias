@@ -76,6 +76,9 @@ func main() {
 	var dbConn *gorm.DB
 	if dbDeps.BizDB != nil {
 		dbConn = dbDeps.BizDB.DB
+
+		// 将 StatsStore 注入 BlockLog（两阶段初始化：bizDB 在 Phase 2 才就绪）
+		core.BlockLogHandle.AttachStatsStore(dbConn)
 	}
 
 	// Phase 3: 检测模块工厂 (Intel / Geo / WAF / RateLimit / FailGuard)

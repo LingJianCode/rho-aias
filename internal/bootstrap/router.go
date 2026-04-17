@@ -39,9 +39,6 @@ func RegisterAllRoutes(
 	ruleQueryHandle := handles.NewRuleQueryHandle(core.XDP)
 	routers.RegisterRuleRoutes(api, ruleQueryHandle, enforcer, authSvc, apiKeySvc)
 
-	eventHandle := handles.NewEventHandle(core.XDP)
-	routers.RegisterEventRoutes(api, eventHandle, enforcer, authSvc, apiKeySvc)
-
 	registerBizRoutes(api, core.XDP, dbDeps.BizDB, detectorDeps.IntelMgr, detectorDeps.GeoMgr,
 		enforcer, authSvc, apiKeySvc)
 }
@@ -60,9 +57,6 @@ func registerBizRoutes(
 	if bizDB == nil {
 		return
 	}
-
-	sourceHandle := handles.NewSourceHandle(bizDB.DB, intelMgr, geoMgr)
-	routers.RegisterSourceRoutes(api, sourceHandle, enforcer, authSvc, apiKeySvc)
 
 	if intelMgr != nil {
 		intelHandle := handles.NewIntelHandle(intelMgr)

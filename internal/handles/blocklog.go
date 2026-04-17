@@ -1,28 +1,43 @@
 package handles
 
 import (
+	"fmt"
 	"strconv"
+	"time"
 
 	"rho-aias/internal/blocklog"
+	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/response"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // BlockLogHandle 阻断日志 API 处理器
 type BlockLogHandle struct {
 	blockLog *blocklog.BlockLog
+	xdp      *ebpfs.Xdp
 }
 
 // NewBlockLogHandle 创建新的阻断日志处理器
-func NewBlockLogHandle(blockLog *blocklog.BlockLog) *BlockLogHandle {
+func NewBlockLogHandle(blockLog *blocklog.BlockLog, xdp *ebpfs.Xdp) *BlockLogHandle {
 	return &BlockLogHandle{
 		blockLog: blockLog,
+		xdp:      xdp,
+	}
+}
+
+// AttachStatsStore 注入统计存储（两阶段初始化：bizDB 就绪后调用）
+func (h *BlockLogHandle) AttachStatsStore(db *gorm.DB) {
+	if h.blockLog != nil {
+		h.blockLog.AttachStatsStore(db)
 	}
 }
 
 // GetRecords 获取阻断记录
-// GET /api/blocklog/records?limit=100&match_type=ip4_exact&rule_source=manual
+// GET /api/blocklog/records?hour=2026-04-17_14&page=1&page_size=20&match_type=&rule_source=&src_ip=&country_code=
+// - 指定 hour 参数 → 从 JSONL 文件查询（支持分页，数据完整）
+// - 无 hour 参数 → 从内存查询（实时最新 N 条，适合监控面板）
 func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 	var filter blocklog.RecordFilter
 	if err := c.ShouldBindQuery(&filter); err != nil {
@@ -30,22 +45,19 @@ func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 		return
 	}
 
-	// 默认限制为 100 条
-	if filter.Limit == 0 {
-		filter.Limit = 100
+	// 无 hour 参数时默认查当前小时
+	if filter.Hour == "" {
+		now := time.Now()
+		filter.Hour = fmt.Sprintf("%s_%02d", now.Format("2006-01-02"), now.Hour())
 	}
 
-	var records []blocklog.BlockRecord
-	if filter.MatchType != "" || filter.RuleSource != "" || filter.SrcIP != "" || filter.CountryCode != "" {
-		records = h.blockLog.GetRecordsByFilter(filter)
-	} else {
-		records = h.blockLog.GetRecords(filter.Limit)
+	// 统一从 JSONL 文件查询
+	result, err := h.blockLog.QueryJSONLRecords(filter)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
 	}
-
-	response.OK(c, gin.H{
-		"total":   len(records),
-		"records": records,
-	})
+	response.OK(c, result)
 }
 
 // GetStats 获取阻断统计
@@ -56,17 +68,9 @@ func (h *BlockLogHandle) GetStats(c *gin.Context) {
 	response.OK(c, stats)
 }
 
-// ClearRecords 清空阻断记录
-// DELETE /api/blocklog/records
-func (h *BlockLogHandle) ClearRecords(c *gin.Context) {
-	h.blockLog.Clear()
-
-	response.OKMsg(c, "Block log cleared")
-}
-
-// GetBlockedIPs 获取被阻断的 IP 列表（聚合）
-// GET /api/blocklog/blocked-ips?limit=20
-func (h *BlockLogHandle) GetBlockedIPs(c *gin.Context) {
+// GetBlockedTopIPs 获取被阻断的 IP 列表（直接从 DB 查询）
+// GET /api/blocklog/blocked-top-ips?limit=20
+func (h *BlockLogHandle) GetBlockedTopIPs(c *gin.Context) {
 	limit := 20
 	if l := c.Query("limit"); l != "" {
 		if parsed, err := parseInt(l); err == nil && parsed > 0 {
@@ -74,21 +78,15 @@ func (h *BlockLogHandle) GetBlockedIPs(c *gin.Context) {
 		}
 	}
 
-	stats := h.blockLog.GetStats()
-
-	// 返回 Top N 被阻断的 IP
-	topIPs := stats.TopBlockedIPs
-	if len(topIPs) > limit {
-		topIPs = topIPs[:limit]
-	}
+	topIPs, total := h.blockLog.GetTopIPs(limit)
 
 	response.OK(c, gin.H{
-		"total_blocked_ips": len(stats.TopBlockedIPs),
+		"total_blocked_ips": total,
 		"top_blocked_ips":   topIPs,
 	})
 }
 
-// GetBlockedCountries 获取被阻断的国家/地区列表
+// GetBlockedCountries 获取被阻断的国家/地区列表（直接从 DB 查询）
 // GET /api/blocklog/blocked-countries?limit=20
 func (h *BlockLogHandle) GetBlockedCountries(c *gin.Context) {
 	limit := 20
@@ -98,16 +96,10 @@ func (h *BlockLogHandle) GetBlockedCountries(c *gin.Context) {
 		}
 	}
 
-	stats := h.blockLog.GetStats()
-
-	// 返回 Top N 被阻断的国家
-	topCountries := stats.TopBlockedCountries
-	if len(topCountries) > limit {
-		topCountries = topCountries[:limit]
-	}
+	topCountries, total := h.blockLog.GetTopCountries(limit)
 
 	response.OK(c, gin.H{
-		"total_blocked_countries": len(stats.TopBlockedCountries),
+		"total_blocked_countries": total,
 		"top_blocked_countries":   topCountries,
 	})
 }
@@ -125,31 +117,35 @@ func (h *BlockLogHandle) GetHourlyTrend(c *gin.Context) {
 	trend := h.blockLog.GetHourlyTrend(hours)
 
 	response.OK(c, gin.H{
-		"hours":      hours,
+		"hours":       hours,
 		"hourly_data": trend,
-	})
-}
-
-// GetDroppedSummary 获取丢弃概览
-// GET /api/blocklog/dropped-summary?hours=168
-func (h *BlockLogHandle) GetDroppedSummary(c *gin.Context) {
-	hours := 168 // 默认查询最近 7 天
-	if h := c.Query("hours"); h != "" {
-		if parsed, err := parseInt(h); err == nil && parsed > 0 && parsed <= 8760 { // 最长 1 年
-			hours = parsed
-		}
-	}
-
-	summary := h.blockLog.GetDroppedSummary(hours)
-
-	response.OK(c, gin.H{
-		"hours":   hours,
-		"total":   summary.Total,
-		"sources": summary.Sources,
-		"hourly":  summary.Hourly,
 	})
 }
 
 func parseInt(s string) (int, error) {
 	return strconv.Atoi(s)
+}
+
+// EventStatusResponse 事件状态响应结构
+type EventStatusResponse struct {
+	Enabled    bool   `json:"enabled"`     // 是否启用
+	SampleRate uint32 `json:"sample_rate"` // 采样率
+}
+
+// GetEventStatus 获取阻断事件上报状态
+// GET /api/blocklog/event-status
+func (h *BlockLogHandle) GetEventStatus(c *gin.Context) {
+	if h.xdp == nil {
+		response.OK(c, EventStatusResponse{Enabled: false, SampleRate: 0})
+		return
+	}
+	config, err := h.xdp.GetEventConfig()
+	if err != nil {
+		config = ebpfs.DefaultEventConfig()
+	}
+
+	response.OK(c, EventStatusResponse{
+		Enabled:    config.Enabled == 1,
+		SampleRate: config.SampleRate,
+	})
 }

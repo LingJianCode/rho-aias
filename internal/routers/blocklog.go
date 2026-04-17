@@ -28,10 +28,10 @@ func RegisterBlockLogRoutes(group *gin.RouterGroup, blockLogHandle *handles.Bloc
 	)
 
 	// 查看阻断 IP 列表 - 需要 blocklog:read 权限
-	blocklog.GET("/blocked-ips",
+	blocklog.GET("/blocked-top-ips",
 		middleware.AuthMiddleware(authService, apiKeyService),
 		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
-		blockLogHandle.GetBlockedIPs,
+		blockLogHandle.GetBlockedTopIPs,
 	)
 
 	// 查看阻断国家列表 - 需要 blocklog:read 权限
@@ -41,13 +41,6 @@ func RegisterBlockLogRoutes(group *gin.RouterGroup, blockLogHandle *handles.Bloc
 		blockLogHandle.GetBlockedCountries,
 	)
 
-	// 清除记录 - 需要 blocklog:clear 权限
-	blocklog.DELETE("/records",
-		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "blocklog", "write"),
-		blockLogHandle.ClearRecords,
-	)
-
 	// 查看小时趋势 - 需要 blocklog:read 权限
 	blocklog.GET("/hourly-trend",
 		middleware.AuthMiddleware(authService, apiKeyService),
@@ -55,10 +48,10 @@ func RegisterBlockLogRoutes(group *gin.RouterGroup, blockLogHandle *handles.Bloc
 		blockLogHandle.GetHourlyTrend,
 	)
 
-	// 查看丢弃概览 - 需要 blocklog:read 权限
-	blocklog.GET("/dropped-summary",
+	// 查看阻断事件上报状态 - 需要 blocklog:read 权限
+	blocklog.GET("/event-status",
 		middleware.AuthMiddleware(authService, apiKeyService),
 		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
-		blockLogHandle.GetDroppedSummary,
+		blockLogHandle.GetEventStatus,
 	)
 }

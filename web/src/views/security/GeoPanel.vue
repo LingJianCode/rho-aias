@@ -69,13 +69,13 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="error" label="错误信息" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.error || '-' }}</template>
+        </el-table-column>
         <el-table-column prop="last_update" label="最后更新" width="170">
           <template #default="{ row }">
             {{ row.last_update ? formatDateTime(row.last_update) : '-' }}
           </template>
-        </el-table-column>
-        <el-table-column prop="error" label="错误信息" min-width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.error || '-' }}</template>
         </el-table-column>
       </el-table>
     </div>

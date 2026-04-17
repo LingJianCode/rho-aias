@@ -27,6 +27,9 @@
         </el-alert>
         <el-table :data="manualRules" v-loading="loading" stripe>
           <el-table-column prop="value" label="IP/CIDR" min-width="200" />
+          <el-table-column prop="remark" label="备注" min-width="150">
+            <template #default="{ row }">{{ row.remark || '-' }}</template>
+          </el-table-column>
           <el-table-column prop="added_at" label="添加时间" width="180">
             <template #default="{ row }">{{ row.added_at ? formatDateTime(row.added_at) : '-' }}</template>
           </el-table-column>
@@ -81,6 +84,9 @@
         <el-form-item label="IP/CIDR" prop="value">
           <el-input v-model="form.value" placeholder="例如: 192.168.1.1 或 10.0.0.0/24" />
         </el-form-item>
+        <el-form-item label="备注" prop="remark">
+          <el-input v-model="form.remark" placeholder="可选备注" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showAddDialog = false">取消</el-button>
@@ -117,7 +123,7 @@ const total = ref(0)
 // 添加规则表单
 const showAddDialog = ref(false)
 const formRef = ref<FormInstance>()
-const form = reactive({ value: '' })
+const form = reactive({ value: '', remark: '' })
 const formRules: FormRules = {
   value: [{ required: true, message: '请输入 IP 地址或 CIDR', trigger: 'blur' }],
 }
@@ -190,7 +196,7 @@ async function handleAdd() {
   if (!valid) return
 
   try {
-    await addBlacklistRule(form.value)
+    await addBlacklistRule({ value: form.value, remark: form.remark })
     ElMessage.success('添加成功')
     showAddDialog.value = false
     formRef.value?.resetFields()

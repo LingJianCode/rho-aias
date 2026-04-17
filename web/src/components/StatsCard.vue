@@ -5,7 +5,7 @@
         <el-icon :size="24"><component :is="icon" /></el-icon>
       </div>
       <div class="stats-info">
-        <div class="stats-value">{{ formattedValue }}</div>
+        <div class="stats-value">{{ formattedValue }}<span v-if="suffix" class="stats-suffix">{{ suffix }}</span></div>
         <div class="stats-label">{{ label }}</div>
       </div>
     </div>
@@ -31,6 +31,7 @@ const props = defineProps<{
   iconColor?: string
   trend?: number
   format?: 'number' | 'bytes'
+  suffix?: string
 }>()
 
 const iconBgColor = computed(() => props.iconColor ? `${props.iconColor}20` : 'var(--el-color-primary-light-9)')
@@ -85,6 +86,13 @@ function formatBytes(bytes: number): string {
   font-size: 24px;
   font-weight: 600;
   color: var(--el-text-color-primary);
+}
+
+.stats-suffix {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--el-text-color-secondary);
+  margin-left: 2px;
 }
 
 .stats-label {

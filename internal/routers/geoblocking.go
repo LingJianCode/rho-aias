@@ -26,11 +26,4 @@ func RegisterGeoBlockingRoutes(group *gin.RouterGroup, geoHandle *handles.GeoBlo
 		middleware.CasbinMiddleware(enforcer, "geo", "write"),
 		geoHandle.TriggerUpdate,
 	)
-
-	// 更新配置 - 需要 geo:write 权限
-	geo.POST("/config",
-		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "geo", "write"),
-		geoHandle.UpdateConfig,
-	)
 }

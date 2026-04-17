@@ -13,10 +13,10 @@ import (
 func RegisterRuleRoutes(group *gin.RouterGroup, ruleQueryHandle *handles.RuleQueryHandle, enforcer *casbin.Enforcer, authService *services.AuthService, apiKeyService *services.APIKeyService) {
 	rules := group.Group("/rules")
 
-	// 查询规则 - 需要 firewall:read 权限
+	// 查询规则 - 需要 admin:read 权限, 该接口主要用于调试，直接从ebpf中直接查询规则
 	rules.GET("",
 		middleware.AuthMiddleware(authService, apiKeyService),
-		middleware.CasbinMiddleware(enforcer, "firewall", "read"),
+		middleware.CasbinMiddleware(enforcer, "admin", "read"),
 		ruleQueryHandle.GetRules,
 	)
 }

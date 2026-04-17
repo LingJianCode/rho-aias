@@ -14,7 +14,7 @@ import (
 // CoreDependencies 核心基础设施初始化结果
 type CoreDependencies struct {
 	XDP             *ebpfs.Xdp
-	ManualHandle    *handles.ManualHandle
+	ManualHandle    *handles.BlocklistHandle
 	WhitelistHandle *handles.WhitelistHandle
 	BlockLogHandle  *handles.BlockLogHandle
 }
@@ -27,7 +27,7 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 	if cfg.Manual.Enabled {
 		manualCache = manual.NewCache(cfg.Manual.PersistenceDir)
 	}
-	manualHandle := handles.NewManualHandle(xdp, manualCache, nil)
+	manualHandle := handles.NewBlocklistHandle(xdp, manualCache, nil)
 
 	var whitelistCache *manual.Cache
 	var whitelistHandle *handles.WhitelistHandle
@@ -59,7 +59,7 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 		record := blocklog.CreateRecord(srcIP, dstIP, matchType, ruleSource, countryCode, packetSize)
 		blockLog.AddRecord(record)
 	})
-	blockLogHandle := handles.NewBlockLogHandle(blockLog)
+	blockLogHandle := handles.NewBlockLogHandle(blockLog, xdp)
 
 	return &CoreDependencies{
 		XDP:             xdp,
@@ -75,9 +75,19 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 		return
 	}
 
+	// 将内置保护网段写入 eBPF 白名单 map（防止内核层误封云平台元数据/内网服务）
+	protectedNets := manual.ProtectedNets()
+	for _, ipNet := range protectedNets {
+		if err := c.XDP.AddWhitelistRule(ipNet.String()); err != nil {
+			logger.Warnf("[Whitelist] Failed to add protected net %s to eBPF whitelist: %v", ipNet.String(), err)
+		} else {
+			logger.Infof("[Whitelist] Added protected net %s to eBPF whitelist", ipNet.String())
+		}
+	}
+
 	// 加载手动阻断规则
-	if c.ManualHandle != nil && c.ManualHandle.Cache() != nil && c.ManualHandle.Cache().Exists() {
-		cacheData, err := c.ManualHandle.Cache().Load()
+	if c.ManualHandle != nil && c.ManualHandle.Cache() != nil && c.ManualHandle.Cache().DataExists(manual.CacheFileBlocklist) {
+		cacheData, err := c.ManualHandle.Cache().LoadData(manual.CacheFileBlocklist)
 		if err != nil {
 			logger.Warnf("[Manual] Failed to load cache: %v", err)
 		} else if cacheData.RuleCount() > 0 {
@@ -96,12 +106,12 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 
 	// 加载白名单规则
 	if c.WhitelistHandle != nil && c.WhitelistHandle.Cache() != nil &&
-		cfg.Manual.AutoLoad && c.WhitelistHandle.Cache().WhitelistExists() {
-		whitelistData, err := c.WhitelistHandle.Cache().LoadWhitelist()
+		cfg.Manual.AutoLoad && c.WhitelistHandle.Cache().DataExists(manual.CacheFileWhitelist) {
+		whitelistData, err := c.WhitelistHandle.Cache().LoadData(manual.CacheFileWhitelist)
 		if err != nil {
 			logger.Warnf("[Whitelist] Failed to load cache: %v", err)
-		} else if whitelistData.WhitelistRuleCount() > 0 {
-			logger.Infof("[Whitelist] Loading %d rules from cache...", whitelistData.WhitelistRuleCount())
+		} else if whitelistData.RuleCount() > 0 {
+			logger.Infof("[Whitelist] Loading %d rules from cache...", whitelistData.RuleCount())
 			loaded := 0
 			for _, entry := range whitelistData.Rules {
 				if err := c.XDP.AddWhitelistRule(entry.Value); err != nil {
@@ -110,7 +120,7 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 					loaded++
 				}
 			}
-			logger.Infof("[Whitelist] Loaded %d/%d rules from cache", loaded, whitelistData.WhitelistRuleCount())
+			logger.Infof("[Whitelist] Loaded %d/%d rules from cache", loaded, whitelistData.RuleCount())
 			c.WhitelistHandle.Checker().LoadFromCache(whitelistData)
 		}
 	}

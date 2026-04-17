@@ -58,6 +58,23 @@ func (h *BanRecordHandle) GetBanStats(c *gin.Context) {
 	response.OK(c, stats)
 }
 
+// GetTopBannedIPs 获取封禁次数最多的 IP
+// GET /api/ban-records/top-ips?limit=10
+func (h *BanRecordHandle) GetTopBannedIPs(c *gin.Context) {
+	limit := 10
+	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 {
+		limit = l
+	}
+
+	topIPs, err := h.service.GetTopBannedIPs(limit)
+	if err != nil {
+		response.InternalError(c, "Failed to get top banned IPs: "+err.Error())
+		return
+	}
+
+	response.OK(c, topIPs)
+}
+
 // GetBanRecord 查询单条封禁记录
 // GET /api/ban-records/:id
 func (h *BanRecordHandle) GetBanRecord(c *gin.Context) {

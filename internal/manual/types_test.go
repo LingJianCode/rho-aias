@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-func TestNewCacheData(t *testing.T) {
-	data := NewCacheData()
+func TestNewRuleCacheData(t *testing.T) {
+	data := NewRuleCacheData()
 
 	if data == nil {
-		t.Fatal("NewCacheData() returned nil")
+		t.Fatal("NewRuleCacheData() returned nil")
 	}
 	if data.Version != 1 {
 		t.Errorf("Version = %d, want 1", data.Version)
@@ -22,28 +22,42 @@ func TestNewCacheData(t *testing.T) {
 	}
 }
 
-func TestNewManualRuleEntry(t *testing.T) {
+func TestNewRuleEntry(t *testing.T) {
 	value := "192.168.1.1"
-	entry := NewManualRuleEntry(value)
+	entry := NewRuleEntry(value)
 
 	if entry == nil {
-		t.Fatal("NewManualRuleEntry() returned nil")
+		t.Fatal("NewRuleEntry() returned nil")
 	}
 	if entry.Value != value {
 		t.Errorf("Value = %v, want %v", entry.Value, value)
 	}
-	if entry.Source != SourceManual {
-		t.Errorf("Source = %v, want %v", entry.Source, SourceManual)
+	if entry.Remark != "" {
+		t.Errorf("Remark = %v, want empty", entry.Remark)
 	}
 	if entry.AddedAt.IsZero() {
 		t.Error("AddedAt should not be zero")
 	}
 }
 
-func TestCacheData_AddRule(t *testing.T) {
-	data := NewCacheData()
+func TestNewRuleEntryWithRemark(t *testing.T) {
+	entry := NewRuleEntryWithRemark("10.0.0.1", "test remark")
 
-	entry1 := NewManualRuleEntry("192.168.1.1")
+	if entry.Value != "10.0.0.1" {
+		t.Errorf("Value = %v, want 10.0.0.1", entry.Value)
+	}
+	if entry.Remark != "test remark" {
+		t.Errorf("Remark = %v, want 'test remark'", entry.Remark)
+	}
+	if entry.AddedAt.IsZero() {
+		t.Error("AddedAt should not be zero")
+	}
+}
+
+func TestRuleCacheData_AddRule(t *testing.T) {
+	data := NewRuleCacheData()
+
+	entry1 := NewRuleEntry("192.168.1.1")
 	data.AddRule(*entry1)
 
 	if len(data.Rules) != 1 {
@@ -51,7 +65,7 @@ func TestCacheData_AddRule(t *testing.T) {
 	}
 
 	// Add same value again (should update)
-	entry2 := NewManualRuleEntry("192.168.1.1")
+	entry2 := NewRuleEntry("192.168.1.1")
 	data.AddRule(*entry2)
 
 	if len(data.Rules) != 1 {
@@ -59,7 +73,7 @@ func TestCacheData_AddRule(t *testing.T) {
 	}
 
 	// Add different value
-	entry3 := NewManualRuleEntry("10.0.0.1")
+	entry3 := NewRuleEntry("10.0.0.1")
 	data.AddRule(*entry3)
 
 	if len(data.Rules) != 2 {
@@ -67,13 +81,13 @@ func TestCacheData_AddRule(t *testing.T) {
 	}
 }
 
-func TestCacheData_RemoveRule(t *testing.T) {
-	data := NewCacheData()
+func TestRuleCacheData_RemoveRule(t *testing.T) {
+	data := NewRuleCacheData()
 
 	// Add some rules
-	data.AddRule(*NewManualRuleEntry("192.168.1.1"))
-	data.AddRule(*NewManualRuleEntry("10.0.0.1"))
-	data.AddRule(*NewManualRuleEntry("172.16.0.1"))
+	data.AddRule(*NewRuleEntry("192.168.1.1"))
+	data.AddRule(*NewRuleEntry("10.0.0.1"))
+	data.AddRule(*NewRuleEntry("172.16.0.1"))
 
 	// Remove one
 	data.RemoveRule("10.0.0.1")
@@ -90,10 +104,10 @@ func TestCacheData_RemoveRule(t *testing.T) {
 	}
 }
 
-func TestCacheData_HasRule(t *testing.T) {
-	data := NewCacheData()
+func TestRuleCacheData_HasRule(t *testing.T) {
+	data := NewRuleCacheData()
 
-	data.AddRule(*NewManualRuleEntry("192.168.1.1"))
+	data.AddRule(*NewRuleEntry("192.168.1.1"))
 
 	if !data.HasRule("192.168.1.1") {
 		t.Error("HasRule() should return true for existing rule")
@@ -104,19 +118,19 @@ func TestCacheData_HasRule(t *testing.T) {
 	}
 }
 
-func TestCacheData_RuleCount(t *testing.T) {
-	data := NewCacheData()
+func TestRuleCacheData_RuleCount(t *testing.T) {
+	data := NewRuleCacheData()
 
 	if data.RuleCount() != 0 {
 		t.Errorf("RuleCount() = %d, want 0", data.RuleCount())
 	}
 
-	data.AddRule(*NewManualRuleEntry("192.168.1.1"))
+	data.AddRule(*NewRuleEntry("192.168.1.1"))
 	if data.RuleCount() != 1 {
 		t.Errorf("RuleCount() = %d, want 1", data.RuleCount())
 	}
 
-	data.AddRule(*NewManualRuleEntry("10.0.0.1"))
+	data.AddRule(*NewRuleEntry("10.0.0.1"))
 	if data.RuleCount() != 2 {
 		t.Errorf("RuleCount() = %d, want 2", data.RuleCount())
 	}
@@ -127,8 +141,8 @@ func TestCacheData_RuleCount(t *testing.T) {
 	}
 }
 
-func TestCacheData_GetValues(t *testing.T) {
-	data := NewCacheData()
+func TestRuleCacheData_GetValues(t *testing.T) {
+	data := NewRuleCacheData()
 
 	// Empty data
 	values := data.GetValues()
@@ -139,7 +153,7 @@ func TestCacheData_GetValues(t *testing.T) {
 	// Add some rules
 	expectedValues := []string{"192.168.1.1", "10.0.0.1", "172.16.0.1"}
 	for _, v := range expectedValues {
-		data.AddRule(*NewManualRuleEntry(v))
+		data.AddRule(*NewRuleEntry(v))
 	}
 
 	values = data.GetValues()
@@ -160,10 +174,10 @@ func TestCacheData_GetValues(t *testing.T) {
 	}
 }
 
-func TestCacheData_Timestamp(t *testing.T) {
+func TestRuleCacheData_Timestamp(t *testing.T) {
 	// Initial timestamp
 	beforeCreate := time.Now().Unix() - 1
-	data := NewCacheData()
+	data := NewRuleCacheData()
 	afterCreate := time.Now().Unix() + 1
 
 	if data.Timestamp < beforeCreate || data.Timestamp > afterCreate {
@@ -171,7 +185,7 @@ func TestCacheData_Timestamp(t *testing.T) {
 	}
 
 	// Timestamp should update on AddRule
-	data.AddRule(*NewManualRuleEntry("192.168.1.1"))
+	data.AddRule(*NewRuleEntry("192.168.1.1"))
 	if data.Timestamp == 0 {
 		t.Error("Timestamp should be set after AddRule")
 	}
@@ -183,23 +197,26 @@ func TestCacheData_Timestamp(t *testing.T) {
 	}
 }
 
-func TestSourceManualConstant(t *testing.T) {
-	if SourceManual != "manual" {
-		t.Errorf("SourceManual = %v, want 'manual'", SourceManual)
+func TestCacheFileConstants(t *testing.T) {
+	if CacheFileBlocklist != "manual_cache.bin" {
+		t.Errorf("CacheFileBlocklist = %v, want 'manual_cache.bin'", CacheFileBlocklist)
+	}
+	if CacheFileWhitelist != "whitelist_cache.bin" {
+		t.Errorf("CacheFileWhitelist = %v, want 'whitelist_cache.bin'", CacheFileWhitelist)
 	}
 }
 
-func TestManualRuleEntry_Fields(t *testing.T) {
-	entry := ManualRuleEntry{
+func TestRuleEntry_Fields(t *testing.T) {
+	entry := RuleEntry{
 		Value:   "192.168.1.0/24",
 		AddedAt: time.Now(),
-		Source:  "manual",
+		Remark:  "office network",
 	}
 
 	if entry.Value != "192.168.1.0/24" {
 		t.Errorf("Value = %v, want 192.168.1.0/24", entry.Value)
 	}
-	if entry.Source != "manual" {
-		t.Errorf("Source = %v, want manual", entry.Source)
+	if entry.Remark != "office network" {
+		t.Errorf("Remark = %v, want 'office network'", entry.Remark)
 	}
 }

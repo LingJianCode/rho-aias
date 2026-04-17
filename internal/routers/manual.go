@@ -11,7 +11,7 @@ import (
 
 // RegisterManualRoutes 注册手动规则管理路由（黑名单）
 // 路由路径: /api/manual/blacklist/rules
-func RegisterManualRoutes(group *gin.RouterGroup, manualHandle *handles.ManualHandle, enforcer *casbin.Enforcer, authService *services.AuthService, apiKeyService *services.APIKeyService) {
+func RegisterManualRoutes(group *gin.RouterGroup, manualHandle *handles.BlocklistHandle, enforcer *casbin.Enforcer, authService *services.AuthService, apiKeyService *services.APIKeyService) {
 	manual := group.Group("/manual")
 
 	blacklist := manual.Group("/blacklist")
@@ -20,21 +20,21 @@ func RegisterManualRoutes(group *gin.RouterGroup, manualHandle *handles.ManualHa
 	blacklist.POST("/rules",
 		middleware.AuthMiddleware(authService, apiKeyService),
 		middleware.CasbinMiddleware(enforcer, "firewall", "write"),
-		manualHandle.AddRule,
+		manualHandle.AddBlocklistRule,
 	)
 
 	// 删除黑名单规则 - 需要 firewall:write 权限
 	blacklist.DELETE("/rules",
 		middleware.AuthMiddleware(authService, apiKeyService),
 		middleware.CasbinMiddleware(enforcer, "firewall", "write"),
-		manualHandle.DelRule,
+		manualHandle.DelBlocklistRule,
 	)
 
 	// 查询黑名单规则列表 - 需要 firewall:read 权限
 	blacklist.GET("/rules",
 		middleware.AuthMiddleware(authService, apiKeyService),
 		middleware.CasbinMiddleware(enforcer, "firewall", "read"),
-		manualHandle.ListManualRules,
+		manualHandle.ListBlocklistRules,
 	)
 }
 

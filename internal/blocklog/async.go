@@ -38,12 +38,15 @@ type AsyncWriter struct {
 }
 
 // NewAsyncWriter 创建异步写入器
-func NewAsyncWriter(config Config) (*AsyncWriter, error) {
+func NewAsyncWriter(config Config, onRotate func(time.Time)) (*AsyncWriter, error) {
 	// 创建文件写入器
 	fileWriter, err := NewFileWriter(config.LogDir)
 	if err != nil {
 		return nil, err
 	}
+
+	// 注入轮转回调
+	fileWriter.OnRotate = onRotate
 
 	aw := &AsyncWriter{
 		config:     config,

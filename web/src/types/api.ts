@@ -58,15 +58,21 @@ export type RuleSource = 'manual' | 'ipsum' | 'spamhaus' | 'waf' | 'ddos' | 'ano
 
 export interface ManualRuleRequest {
   value: string
+  remark?: string
 }
 
 export interface ManualRuleItem {
   value: string
+  remark?: string
   added_at?: string
 }
 
+export interface WhitelistRuleItem extends ManualRuleItem {
+  protected?: boolean
+}
+
 export interface WhitelistResponse {
-  rules: ManualRuleItem[]
+  rules: WhitelistRuleItem[]
   total: number
 }
 
@@ -80,19 +86,20 @@ export interface BlacklistResponse {
 // ============================================
 
 export interface BlockLog {
-  timestamp: string
+  timestamp: number
   src_ip: string
   dst_ip: string
-  protocol: string
   match_type: string
-  source: string
+  rule_source: string
   country_code: string
   packet_size: number
 }
 
 export interface BlockLogListResponse {
-  items: BlockLog[]
+  records: BlockLog[]
   total: number
+  page: number
+  page_size: number
 }
 
 export interface IPCount {
@@ -105,22 +112,12 @@ export interface CountryCount {
   count: number
 }
 
-export interface SourceCount {
-  source: string
-  count: number
-}
-
 export interface BlockLogStats {
-  total_blocks: number
-  unique_ips: number
-  top_countries: CountryCount[]
-  top_sources: SourceCount[]
-  hourly_trend: { hour: string; count: number }[]
-}
-
-export interface BlockedIPsResponse {
-  total_blocked_ips: number
+  total_blocked: number
+  by_rule_source: Record<string, number>
+  by_country: Record<string, number>
   top_blocked_ips: IPCount[]
+  top_blocked_countries: CountryCount[]
 }
 
 // ============================================
@@ -150,24 +147,6 @@ export interface BanRecordStats {
   expired: number
   today_count: number
 }
-
-// ============================================
-// 数据源状态
-// ============================================
-
-export interface SourceStatusRecord {
-  id: number
-  source_type: string
-  source_id: string
-  source_name: string
-  status: 'success' | 'failed'
-  rule_count: number
-  error_message: string
-  duration: number
-  updated_at: string
-}
-
-export type SourcesStatusResponse = Record<string, Record<string, SourceStatusRecord>>
 
 // ============================================
 // 威胁情报
@@ -211,11 +190,6 @@ export interface GeoBlockingStatus {
     rule_count: number
     error: string
   }>
-}
-
-export interface GeoBlockingConfigRequest {
-  mode: 'whitelist' | 'blacklist'
-  allowed_countries: string[]
 }
 
 // ============================================
@@ -281,14 +255,9 @@ export interface AuditLogsResponse {
 // XDP 事件
 // ============================================
 
-export interface EventStatus {
+export interface BlockLogEventStatus {
   enabled: boolean
   sample_rate: number
-}
-
-export interface EventConfigRequest {
-  enabled?: boolean
-  sample_rate?: number
 }
 
 // ============================================
@@ -298,11 +267,9 @@ export interface EventConfigRequest {
 export interface DashboardStats {
   total_blocks: number
   active_rules: number
-  healthy_sources: number
   today_bans: number
   block_trend: { date: string; count: number }[]
   recent_blocks: BlockLog[]
-  source_status: { name: string; status: string }[]
 }
 
 // ============================================

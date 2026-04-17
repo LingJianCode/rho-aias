@@ -4,39 +4,7 @@
       <h2>仪表盘</h2>
     </div>
 
-    <!-- 第一行：系统运行状态概览 -->
-    <el-row :gutter="12" class="stats-row">
-      <el-col :span="5">
-        <div class="stat-card-clickable">
-          <StatsCard label="XDP 事件上报" :value="systemStatus.eventEnabled ? Number((100 / systemStatus.eventSampleRate).toFixed(1)) : 0" :icon="Connection" icon-color="#409eff">
-            <template #extra>{{ systemStatus.eventEnabled ? `${Number((100 / systemStatus.eventSampleRate).toFixed(1))}% · 运行中` : '已停止' }}</template>
-          </StatsCard>
-        </div>
-      </el-col>
-      <el-col :span="5">
-        <div class="stat-card-clickable">
-          <StatsCard label="威胁情报规则" :value="systemStatus.intelTotalRules" :icon="Cpu" icon-color="#67c23a">
-            <template #extra>{{ systemStatus.intelEnabled ? '已启用' : '未启用' }}</template>
-          </StatsCard>
-        </div>
-      </el-col>
-      <el-col :span="5">
-        <div class="stat-card-clickable">
-          <StatsCard label="地域封禁规则" :value="systemStatus.geoTotalRules" :icon="Location" icon-color="#e6a23c">
-            <template #extra>{{ systemStatus.geoMode === 'whitelist' ? '白名单' : systemStatus.geoMode === 'blacklist' ? '黑名单' : '未启用' }}</template>
-          </StatsCard>
-        </div>
-      </el-col>
-      <el-col :span="5">
-        <div class="stat-card-clickable">
-          <StatsCard label="生效封禁数" :value="systemStatus.activeBans" :icon="Lock" icon-color="#f56c6c">
-            <template #extra>共 {{ systemStatus.totalBans }} 条</template>
-          </StatsCard>
-        </div>
-      </el-col>
-    </el-row>
-
-    <!-- 第二行：阻断态势图 + TOP 被封国家/来源 -->
+    <!-- 阻断态势图 + TOP 被封国家/来源 -->
     <el-row :gutter="20">
       <el-col :span="16">
         <el-card>
@@ -84,15 +52,15 @@
       </template>
       <el-table :data="recentBlocks" stripe>
         <el-table-column prop="timestamp" label="时间" width="180">
-          <template #default="{ row }">{{ formatDateTime(row.timestamp) }}</template>
+          <template #default="{ row }">{{ formatNanoTimestamp(row.timestamp) }}</template>
         </el-table-column>
         <el-table-column prop="src_ip" label="源 IP" min-width="140" />
-        <el-table-column prop="dst_ip" label="目的 IP" min-width="140" />
-        <el-table-column prop="source" label="来源" width="100">
+        <el-table-column prop="rule_source" label="来源" width="100">
           <template #default="{ row }">
-            <RuleSourceTag :source="row.source" />
+            <RuleSourceTag :source="row.rule_source" />
           </template>
         </el-table-column>
+        <el-table-column prop="match_type" label="匹配类型" width="100" />
         <el-table-column prop="country_code" label="国家" width="100">
           <template #default="{ row }">
             <CountryFlag :code="row.country_code" />
@@ -104,36 +72,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
-import { Connection, Cpu, Location, Lock } from '@element-plus/icons-vue'
-import StatsCard from '@/components/StatsCard.vue'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
 import { formatDateTime, formatNumber } from '@/utils/format'
-// 系统状态类 API
-import { getEventStatus } from '@/api/events'
-import { getIntelStatus } from '@/api/intel'
-import { getGeoBlockingStatus } from '@/api/geoblocking'
+
+function formatNanoTimestamp(ts: number | string): string {
+  if (typeof ts === 'number') {
+    return formatDateTime(new Date(ts / 1e6).toISOString())
+  }
+  return formatDateTime(ts)
+}
 // 统计与趋势
-import { getBlockLogStats, getBlockLogs, getBlockedCountries } from '@/api/blocklog'
-import { getBanRecordStats } from '@/api/ban-records'
+import { getBlockLogStats, getBlockLogs, getBlockedCountries, getHourlyTrend } from '@/api/blocklog'
 import type { BlockLog } from '@/types/api'
 
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
-
-const systemStatus = reactive({
-  eventEnabled: false,
-  eventSampleRate: 0,
-  intelEnabled: false,
-  intelTotalRules: 0,
-  geoEnabled: false,
-  geoMode: '' as string,
-  geoTotalRules: 0,
-  activeBans: 0,
-  totalBans: 0,
-})
 
 const topCountries = ref<{ country: string; count: number }[]>([])
 const recentBlocks = ref<BlockLog[]>([])
@@ -141,8 +97,6 @@ const blockTrend = ref<{ date: string; count: number }[]>([])
 
 async function fetchDashboardData() {
   await Promise.all([
-    fetchSystemStatus(),
-    fetchBanStats(),
     fetchBlockStatsAndTrend(),
     fetchTopCountries(),
     fetchRecentBlocks(),
@@ -150,53 +104,13 @@ async function fetchDashboardData() {
   updateChart()
 }
 
-async function fetchSystemStatus() {
-  try {
-    const [eventRes, intelRes, geoRes] = await Promise.all([
-      getEventStatus(),
-      getIntelStatus(),
-      getGeoBlockingStatus(),
-    ])
-    // XDP 上报状态
-    if (eventRes.data) {
-      systemStatus.eventEnabled = eventRes.data.enabled
-      systemStatus.eventSampleRate = eventRes.data.sample_rate || 0
-    }
-    // 威胁情报状态
-    if (intelRes.data) {
-      systemStatus.intelEnabled = intelRes.data.enabled
-      systemStatus.intelTotalRules = intelRes.data.total_rules || 0
-    }
-    // 地域封禁状态
-    if (geoRes.data) {
-      systemStatus.geoEnabled = geoRes.data.enabled
-      systemStatus.geoMode = geoRes.data.mode || ''
-      systemStatus.geoTotalRules = geoRes.data.total_rules || 0
-    }
-  } catch {
-    // Error handled
-  }
-}
-
-async function fetchBanStats() {
-  try {
-    const res = await getBanRecordStats()
-    if (res.data) {
-      systemStatus.activeBans = res.data.active || 0
-      systemStatus.totalBans = res.data.total || 0
-    }
-  } catch {
-    // Error handled
-  }
-}
-
 async function fetchBlockStatsAndTrend() {
   try {
-    const res = await getBlockLogStats()
-    if (res.data) {
-      blockTrend.value = (res.data.hourly_trend || []).map((item) => ({
+    const res = await getHourlyTrend(24)
+    if (res.data?.hourly_data) {
+      blockTrend.value = res.data.hourly_data.map((item) => ({
         date: item.hour,
-        count: item.count,
+        count: item.total,
       }))
     }
   } catch {
@@ -218,8 +132,8 @@ async function fetchTopCountries() {
 async function fetchRecentBlocks() {
   try {
     const res = await getBlockLogs({ page_size: 5 })
-    if (res.data?.items) {
-      recentBlocks.value = res.data.items
+    if (res.data?.records) {
+      recentBlocks.value = res.data.records
     }
   } catch {
     // Error handled
@@ -266,15 +180,6 @@ onUnmounted(() => {
 </script>
 
 <style lang="scss" scoped>
-.stat-card-clickable {
-  cursor: pointer;
-  transition: transform 0.15s;
-
-  &:hover {
-    transform: translateY(-2px);
-  }
-}
-
 .rank-list {
   max-height: 300px;
   overflow-y: auto;
