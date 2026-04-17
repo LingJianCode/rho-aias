@@ -22,13 +22,6 @@ type HourlyTrendItem struct {
 	Breakdown  map[string]int64 `json:"breakdown"`   // 按规则来源细分
 }
 
-// DroppedSummary 丢弃概要
-type DroppedSummary struct {
-	Total   int64             `json:"total"`   // 总丢弃数
-	Sources map[string]int64  `json:"sources"` // 按来源统计
-	Hourly  []HourlyTrendItem `json:"hourly"`  // 小时趋势
-}
-
 // NewStatsStore 创建统计存储实例（接收外部注入的 *gorm.DB）
 func NewStatsStore(db *gorm.DB) *StatsStore {
 	return &StatsStore{db: db}
@@ -203,24 +196,50 @@ func (ss *StatsStore) GetHourlyTrend(hours int) []HourlyTrendItem {
 	return result
 }
 
-// GetDroppedSummary 获取丢弃概览
-func (ss *StatsStore) GetDroppedSummary(hours int) DroppedSummary {
-	trend := ss.GetHourlyTrend(hours)
+// GetTopIPs 从 blocklog_top_ips 表直接查询 Top N IP
+func (ss *StatsStore) GetTopIPs(limit int) ([]IPCount, int64) {
+	if ss.db == nil {
+		return nil, 0
+	}
 
-	sources := make(map[string]int64)
 	var total int64
-	for _, item := range trend {
-		total += item.Total
-		for src, cnt := range item.Breakdown {
-			sources[src] += cnt
-		}
+	ss.db.Model(&models.BlocklogTopIP{}).Count(&total)
+
+	var results []models.BlocklogTopIP
+	ss.db.Order("count DESC").Limit(limit).Find(&results)
+
+	ips := make([]IPCount, len(results))
+	for i, r := range results {
+		ips[i] = IPCount{IP: r.IP, Count: int(r.Count)}
+	}
+	return ips, total
+}
+
+// GetTopCountries 从 blocklog_hourly_stats 聚合查询 Top N 国家
+func (ss *StatsStore) GetTopCountries(limit int) ([]CountryCount, int) {
+	if ss.db == nil {
+		return nil, 0
 	}
 
-	return DroppedSummary{
-		Total:   total,
-		Sources: sources,
-		Hourly:  trend,
+	var results []models.BlocklogHourlyStat
+	ss.db.Select("dim_value, SUM(count) as count").
+		Where("dimension = ?", "country").
+		Group("dim_value").
+		Order("count DESC").
+		Limit(limit).
+		Find(&results)
+
+	// 总国家数
+	var totalCountries []models.BlocklogHourlyStat
+	ss.db.Select("DISTINCT dim_value").
+		Where("dimension = ?", "country").
+		Find(&totalCountries)
+
+	countries := make([]CountryCount, len(results))
+	for i, r := range results {
+		countries[i] = CountryCount{Country: r.DimValue, Count: int(r.Count)}
 	}
+	return countries, len(totalCountries)
 }
 
 // Cleanup 清理 N 天前的历史数据

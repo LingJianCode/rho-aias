@@ -336,12 +336,20 @@ func (bl *BlockLog) GetHourlyTrend(hours int) []HourlyTrendItem {
 	return bl.statsStore.GetHourlyTrend(hours)
 }
 
-// GetDroppedSummary 获取丢弃概览
-func (bl *BlockLog) GetDroppedSummary(hours int) DroppedSummary {
+// GetTopIPs 从数据库查询 Top N 被阻断 IP
+func (bl *BlockLog) GetTopIPs(limit int) ([]IPCount, int64) {
 	if bl.statsStore == nil {
-		return DroppedSummary{}
+		return nil, 0
 	}
-	return bl.statsStore.GetDroppedSummary(hours)
+	return bl.statsStore.GetTopIPs(limit)
+}
+
+// GetTopCountries 从数据库查询 Top N 被阻断国家
+func (bl *BlockLog) GetTopCountries(limit int) ([]CountryCount, int) {
+	if bl.statsStore == nil {
+		return nil, 0
+	}
+	return bl.statsStore.GetTopCountries(limit)
 }
 
 // Flush 刷新缓冲区到磁盘

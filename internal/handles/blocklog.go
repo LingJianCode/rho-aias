@@ -68,9 +68,9 @@ func (h *BlockLogHandle) GetStats(c *gin.Context) {
 	response.OK(c, stats)
 }
 
-// GetBlockedIPs 获取被阻断的 IP 列表（聚合）
-// GET /api/blocklog/blocked-ips?limit=20
-func (h *BlockLogHandle) GetBlockedIPs(c *gin.Context) {
+// GetBlockedTopIPs 获取被阻断的 IP 列表（直接从 DB 查询）
+// GET /api/blocklog/blocked-top-ips?limit=20
+func (h *BlockLogHandle) GetBlockedTopIPs(c *gin.Context) {
 	limit := 20
 	if l := c.Query("limit"); l != "" {
 		if parsed, err := parseInt(l); err == nil && parsed > 0 {
@@ -78,21 +78,15 @@ func (h *BlockLogHandle) GetBlockedIPs(c *gin.Context) {
 		}
 	}
 
-	stats := h.blockLog.GetStats()
-
-	// 返回 Top N 被阻断的 IP
-	topIPs := stats.TopBlockedIPs
-	if len(topIPs) > limit {
-		topIPs = topIPs[:limit]
-	}
+	topIPs, total := h.blockLog.GetTopIPs(limit)
 
 	response.OK(c, gin.H{
-		"total_blocked_ips": len(stats.TopBlockedIPs),
+		"total_blocked_ips": total,
 		"top_blocked_ips":   topIPs,
 	})
 }
 
-// GetBlockedCountries 获取被阻断的国家/地区列表
+// GetBlockedCountries 获取被阻断的国家/地区列表（直接从 DB 查询）
 // GET /api/blocklog/blocked-countries?limit=20
 func (h *BlockLogHandle) GetBlockedCountries(c *gin.Context) {
 	limit := 20
@@ -102,16 +96,10 @@ func (h *BlockLogHandle) GetBlockedCountries(c *gin.Context) {
 		}
 	}
 
-	stats := h.blockLog.GetStats()
-
-	// 返回 Top N 被阻断的国家
-	topCountries := stats.TopBlockedCountries
-	if len(topCountries) > limit {
-		topCountries = topCountries[:limit]
-	}
+	topCountries, total := h.blockLog.GetTopCountries(limit)
 
 	response.OK(c, gin.H{
-		"total_blocked_countries": len(stats.TopBlockedCountries),
+		"total_blocked_countries": total,
 		"top_blocked_countries":   topCountries,
 	})
 }
@@ -131,26 +119,6 @@ func (h *BlockLogHandle) GetHourlyTrend(c *gin.Context) {
 	response.OK(c, gin.H{
 		"hours":       hours,
 		"hourly_data": trend,
-	})
-}
-
-// GetDroppedSummary 获取丢弃概览
-// GET /api/blocklog/dropped-summary?hours=168
-func (h *BlockLogHandle) GetDroppedSummary(c *gin.Context) {
-	hours := 168 // 默认查询最近 7 天
-	if h := c.Query("hours"); h != "" {
-		if parsed, err := parseInt(h); err == nil && parsed > 0 && parsed <= 8760 { // 最长 1 年
-			hours = parsed
-		}
-	}
-
-	summary := h.blockLog.GetDroppedSummary(hours)
-
-	response.OK(c, gin.H{
-		"hours":   hours,
-		"total":   summary.Total,
-		"sources": summary.Sources,
-		"hourly":  summary.Hourly,
 	})
 }
 

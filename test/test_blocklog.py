@@ -273,7 +273,7 @@ class BlockLogAPIClient:
 
     def get_blocked_ips(self, limit: int = None) -> Tuple[bool, dict]:
         """获取被阻断 IP 聚合列表"""
-        path = "/api/blocklog/blocked-ips"
+        path = "/api/blocklog/blocked-top-ips"
         if limit:
             path += f"?limit={limit}"
         return self._request("GET", path)
@@ -501,9 +501,9 @@ class TestBlockLog(unittest.TestCase):
             self.assertTrue(blocked, f"Iteration {i+1}: Block not effective")
         time.sleep(2)
 
-        # 获取 blocked-ips 聚合
+        # 获取 blocked-top-ips 聚合
         success, resp = self.api_client.get_blocked_ips(limit=10)
-        self.assertTrue(success, f"Failed to get blocked-ips: {resp}")
+        self.assertTrue(success, f"Failed to get blocked-top-ips: {resp}")
 
         data = resp.get("data", {}) or {}
         top_ips = data.get("top_blocked_ips") or []
@@ -511,7 +511,7 @@ class TestBlockLog(unittest.TestCase):
 
         # 找到 10.0.1.2 的聚合记录
         target_record = next((item for item in top_ips if item.get("ip") == "10.0.1.2"), None)
-        self.assertIsNotNone(target_record, "10.0.1.2 not found in blocked-ips aggregation")
+        self.assertIsNotNone(target_record, "10.0.1.2 not found in blocked-top-ips aggregation")
         self.assertGreaterEqual(target_record.get("count", 0), 1,
                                 "IP block count >= 1 expected")
         logger.info(f"IP aggregation validated: 10.0.1.2 count={target_record.get('count')}")
