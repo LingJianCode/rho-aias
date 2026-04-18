@@ -68,10 +68,10 @@ func main() {
 	core.LoadCachedRules(cfg)
 
 	// Phase 3: 检测模块工厂 (Intel / Geo / WAF / RateLimit / FailGuard)
-	detectors := bootstrap.InitDetectors(cfg, core.XDP, ctx, dbConn, core.WhitelistHandle.GetWhitelistChecker())
+	detectors := bootstrap.InitDetectors(cfg, core.XDP, ctx, dbConn, core.WhitelistManager.Checker())
 
 	// Phase 4: 异常检测
-	anomaly := bootstrap.InitAnomaly(cfg, core.XDP, dbConn, core.WhitelistHandle.GetWhitelistChecker())
+	anomaly := bootstrap.InitAnomaly(cfg, core.XDP, dbConn, core.WhitelistManager.Checker())
 
 	// Phase 5: 认证系统 (Casbin / JWT / Captcha)
 	auth := bootstrap.InitAuth(cfg, dbs.AuthDB)

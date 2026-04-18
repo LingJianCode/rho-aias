@@ -6,7 +6,6 @@ import (
 	"rho-aias/internal/blocklog"
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
-	"rho-aias/internal/handles"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
 
@@ -15,24 +14,24 @@ import (
 
 // CoreDependencies 核心基础设施初始化结果
 type CoreDependencies struct {
-	XDP             *ebpfs.Xdp
-	BlacklistHandle *handles.BlacklistHandle
-	WhitelistHandle *handles.WhitelistHandle
-	BlockLogHandle  *handles.BlockLogHandle
+	XDP              *ebpfs.Xdp
+	BlacklistManager *manual.BlacklistManager
+	WhitelistManager *manual.WhitelistManager
+	BlockLogMgr      *blocklog.Manager
 }
 
 // InitCore 初始化核心 eBPF 基础设施（不加载缓存规则，缓存需在 Start 后通过 LoadCachedRules 加载）
 func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 	xdp := ebpfs.NewXdp(cfg.Ebpf.InterfaceName)
 
-	blacklistCache := manual.NewCache(cfg.Manual.PersistenceDir)
-
 	manual.InitProtectedNets(logger.Infof)
 	whitelistChecker := manual.NewWhitelistChecker()
+
+	blacklistCache := manual.NewCache(cfg.Manual.PersistenceDir)
 	whitelistCache := manual.NewCache(cfg.Manual.PersistenceDir)
 
-	whitelistHandle := handles.NewWhitelistHandle(xdp, whitelistCache, whitelistChecker)
-	blacklistHandle := handles.NewBlacklistHandle(xdp, blacklistCache, whitelistChecker)
+	blacklistManager := manual.NewBlacklistManager(xdp, blacklistCache, whitelistChecker)
+	whitelistManager := manual.NewWhitelistManager(xdp, whitelistCache, whitelistChecker)
 
 	var blockLogMgr *blocklog.Manager
 	{
@@ -54,13 +53,12 @@ func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 		record := blocklog.CreateRecord(srcIP, dstIP, matchType, ruleSource, countryCode, packetSize)
 		blockLogMgr.AddRecord(record)
 	})
-	blockLogHandle := handles.NewBlockLogHandle(blockLogMgr, xdp)
 
 	return &CoreDependencies{
-		XDP:             xdp,
-		BlacklistHandle: blacklistHandle,
-		WhitelistHandle: whitelistHandle,
-		BlockLogHandle:  blockLogHandle,
+		XDP:              xdp,
+		BlacklistManager: blacklistManager,
+		WhitelistManager: whitelistManager,
+		BlockLogMgr:      blockLogMgr,
 	}
 }
 
@@ -78,8 +76,9 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 	}
 
 	// 加载手动阻断规则
-	if c.BlacklistHandle != nil && c.BlacklistHandle.Cache() != nil && c.BlacklistHandle.Cache().DataExists(manual.CacheFileBlacklist) {
-		cacheData, err := c.BlacklistHandle.Cache().LoadData(manual.CacheFileBlacklist)
+	blacklistCache := c.BlacklistManager.Cache()
+	if blacklistCache != nil && blacklistCache.DataExists(manual.CacheFileBlacklist) {
+		cacheData, err := blacklistCache.LoadData(manual.CacheFileBlacklist)
 		if err != nil {
 			logger.Warnf("[Manual] Failed to load cache: %v", err)
 		} else if cacheData.RuleCount() > 0 {
@@ -97,9 +96,10 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 	}
 
 	// 加载白名单规则
-	if c.WhitelistHandle != nil && c.WhitelistHandle.Cache() != nil &&
-		cfg.Manual.AutoLoad && c.WhitelistHandle.Cache().DataExists(manual.CacheFileWhitelist) {
-		whitelistData, err := c.WhitelistHandle.Cache().LoadData(manual.CacheFileWhitelist)
+	whitelistCache := c.WhitelistManager.Cache()
+	if whitelistCache != nil &&
+		cfg.Manual.AutoLoad && whitelistCache.DataExists(manual.CacheFileWhitelist) {
+		whitelistData, err := whitelistCache.LoadData(manual.CacheFileWhitelist)
 		if err != nil {
 			logger.Warnf("[Whitelist] Failed to load cache: %v", err)
 		} else if whitelistData.RuleCount() > 0 {
@@ -113,7 +113,7 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 				}
 			}
 			logger.Infof("[Whitelist] Loaded %d/%d rules from cache", loaded, whitelistData.RuleCount())
-			c.WhitelistHandle.Checker().LoadFromCache(whitelistData)
+			c.WhitelistManager.Checker().LoadFromCache(whitelistData)
 		}
 	}
 }
