@@ -14,7 +14,7 @@ import (
 // CoreDependencies 核心基础设施初始化结果
 type CoreDependencies struct {
 	XDP             *ebpfs.Xdp
-	ManualHandle    *handles.BlocklistHandle
+	BlacklistHandle *handles.BlacklistHandle
 	WhitelistHandle *handles.WhitelistHandle
 	BlockLogHandle  *handles.BlockLogHandle
 }
@@ -27,7 +27,7 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 	if cfg.Manual.Enabled {
 		manualCache = manual.NewCache(cfg.Manual.PersistenceDir)
 	}
-	manualHandle := handles.NewBlocklistHandle(xdp, manualCache, nil)
+	manualHandle := handles.NewBlacklistHandle(xdp, manualCache, nil)
 
 	var whitelistCache *manual.Cache
 	var whitelistHandle *handles.WhitelistHandle
@@ -63,7 +63,7 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 
 	return &CoreDependencies{
 		XDP:             xdp,
-		ManualHandle:    manualHandle,
+		BlacklistHandle: manualHandle,
 		WhitelistHandle: whitelistHandle,
 		BlockLogHandle:  blockLogHandle,
 	}
@@ -86,8 +86,8 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 	}
 
 	// 加载手动阻断规则
-	if c.ManualHandle != nil && c.ManualHandle.Cache() != nil && c.ManualHandle.Cache().DataExists(manual.CacheFileBlocklist) {
-		cacheData, err := c.ManualHandle.Cache().LoadData(manual.CacheFileBlocklist)
+	if c.BlacklistHandle != nil && c.BlacklistHandle.Cache() != nil && c.BlacklistHandle.Cache().DataExists(manual.CacheFileBlacklist) {
+		cacheData, err := c.BlacklistHandle.Cache().LoadData(manual.CacheFileBlacklist)
 		if err != nil {
 			logger.Warnf("[Manual] Failed to load cache: %v", err)
 		} else if cacheData.RuleCount() > 0 {

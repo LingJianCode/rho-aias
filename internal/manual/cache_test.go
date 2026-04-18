@@ -30,13 +30,13 @@ func TestCache_SaveAndLoad(t *testing.T) {
 	data.AddRule(*NewRuleEntry("172.16.0.0/12"))
 
 	// Save
-	err := cache.SaveData(data, CacheFileBlocklist)
+	err := cache.SaveData(data, CacheFileBlacklist)
 	if err != nil {
 		t.Fatalf("SaveData() error = %v", err)
 	}
 
 	// Load
-	loaded, err := cache.LoadData(CacheFileBlocklist)
+	loaded, err := cache.LoadData(CacheFileBlacklist)
 	if err != nil {
 		t.Fatalf("LoadData() error = %v", err)
 	}
@@ -68,18 +68,18 @@ func TestCache_DataExists(t *testing.T) {
 	cache := NewCache(tempDir)
 
 	// Should not exist initially
-	if cache.DataExists(CacheFileBlocklist) {
+	if cache.DataExists(CacheFileBlacklist) {
 		t.Error("DataExists() should return false for non-existent cache")
 	}
 
 	// Save data
 	data := NewRuleCacheData()
-	if err := cache.SaveData(data, CacheFileBlocklist); err != nil {
+	if err := cache.SaveData(data, CacheFileBlacklist); err != nil {
 		t.Fatalf("SaveData() error = %v", err)
 	}
 
 	// Should exist now
-	if !cache.DataExists(CacheFileBlocklist) {
+	if !cache.DataExists(CacheFileBlacklist) {
 		t.Error("DataExists() should return true after save")
 	}
 }
@@ -90,22 +90,22 @@ func TestCache_ClearData(t *testing.T) {
 
 	// Save data
 	data := NewRuleCacheData()
-	if err := cache.SaveData(data, CacheFileBlocklist); err != nil {
+	if err := cache.SaveData(data, CacheFileBlacklist); err != nil {
 		t.Fatalf("SaveData() error = %v", err)
 	}
 
 	// Clear
-	if err := cache.ClearData(CacheFileBlocklist); err != nil {
+	if err := cache.ClearData(CacheFileBlacklist); err != nil {
 		t.Fatalf("ClearData() error = %v", err)
 	}
 
 	// Should not exist
-	if cache.DataExists(CacheFileBlocklist) {
+	if cache.DataExists(CacheFileBlacklist) {
 		t.Error("DataExists() should return false after clear")
 	}
 
 	// Clear again (should not error on non-existent file)
-	if err := cache.ClearData(CacheFileBlocklist); err != nil {
+	if err := cache.ClearData(CacheFileBlacklist); err != nil {
 		t.Errorf("ClearData() on non-existent file error = %v", err)
 	}
 }
@@ -114,7 +114,7 @@ func TestCache_LoadNonExistent(t *testing.T) {
 	tempDir := t.TempDir()
 	cache := NewCache(tempDir)
 
-	_, err := cache.LoadData(CacheFileBlocklist)
+	_, err := cache.LoadData(CacheFileBlacklist)
 	if err == nil {
 		t.Error("LoadData() should return error for non-existent file")
 	}
@@ -125,7 +125,7 @@ func TestCache_GetModTime(t *testing.T) {
 	cache := NewCache(tempDir)
 
 	// Non-existent file
-	_, err := cache.GetModTime(CacheFileBlocklist)
+	_, err := cache.GetModTime(CacheFileBlacklist)
 	if err == nil {
 		t.Error("GetModTime() should return error for non-existent file")
 	}
@@ -133,12 +133,12 @@ func TestCache_GetModTime(t *testing.T) {
 	// Save data
 	data := NewRuleCacheData()
 	beforeSave := time.Now().Add(-time.Second)
-	if err := cache.SaveData(data, CacheFileBlocklist); err != nil {
+	if err := cache.SaveData(data, CacheFileBlacklist); err != nil {
 		t.Fatalf("SaveData() error = %v", err)
 	}
 
 	// Get modification time
-	modTime, err := cache.GetModTime(CacheFileBlocklist)
+	modTime, err := cache.GetModTime(CacheFileBlacklist)
 	if err != nil {
 		t.Fatalf("GetModTime() error = %v", err)
 	}
@@ -165,12 +165,12 @@ func TestCache_RoundTrip(t *testing.T) {
 	}
 
 	// Save
-	if err := cache.SaveData(data, CacheFileBlocklist); err != nil {
+	if err := cache.SaveData(data, CacheFileBlacklist); err != nil {
 		t.Fatalf("SaveData() error = %v", err)
 	}
 
 	// Load
-	loaded, err := cache.LoadData(CacheFileBlocklist)
+	loaded, err := cache.LoadData(CacheFileBlacklist)
 	if err != nil {
 		t.Fatalf("LoadData() error = %v", err)
 	}
@@ -193,12 +193,12 @@ func TestCache_FilePath(t *testing.T) {
 
 	// Save blocklist data
 	data := NewRuleCacheData()
-	if err := cache.SaveData(data, CacheFileBlocklist); err != nil {
+	if err := cache.SaveData(data, CacheFileBlacklist); err != nil {
 		t.Fatalf("SaveData() error = %v", err)
 	}
 
 	// Verify file exists at expected path
-	expectedPath := filepath.Join(tempDir, CacheFileBlocklist)
+	expectedPath := filepath.Join(tempDir, CacheFileBlacklist)
 	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
 		t.Errorf("Cache file not found at %s", expectedPath)
 	}
@@ -221,7 +221,7 @@ func TestCache_Overwrite(t *testing.T) {
 	// Save initial data
 	data1 := NewRuleCacheData()
 	data1.AddRule(*NewRuleEntry("192.168.1.1"))
-	if err := cache.SaveData(data1, CacheFileBlocklist); err != nil {
+	if err := cache.SaveData(data1, CacheFileBlacklist); err != nil {
 		t.Fatalf("First SaveData() error = %v", err)
 	}
 
@@ -229,12 +229,12 @@ func TestCache_Overwrite(t *testing.T) {
 	data2 := NewRuleCacheData()
 	data2.AddRule(*NewRuleEntry("10.0.0.1"))
 	data2.AddRule(*NewRuleEntry("172.16.0.1"))
-	if err := cache.SaveData(data2, CacheFileBlocklist); err != nil {
+	if err := cache.SaveData(data2, CacheFileBlacklist); err != nil {
 		t.Fatalf("Second SaveData() error = %v", err)
 	}
 
 	// Load and verify
-	loaded, err := cache.LoadData(CacheFileBlocklist)
+	loaded, err := cache.LoadData(CacheFileBlacklist)
 	if err != nil {
 		t.Fatalf("LoadData() error = %v", err)
 	}

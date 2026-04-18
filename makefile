@@ -41,7 +41,7 @@ clean:
 
 test:
 	@echo "==> Testing"
-	$(GO) test -v ./...
+	$(GO) test ./...
 
 GOLANGCI_LINT := $(shell command -v golangci-lint 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/golangci-lint")
 

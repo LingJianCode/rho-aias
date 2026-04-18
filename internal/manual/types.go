@@ -8,7 +8,7 @@ import (
 
 // 缓存文件名常量
 const (
-	CacheFileBlocklist = "manual_cache.bin"
+	CacheFileBlacklist = "blacklist_cache.bin"
 	CacheFileWhitelist = "whitelist_cache.bin"
 )
 
@@ -21,9 +21,9 @@ type RuleEntry struct {
 
 // RuleCacheData 统一规则缓存数据结构
 type RuleCacheData struct {
-	Version   uint32                 // 版本号
-	Timestamp int64                  // Unix 时间戳
-	Rules     map[string]RuleEntry   // key: value (IP/CIDR), value: 规则条目
+	Version   uint32               // 版本号
+	Timestamp int64                // Unix 时间戳
+	Rules     map[string]RuleEntry // key: value (IP/CIDR), value: 规则条目
 }
 
 // NewRuleCacheData 创建新的缓存数据

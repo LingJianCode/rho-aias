@@ -17,7 +17,7 @@ import (
 func RegisterAllRoutes(
 	api *gin.RouterGroup,
 	core *CoreDependencies,
-	dbDeps *Databases,
+	dbs *Databases,
 	detectorDeps *DetectorDeps,
 	anomalyDeps *AnomalyDeps,
 	authDeps *AuthDeps,
@@ -32,18 +32,18 @@ func RegisterAllRoutes(
 	routers.RegisterUserRoutes(api, authDeps.UserHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterAuditRoutes(api, authDeps.AuditHandle, enforcer, authSvc, apiKeySvc)
 
-	routers.RegisterManualRoutes(api, core.ManualHandle, enforcer, authSvc, apiKeySvc)
+	routers.RegisterBlacklistRoutes(api, core.BlacklistHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterWhitelistRoutes(api, core.WhitelistHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterBlockLogRoutes(api, core.BlockLogHandle, enforcer, authSvc, apiKeySvc)
 
 	ruleQueryHandle := handles.NewRuleQueryHandle(core.XDP)
 	routers.RegisterRuleRoutes(api, ruleQueryHandle, enforcer, authSvc, apiKeySvc)
 
-	registerBizRoutes(api, core.XDP, dbDeps.BizDB, detectorDeps.IntelMgr, detectorDeps.GeoMgr,
+	registerBizRoutes(api, core.XDP, dbs.BizDB, detectorDeps.IntelMgr, detectorDeps.GeoMgr,
 		enforcer, authSvc, apiKeySvc)
 
 	// ConfigHandle
-	configHandle := newConfigHandle(dbDeps.DynamicConfigSvc, detectorDeps, anomalyDeps, core.XDP)
+	configHandle := newConfigHandle(dbs.DynamicConfigSvc, detectorDeps, anomalyDeps, core.XDP)
 	routers.RegisterConfigRoutes(api, configHandle, enforcer, authSvc, apiKeySvc)
 }
 

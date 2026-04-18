@@ -198,8 +198,8 @@ func TestRuleCacheData_Timestamp(t *testing.T) {
 }
 
 func TestCacheFileConstants(t *testing.T) {
-	if CacheFileBlocklist != "manual_cache.bin" {
-		t.Errorf("CacheFileBlocklist = %v, want 'manual_cache.bin'", CacheFileBlocklist)
+	if CacheFileBlacklist != "blacklist_cache.bin" {
+		t.Errorf("CacheFileBlacklist = %v, want 'blacklist_cache.bin'", CacheFileBlacklist)
 	}
 	if CacheFileWhitelist != "whitelist_cache.bin" {
 		t.Errorf("CacheFileWhitelist = %v, want 'whitelist_cache.bin'", CacheFileWhitelist)
