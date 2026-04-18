@@ -3,6 +3,8 @@ package threatintel
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -18,17 +20,17 @@ import (
 // Manager 威胁情报管理器
 // 负责协调威胁情报的获取、解析、同步和持久化
 type Manager struct {
-	config  *config.IntelConfig       // 威胁情报配置
-	xdp     *ebpfs.Xdp                // XDP eBPF 程序接口
-	fetcher *feed.Fetcher           // 数据获取器（公共）
-	parser  *Parser                   // 数据解析器
-	cache   *feed.Cache[CacheData]  // 持久化缓存（公共泛型）
-	syncer  *Syncer                   // 内核同步器
-	cron    *cron.Cron                // Cron 调度器
-	jobIDs  map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
-	done    chan struct{}             // 停止信号
-	stopOnce sync.Once               // 确保 Stop 只执行一次
-	mu      sync.RWMutex              // 读写锁
+	config     *config.IntelConfig       // 威胁情报配置
+	xdp        *ebpfs.Xdp                // XDP eBPF 程序接口
+	fetcher    *feed.Fetcher           // 数据获取器（公共）
+	parser     *Parser                   // 数据解析器
+	rawFileDir string                    // 原始文件持久化目录
+	syncer     *Syncer                   // 内核同步器
+	cron       *cron.Cron                // Cron 调度器
+	jobIDs     map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
+	done       chan struct{}             // 停止信号
+	stopOnce   sync.Once               // 确保 Stop 只执行一次
+	mu         sync.RWMutex              // 读写锁
 
 	// 状态管理
 	status       *Status                    // 模块状态
@@ -38,9 +40,6 @@ type Manager struct {
 	// 数据库支持和并发控制（使用公共组件）
 	db            *gorm.DB                          // 数据库连接
 	sourceMutexes *feed.MutexPool[SourceID]       // 互斥锁池（公共）
-
-	// 每个源的最新规则数据（用于 saveCache 按源分类保存）
-	sourceRules map[SourceID]*IntelData
 }
 
 // NewManager 创建新的威胁情报管理器
@@ -50,13 +49,12 @@ func NewManager(cfg *config.IntelConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Manager {
 		xdp:           xdp,
 		fetcher:       feed.NewFetcher(30 * time.Second),
 		parser:        NewParser(),
-		cache:         feed.NewCache[CacheData](cfg.PersistenceDir, "intel_cache.bin"),
+		rawFileDir:    cfg.PersistenceDir,
 		syncer:        NewSyncer(xdp, cfg.BatchSize),
 		done:          make(chan struct{}),
 		sourceStatus:  make(map[SourceID]*SourceStatus),
 		db:            db,
 		sourceMutexes: feed.NewMutexPool[SourceID](),
-		sourceRules:   make(map[SourceID]*IntelData),
 		status: &Status{
 			Enabled: cfg.Enabled,
 			Sources: make(map[SourceID]SourceStatus),
@@ -76,11 +74,11 @@ func (m *Manager) Start() error {
 
 	logger.Info("[ThreatIntel] Starting threat intelligence manager...")
 
-	// 1. 加载本地缓存（离线启动）
-	if err := m.loadFromCache(); err != nil {
-		logger.Warnf("[ThreatIntel] Failed to load cache: %v", err)
+	// 1. 从本地原始文件加载（离线启动支持）
+	if err := m.loadFromRawFiles(); err != nil {
+		logger.Warnf("[ThreatIntel] Failed to load raw files: %v", err)
 	} else {
-		logger.Info("[ThreatIntel] Loaded cache successfully")
+		logger.Info("[ThreatIntel] Loaded raw files successfully")
 	}
 
 	// 2. 创建 Cron 调度器
@@ -118,9 +116,6 @@ func (m *Manager) scheduleSource(sourceID SourceID, src config.IntelSource) erro
 			logger.Errorf("[ThreatIntel] [%s] update failed: %v", sourceID, err)
 			m.updateSourceStatus(sourceID, false, 0, err.Error())
 		}
-		if err := m.saveCache(); err != nil {
-			logger.Errorf("[ThreatIntel] Failed to save cache: %v", err)
-		}
 	}))
 
 	m.jobIDs[sourceID] = jobID
@@ -152,10 +147,6 @@ func (m *Manager) updateAllSources() {
 			logger.Errorf("[ThreatIntel] [%s] update failed: %v", sourceID, err)
 			m.updateSourceStatus(sourceID, false, 0, err.Error())
 		}
-	}
-
-	if err := m.saveCache(); err != nil {
-		logger.Errorf("[ThreatIntel] Failed to save cache: %v", err)
 	}
 
 	logger.Info("[ThreatIntel] Update completed")
@@ -203,10 +194,10 @@ func (m *Manager) updateSource(sourceID SourceID, src config.IntelSource) error 
 	// 4. 更新状态
 	m.updateSourceStatus(sourceID, true, parsed.TotalCount(), "")
 
-	// 5. 保存该源的规则数据
-	m.mu.Lock()
-	m.sourceRules[sourceID] = parsed
-	m.mu.Unlock()
+	// 5. 保存原始文件到本地
+	if err := m.saveRawFile(sourceID, src.Format, data); err != nil {
+		logger.Warnf("[ThreatIntel] [%s] Failed to save raw file: %v", sourceID, err)
+	}
 
 	// 6. 记录成功状态 + 清理旧记录
 	duration := time.Since(startTime).Milliseconds()
@@ -220,33 +211,47 @@ func (m *Manager) updateSource(sourceID SourceID, src config.IntelSource) error 
 	return nil
 }
 
-// loadFromCache 从本地缓存加载威胁情报（离线启动支持）
-func (m *Manager) loadFromCache() error {
-	if !m.cache.Exists() {
-		return ErrThreatIntelCacheNotFound
-	}
+// loadFromRawFiles 从本地原始文件加载威胁情报（离线启动支持）
+// 读取各源的原始文件，重新解析后加载到 eBPF map
+func (m *Manager) loadFromRawFiles() error {
+	loadedAny := false
 
-	cacheData, err := m.cache.Load()
-	if err != nil {
-		return err
-	}
+	for id, src := range m.config.Sources {
+		if !src.Enabled {
+			continue
+		}
 
-	logger.Infof("[ThreatIntel] Loading cache with %d sources...", len(cacheData.Sources))
+		sourceID := SourceID(id)
+		filePath := m.getRawFilePath(sourceID, src.Format)
+		rawBytes, err := os.ReadFile(filePath)
+		if err != nil {
+			logger.Warnf("[ThreatIntel] [%s] Raw file not found (%s), skipping", sourceID, filePath)
+			continue
+		}
 
-	now := time.Now()
-	m.lastUpdate = time.Unix(cacheData.Timestamp, 0)
+		logger.Infof("[ThreatIntel] [%s] Loading from raw file: %s (%d bytes)", sourceID, filePath, len(rawBytes))
 
-	for sourceID, data := range cacheData.Sources {
-		logger.Infof("[ThreatIntel] [%s] Loading %d rules from cache", sourceID, data.TotalCount())
-
-		sourceMask := sourceIDToMask(sourceID)
-		if err := m.syncer.LoadAll(&data, sourceMask); err != nil {
-			logger.Warnf("[ThreatIntel] [%s] Failed to load from cache: %v", sourceID, err)
+		// 重新解析原始文件
+		parsed, err := m.parser.Parse(rawBytes, src.Format, sourceID)
+		if err != nil {
+			logger.Warnf("[ThreatIntel] [%s] Failed to parse raw file: %v", sourceID, err)
 			m.setSourceStatusInline(sourceID, false, 0, err.Error())
 			continue
 		}
 
-		m.setSourceStatusInline(sourceID, true, data.TotalCount(), "")
+		sourceMask := sourceIDToMask(sourceID)
+		if err := m.syncer.LoadAll(parsed, sourceMask); err != nil {
+			logger.Warnf("[ThreatIntel] [%s] Failed to load from raw file: %v", sourceID, err)
+			m.setSourceStatusInline(sourceID, false, 0, err.Error())
+			continue
+		}
+
+		m.setSourceStatusInline(sourceID, true, parsed.TotalCount(), "")
+		loadedAny = true
+	}
+
+	if !loadedAny {
+		return fmt.Errorf("no raw files found for enabled sources")
 	}
 
 	// 计算总规则数
@@ -255,7 +260,7 @@ func (m *Manager) loadFromCache() error {
 		totalRules += s.RuleCount
 	}
 	m.status.TotalRules = totalRules
-	m.status.LastUpdate = now
+	m.status.LastUpdate = time.Now()
 
 	return nil
 }
@@ -278,30 +283,31 @@ func (m *Manager) setSourceStatusInline(sourceID SourceID, success bool, ruleCou
 	m.status.Sources[sourceID] = *status
 }
 
-// saveCache 保存威胁情报到本地缓存
-func (m *Manager) saveCache() error {
-	cacheData := NewCacheData()
+// getRawFilePath 返回指定源的原始文件路径
+func (m *Manager) getRawFilePath(sourceID SourceID, format string) string {
+	ext := sourceFileExt(format)
+	return filepath.Join(m.rawFileDir, string(sourceID)+ext)
+}
 
-	m.mu.RLock()
-	for sourceID, status := range m.sourceStatus {
-		if status.Success && status.RuleCount > 0 {
-			data := NewIntelData(sourceID)
+// saveRawFile 原子写入原始文件到本地磁盘
+func (m *Manager) saveRawFile(sourceID SourceID, format string, data []byte) error {
+	path := m.getRawFilePath(sourceID, format)
+	tmpPath := path + ".tmp"
 
-			if sourceRules, ok := m.sourceRules[sourceID]; ok {
-				for _, ip := range sourceRules.IPv4Exact {
-					data.AddIPv4(ip)
-				}
-				for _, cidr := range sourceRules.IPv4CIDR {
-					data.AddCIDR(cidr)
-				}
-			}
-
-			cacheData.Sources[sourceID] = *data
-		}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create raw file dir failed: %w", err)
 	}
-	m.mu.RUnlock()
 
-	return m.cache.Save(*cacheData)
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("write tmp file failed: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename raw file failed: %w", err)
+	}
+
+	logger.Infof("[ThreatIntel] [%s] Saved raw file: %s (%d bytes)", sourceID, path, len(data))
+	return nil
 }
 
 // updateSourceStatus 更新威胁情报源状态
@@ -452,9 +458,6 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule str
 			} else {
 				logger.Infof("[ThreatIntel] [%s] Immediate fetch completed, rules synced to eBPF", sourceID)
 			}
-			if err := m.saveCache(); err != nil {
-				logger.Errorf("[ThreatIntel] Failed to save cache after immediate fetch: %v", err)
-			}
 		}()
 	case !enabled && wasEnabled:
 		// 从启用→禁用：立即清理该源的规则并从 eBPF map 中移除
@@ -465,13 +468,6 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule str
 				logger.Errorf("[ThreatIntel] [%s] Cleanup failed: %v", sourceID, err)
 			} else {
 				logger.Infof("[ThreatIntel] [%s] Cleanup completed, rules removed from eBPF", sourceID)
-			}
-			// 清理内存中的源规则缓存
-			m.mu.Lock()
-			delete(m.sourceRules, SourceID(sourceID))
-			m.mu.Unlock()
-			if err := m.saveCache(); err != nil {
-				logger.Errorf("[ThreatIntel] Failed to save cache after cleanup: %v", err)
 			}
 		}()
 	}

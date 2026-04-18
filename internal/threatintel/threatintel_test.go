@@ -86,34 +86,6 @@ func TestIntelData_TotalCount(t *testing.T) {
 	}
 }
 
-func TestNewCacheData(t *testing.T) {
-	data := NewCacheData()
-
-	if data == nil {
-		t.Fatal("NewCacheData() returned nil")
-	}
-	if data.Version != 1 {
-		t.Errorf("Version = %d, want 1", data.Version)
-	}
-	if data.Sources == nil {
-		t.Error("Sources map should not be nil")
-	}
-	if len(data.Sources) != 0 {
-		t.Errorf("Sources length = %d, want 0", len(data.Sources))
-	}
-}
-
-func TestCacheData_Timestamp(t *testing.T) {
-	// Timestamp should be set on creation
-	beforeCreate := time.Now().Unix() - 1
-	data := NewCacheData()
-	afterCreate := time.Now().Unix() + 1
-
-	if data.Timestamp < beforeCreate || data.Timestamp > afterCreate {
-		t.Errorf("Timestamp = %d, should be around %d", data.Timestamp, time.Now().Unix())
-	}
-}
-
 func TestSourceIDConstants(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -180,11 +152,5 @@ func TestSourceStatusStruct(t *testing.T) {
 	}
 	if ss.RuleCount != 50 {
 		t.Errorf("SourceStatus.RuleCount = %d, want 50", ss.RuleCount)
-	}
-}
-
-func TestErrThreatIntelCacheNotFound(t *testing.T) {
-	if ErrThreatIntelCacheNotFound.Error() != "threat intelligence cache not found" {
-		t.Errorf("Error message = %v, want 'threat intelligence cache not found'", ErrThreatIntelCacheNotFound)
 	}
 }
