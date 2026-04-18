@@ -2,7 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"time"
 
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
@@ -13,8 +12,8 @@ import (
 	"rho-aias/internal/ratelimit"
 	"rho-aias/internal/services"
 	"rho-aias/internal/threatintel"
-	"rho-aias/internal/watcher"
 	"rho-aias/internal/waf"
+	"rho-aias/internal/watcher"
 
 	"gorm.io/gorm"
 )
@@ -44,20 +43,6 @@ func InitDetectors(
 		} else {
 			logger.Info("[Main] Intelligence module initialized")
 		}
-		if cfg.Intel.AutoRefreshOnStart {
-			go func() {
-				select {
-				case <-ctx.Done():
-					logger.Info("[ThreatIntel] Auto-refresh goroutine cancelled")
-					return
-				case <-time.After(2 * time.Second):
-					logger.Info("[ThreatIntel] Auto-refresh on startup triggered")
-					if err := intelMgr.TriggerUpdate(); err != nil {
-						logger.Errorf("[ThreatIntel] Auto-refresh failed: %v", err)
-					}
-				}
-			}()
-		}
 	}
 
 	geoMgr := geoblocking.NewManager(&cfg.GeoBlocking, xdp, dbConn)
@@ -66,20 +51,6 @@ func InitDetectors(
 			logger.Warnf("[Main] Geo-blocking manager start failed: %v", err)
 		} else {
 			logger.Info("[Main] Geo-blocking module initialized")
-		}
-		if cfg.GeoBlocking.AutoRefreshOnStart {
-			go func() {
-				select {
-				case <-ctx.Done():
-					logger.Info("[GeoBlocking] Auto-refresh goroutine cancelled")
-					return
-				case <-time.After(2 * time.Second):
-					logger.Info("[GeoBlocking] Auto-refresh on startup triggered")
-					if err := geoMgr.TriggerUpdate(); err != nil {
-						logger.Errorf("[GeoBlocking] Auto-refresh failed: %v", err)
-					}
-				}
-			}()
 		}
 	}
 

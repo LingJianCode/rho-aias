@@ -91,6 +91,7 @@ class RhoAiasProcess:
 
         config['server']['port'] = self.api_port
         config['ebpf']['interface_name'] = self.interface
+        config['log']['level'] = 'debug'
 
         # blocklog 始终持久化，无需额外配置
 
@@ -104,19 +105,13 @@ class RhoAiasProcess:
         
         # 保留手动规则功能
         config['manual']['enabled'] = True
+        config['business']['database_path'] = os.path.join(self.config_dir, 'business.db')
+        config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
+        if self.api_key:
+            config['auth']['api_keys'] = [
+                {'name': 'Test Admin Key', 'key': self.api_key, 'permissions': ['*']}
+            ]
 
-        # 认证配置（注意：Go AuthConfig 无 enabled 字段，认证始终初始化；
-        # use_auth 控制的是是否写入 jwt_secret 和 api_keys）
-        if self.use_auth:
-            config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
-            config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
-            if self.api_key:
-                config['auth']['api_keys'] = [
-                    {'name': 'Test Admin Key', 'key': self.api_key, 'permissions': ['*']}
-                ]
-        else:
-            # 不启用认证：保留空 auth 段（Go 端会使用默认值）
-            pass
 
         try:
             with open(config_file, 'w') as f:

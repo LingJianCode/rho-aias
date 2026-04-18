@@ -223,36 +223,6 @@ func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 	response.OKMsg(c, fmt.Sprintf("Module %s config updated successfully", module))
 }
 
-// ========== 生命周期 / 恢复 / 调度方法 ==========
-
-// RestoreAll 从 DB 恢复所有已持久化的模块配置到运行时（启动时调用）
-func (h *ConfigHandle) RestoreAll() {
-	records, err := h.configService.GetAll()
-	if err != nil {
-		logger.Warnf("[Restore] Failed to load configs from DB: %v", err)
-		return
-	}
-	if len(records) == 0 {
-		return
-	}
-	supported := map[string]bool{
-		models.ModuleFailGuard: true, models.ModuleWAF: true, models.ModuleRateLimit: true,
-		models.ModuleAnomalyDetection: true, models.ModuleGeoBlocking: true,
-		models.ModuleIntel: true, models.ModuleXDPEvents: true,
-	}
-	for _, record := range records {
-		if !supported[record.Module] {
-			continue
-		}
-		raw := json.RawMessage(record.Value)
-		if err := h.applyConfig(record.Module, raw); err != nil {
-			logger.Warnf("[Restore] Failed to restore module %s: %v", record.Module, err)
-		} else {
-			logger.Infof("[Restored] Module %s config restored from DB", record.Module)
-		}
-	}
-}
-
 // getRuntimeConfig 获取模块运行时配置（调度到各子文件）
 func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 	switch module {

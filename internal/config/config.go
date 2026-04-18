@@ -43,11 +43,10 @@ type EbpfConfig struct {
 
 // IntelConfig 情报配置
 type IntelConfig struct {
-	Enabled          bool                   `yaml:"enabled"`            // 总开关
-	AutoRefreshOnStart bool                 `yaml:"auto_refresh_on_start"` // 启动时自动刷新
-	PersistenceDir   string                 `yaml:"persistence_dir"`   // 持久化目录
-	Sources          map[string]IntelSource `yaml:"sources"`           // 情报源配置 (map 结构支持动态添加)
-	BatchSize        int                    `yaml:"batch_size"`         // 批量更新大小
+	Enabled        bool                   `yaml:"enabled"`         // 总开关
+	PersistenceDir string                 `yaml:"persistence_dir"` // 持久化目录
+	Sources        map[string]IntelSource `yaml:"sources"`         // 情报源配置 (map 结构支持动态添加)
+	BatchSize      int                    `yaml:"batch_size"`      // 批量更新大小
 }
 
 // IntelSource 单个情报源配置
@@ -61,14 +60,13 @@ type IntelSource struct {
 
 // GeoBlockingConfig 地域封禁配置
 type GeoBlockingConfig struct {
-	Enabled              bool                   `yaml:"enabled"`                 // 总开关
-	AutoRefreshOnStart   bool                   `yaml:"auto_refresh_on_start"`  // 启动时自动刷新
-	Mode                 string                 `yaml:"mode"`                    // "whitelist" 或 "blacklist"
-	AllowedCountries     []string               `yaml:"allowed_countries"`       // 允许的国家代码列表
+	Enabled              bool                   `yaml:"enabled"`                // 总开关
+	Mode                 string                 `yaml:"mode"`                   // "whitelist" 或 "blacklist"
+	AllowedCountries     []string               `yaml:"allowed_countries"`      // 允许的国家代码列表
 	AllowPrivateNetworks bool                   `yaml:"allow_private_networks"` // 允许私有网段绕过地域检查
 	PersistenceDir       string                 `yaml:"persistence_dir"`        // 持久化目录
 	BatchSize            int                    `yaml:"batch_size"`             // 批量更新大小
-	Sources              map[string]GeoIPSource `yaml:"sources"`                 // GeoIP 数据源配置
+	Sources              map[string]GeoIPSource `yaml:"sources"`                // GeoIP 数据源配置
 }
 
 // GeoIPSource GeoIP 数据源配置
@@ -123,53 +121,53 @@ type BlockLogConfig struct {
 // 参考 fail2ban 的核心功能：日志匹配 + 滑动窗口计数 + 达阈值封禁
 // 模式说明：normal=认证失败, ddos=认证失败+preauth异常, aggressive=ddos+协议协商失败
 type FailGuardConfig struct {
-	Enabled          bool     `yaml:"enabled"`            // 是否启用 FailGuard
-	LogPath          string   `yaml:"log_path"`           // 监控的日志文件路径
-	OffsetStateFile  string   `yaml:"offset_state_file"`  // 偏移量持久化文件路径（默认 ./data/failguard_offset.json）
-	Mode             string   `yaml:"mode"`               // 检测模式: normal/ddos/aggressive（默认 normal）
-	FailRegex        []string `yaml:"fail_regex"`         // 失败匹配正则（留空使用内置默认）
-	IgnoreRegex      []string `yaml:"ignore_regex"`       // 忽略匹配正则（留空使用内置默认）
-	IgnoreIPs        []string `yaml:"ignore_ips"`         // 忽略的 IP/CIDR 列表（白名单）
-	MaxRetry         int      `yaml:"max_retry"`          // 触发封禁的失败次数阈值
-	FindTime         int      `yaml:"find_time"`          // 滑动窗口时长（秒）
-	BanDuration      int      `yaml:"ban_duration"`       // 封禁时长（秒）
+	Enabled         bool     `yaml:"enabled"`           // 是否启用 FailGuard
+	LogPath         string   `yaml:"log_path"`          // 监控的日志文件路径
+	OffsetStateFile string   `yaml:"offset_state_file"` // 偏移量持久化文件路径（默认 ./data/failguard_offset.json）
+	Mode            string   `yaml:"mode"`              // 检测模式: normal/ddos/aggressive（默认 normal）
+	FailRegex       []string `yaml:"fail_regex"`        // 失败匹配正则（留空使用内置默认）
+	IgnoreRegex     []string `yaml:"ignore_regex"`      // 忽略匹配正则（留空使用内置默认）
+	IgnoreIPs       []string `yaml:"ignore_ips"`        // 忽略的 IP/CIDR 列表（白名单）
+	MaxRetry        int      `yaml:"max_retry"`         // 触发封禁的失败次数阈值
+	FindTime        int      `yaml:"find_time"`         // 滑动窗口时长（秒）
+	BanDuration     int      `yaml:"ban_duration"`      // 封禁时长（秒）
 }
 
 // WAFConfig WAF 日志监控配置
 type WAFConfig struct {
 	Enabled         bool   `yaml:"enabled"`           // 是否启用 WAF 日志监控
-	WAFLogPath      string `yaml:"waf_log_path"`       // WAF 审计日志路径（Caddy + Coraza）
-	BanDuration     int    `yaml:"ban_duration"`       // 封禁时长（秒）
-	OffsetStateFile string `yaml:"offset_state_file"`  // 偏移量持久化文件路径（默认 ./data/waf_offset.json）
+	WAFLogPath      string `yaml:"waf_log_path"`      // WAF 审计日志路径（Caddy + Coraza）
+	BanDuration     int    `yaml:"ban_duration"`      // 封禁时长（秒）
+	OffsetStateFile string `yaml:"offset_state_file"` // 偏移量持久化文件路径（默认 ./data/waf_offset.json）
 }
 
 // RateLimitConfig Rate Limit 日志监控配置
 type RateLimitConfig struct {
 	Enabled         bool   `yaml:"enabled"`           // 是否启用 Rate Limit 日志监控
-	LogPath         string `yaml:"log_path"`           // Rate Limit 日志路径
-	BanDuration     int    `yaml:"ban_duration"`       // 封禁时长（秒）
-	OffsetStateFile string `yaml:"offset_state_file"`  // 偏移量持久化文件路径（默认 ./data/ratelimit_offset.json）
+	LogPath         string `yaml:"log_path"`          // Rate Limit 日志路径
+	BanDuration     int    `yaml:"ban_duration"`      // 封禁时长（秒）
+	OffsetStateFile string `yaml:"offset_state_file"` // 偏移量持久化文件路径（默认 ./data/ratelimit_offset.json）
 }
 
 // AnomalyDetectionConfig 异常检测配置
 type AnomalyDetectionConfig struct {
-	Enabled         bool            `yaml:"enabled" json:"enabled"`             // 总开关
-	SampleRate      int             `yaml:"sample_rate" json:"sample_rate"`    // 采样率 1/N（100 表示 1%）
-	CheckInterval   int             `yaml:"check_interval" json:"check_interval"` // 检测间隔（秒）
-	MinPackets      int             `yaml:"min_packets" json:"min_packets"`   // 最小包数（少于此值不检测）
-	CleanupInterval int             `yaml:"cleanup_interval" json:"cleanup_interval"` // 清理过期数据间隔（秒）
-	Ports           []int           `yaml:"ports" json:"ports"`               // 需要检测的端口列表（同时应用于 TCP/UDP，为空则检测所有端口）
-	Baseline        BaselineConfig  `yaml:"baseline" json:"baseline"`         // 3σ 基线配置
-	Attacks         AttacksConfig   `yaml:"attacks" json:"attacks"`          // 攻击类型配置
+	Enabled         bool           `yaml:"enabled" json:"enabled"`                   // 总开关
+	SampleRate      int            `yaml:"sample_rate" json:"sample_rate"`           // 采样率 1/N（100 表示 1%）
+	CheckInterval   int            `yaml:"check_interval" json:"check_interval"`     // 检测间隔（秒）
+	MinPackets      int            `yaml:"min_packets" json:"min_packets"`           // 最小包数（少于此值不检测）
+	CleanupInterval int            `yaml:"cleanup_interval" json:"cleanup_interval"` // 清理过期数据间隔（秒）
+	Ports           []int          `yaml:"ports" json:"ports"`                       // 需要检测的端口列表（同时应用于 TCP/UDP，为空则检测所有端口）
+	Baseline        BaselineConfig `yaml:"baseline" json:"baseline"`                 // 3σ 基线配置
+	Attacks         AttacksConfig  `yaml:"attacks" json:"attacks"`                   // 攻击类型配置
 }
 
 // BaselineConfig 3σ 基线检测配置
 type BaselineConfig struct {
 	MinSampleCount  int     `yaml:"min_sample_count" json:"min_sample_count"` // 最小样本数
 	SigmaMultiplier float64 `yaml:"sigma_multiplier" json:"sigma_multiplier"` // σ 倍数
-	MinThreshold    int     `yaml:"min_threshold" json:"min_threshold"`      // 最小 PPS 阈值
-	MaxAge          int     `yaml:"max_age" json:"max_age"`                 // 基线最大年龄（秒）
-	BlockDuration   int     `yaml:"block_duration" json:"block_duration"`    // 封禁时长（秒）
+	MinThreshold    int     `yaml:"min_threshold" json:"min_threshold"`       // 最小 PPS 阈值
+	MaxAge          int     `yaml:"max_age" json:"max_age"`                   // 基线最大年龄（秒）
+	BlockDuration   int     `yaml:"block_duration" json:"block_duration"`     // 封禁时长（秒）
 }
 
 // AttacksConfig 攻击类型配置
@@ -182,10 +180,10 @@ type AttacksConfig struct {
 
 // AttackConfig 单个攻击类型配置
 type AttackConfig struct {
-	Enabled        bool    `yaml:"enabled" json:"enabled"`                     // 是否启用
-	RatioThreshold float64 `yaml:"ratio_threshold" json:"ratio_threshold"`     // 协议占比阈值
-	BlockDuration  int     `yaml:"block_duration" json:"block_duration"`       // 封禁时长（秒）
-	MinPackets     int     `yaml:"min_packets" json:"min_packets"`            // 触发检测的最小包数（0 表示使用默认值）
+	Enabled        bool    `yaml:"enabled" json:"enabled"`                 // 是否启用
+	RatioThreshold float64 `yaml:"ratio_threshold" json:"ratio_threshold"` // 协议占比阈值
+	BlockDuration  int     `yaml:"block_duration" json:"block_duration"`   // 封禁时长（秒）
+	MinPackets     int     `yaml:"min_packets" json:"min_packets"`         // 触发检测的最小包数（0 表示使用默认值）
 }
 
 func NewConfig(fileName string) (*Config, error) {
@@ -218,8 +216,8 @@ func NewConfig(fileName string) (*Config, error) {
 // applyDefaults 设置配置默认值
 func applyDefaults(config *Config) {
 	// Auth 默认值
-	setIfZero(&config.Auth.TokenDuration, 1440)   // 默认 24 小时
-	setIfZero(&config.Auth.CaptchaDuration, 5)     // 默认 5 分钟
+	setIfZero(&config.Auth.TokenDuration, 1440) // 默认 24 小时
+	setIfZero(&config.Auth.CaptchaDuration, 5)  // 默认 5 分钟
 	setIfEmpty(&config.Auth.DatabasePath, "./data/auth.db")
 
 	// Business 默认值
@@ -254,18 +252,18 @@ func applyDefaults(config *Config) {
 	setIfEmpty(&config.FailGuard.Mode, "normal")
 	setIfEmpty(&config.FailGuard.LogPath, "/var/log/auth.log")
 	setIfZero(&config.FailGuard.MaxRetry, 5)
-	setIfZero(&config.FailGuard.FindTime, 600)                          // 默认 10 分钟
-	setIfZero(&config.FailGuard.BanDuration, 3600)                      // 默认 1 小时
+	setIfZero(&config.FailGuard.FindTime, 600)     // 默认 10 分钟
+	setIfZero(&config.FailGuard.BanDuration, 3600) // 默认 1 小时
 	setIfEmpty(&config.FailGuard.OffsetStateFile, "./data/failguard_offset.json")
 
 	// WAF 默认值
 	setIfEmpty(&config.WAF.WAFLogPath, "/logs/waf_audit.log")
-	setIfZero(&config.WAF.BanDuration, 3600)            // 默认 1 小时
+	setIfZero(&config.WAF.BanDuration, 3600) // 默认 1 小时
 	setIfEmpty(&config.WAF.OffsetStateFile, "./data/waf_offset.json")
 
 	// RateLimit 默认值
 	setIfEmpty(&config.RateLimit.LogPath, "/logs/rate_limit.log")
-	setIfZero(&config.RateLimit.BanDuration, 3600)            // 默认 1 小时
+	setIfZero(&config.RateLimit.BanDuration, 3600) // 默认 1 小时
 	setIfEmpty(&config.RateLimit.OffsetStateFile, "./data/ratelimit_offset.json")
 
 	// AnomalyDetection 默认值

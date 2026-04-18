@@ -73,7 +73,7 @@ func registerBizRoutes(
 	routers.RegisterBanRecordRoutes(api, banRecordHandle, enforcer, authSvc, apiKeySvc)
 }
 
-// SetupConfigHandle 创建 ConfigHandle 并执行 RestoreAll，返回供 defer 使用
+// SetupConfigHandle 创建 ConfigHandle，返回供 defer 使用
 func SetupConfigHandle(
 	dynamicConfigSvc *services.DynamicConfigService,
 	detectors *DetectorDeps,
@@ -93,6 +93,5 @@ func SetupConfigHandle(
 		xdp,
 	)
 	configHandle.SetAnomalyController(xdp, anomaly.RecordPacketFn)
-	configHandle.RestoreAll()
 	return configHandle
 }

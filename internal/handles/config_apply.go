@@ -328,7 +328,7 @@ func (h *ConfigHandle) applyXDPEventsConfig(raw json.RawMessage) error {
 	if err := h.xdp.SetBlocklogEventConfig(enabled, sampleRate); err != nil {
 		return fmt.Errorf("failed to set xdp event config: %w", err)
 	}
-	logger.Infof("[ConfigAPI] XDPEvents config updated: enabled=%v, sample_rate=%d", enabled, sampleRate)
+	logger.Infof("[ConfigAPI] XDP Blocklog Events config updated: enabled=%v, sample_rate=%d", enabled, sampleRate)
 	return nil
 }
 

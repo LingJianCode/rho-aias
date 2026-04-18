@@ -111,6 +111,7 @@ class RhoAiasProcess:
         # 配置认证（始终启用，使用 API Key）
         config['auth']['jwt_secret'] = 'test-jwt-secret-key-for-testing'
         config['auth']['database_path'] = os.path.join(self.config_dir, 'auth.db')
+        config['business']['database_path'] = os.path.join(self.config_dir, 'business.db')
 
         # 配置 API Key 到配置文件
         if self.api_key:

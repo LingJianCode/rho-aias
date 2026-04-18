@@ -52,7 +52,11 @@ func main() {
 	}
 	logger.Debugf("Loaded config: %+v", cfg)
 
-	// Phase 1: 核心基础设施 (XDP / Manual / Whitelist / BlockLog)
+	// 数据库初始化 + 迁移 + 动态配置恢复
+	dbDeps := bootstrap.InitDatabase(cfg)
+	defer dbDeps.AuthDB.Close()
+
+	// 核心基础设施 (XDP / Manual / Whitelist / BlockLog)
 	core := bootstrap.InitCore(cfg)
 	defer core.XDP.Close()
 
@@ -63,10 +67,6 @@ func main() {
 
 	// 加载持久化的缓存规则到 eBPF map（必须在 Start 之后）
 	core.LoadCachedRules(cfg)
-
-	// Phase 2: 数据库初始化 + 迁移 + 动态配置恢复
-	dbDeps := bootstrap.InitDatabase(cfg)
-	defer dbDeps.AuthDB.Close()
 
 	if dbDeps.AuthDB == nil {
 		logger.Fatalf("[Main] Failed to initialize auth database, authentication is mandatory")
@@ -106,7 +106,7 @@ func main() {
 	// Phase 6: 统一路由注册
 	bootstrap.RegisterAllRoutes(api, core, dbDeps, detectors, anomalyDeps, authDeps)
 
-	// ConfigHandle (含 RestoreAll) + 注册路由
+	// ConfigHandle 注册路由
 	var configHandle *handles.ConfigHandle
 	if dbDeps.DynamicConfigSvc != nil {
 		configHandle = bootstrap.SetupConfigHandle(

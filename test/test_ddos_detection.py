@@ -146,7 +146,7 @@ class RhoAiasProcess:
                 'permissions': ['*']
             }
         ]
-
+        config['business']['database_path'] = os.path.join(self.config_dir, 'business.db')
         # 写入临时配置文件
         try:
             with open(config_file, 'w') as f:

@@ -24,17 +24,17 @@ func InitDatabase(cfg *config.Config) *DatabaseDeps {
 	var bizDB *database.Database
 	bizDB, err = database.NewDatabase(cfg.Business.DatabasePath, cfg.Log.Level == "debug")
 	if err != nil {
-		logger.Warnf("[Main] Failed to initialize business database: %v (status recording will be disabled)", err)
+		logger.Fatalf("[Main] Failed to initialize business database: %v ", err)
 	}
 
 	if err := authDB.AutoMigrateAuth(); err != nil {
-		logger.Warnf("[Main] Failed to migrate auth database: %v", err)
+		logger.Fatalf("[Main] Failed to migrate auth database: %v", err)
 	}
 
 	var dynamicConfigSvc *services.DynamicConfigService
 	if bizDB != nil {
 		if err := bizDB.AutoMigrateBusiness(); err != nil {
-			logger.Warnf("[Main] Failed to migrate business database: %v", err)
+			logger.Fatalf("[Main] Failed to migrate business database: %v", err)
 		}
 
 		banRecordService := services.NewBanRecordService(bizDB.DB)

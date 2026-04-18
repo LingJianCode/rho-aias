@@ -28,6 +28,7 @@ func NewDatabase(dsn string, debug bool) (*Database, error) {
 	if debug {
 		logLevel = gormlogger.Info
 	}
+	logger.Debugf("initlized dsn %s", dsn)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(logLevel),
 	})
