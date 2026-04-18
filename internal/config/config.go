@@ -114,6 +114,10 @@ type BlockLogConfig struct {
 	MemoryCacheSize int    `yaml:"memory_cache_size"` // 内存缓存大小（用于实时查询）
 	BufferSize      int    `yaml:"buffer_size"`       // 异步写入缓冲区大小
 	FlushInterval   int    `yaml:"flush_interval"`    // 刷盘间隔（秒）
+
+	// 以下字段由动态配置恢复写入（非 YAML），供 LoadCachedRules 恢复 eBPF 事件上报配置
+	EventsEnabled    bool   `yaml:"-"`
+	EventsSampleRate uint32 `yaml:"-"`
 }
 
 // FailGuardConfig SSH 防爆破配置

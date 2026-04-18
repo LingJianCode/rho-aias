@@ -116,4 +116,18 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 			c.WhitelistManager.Checker().LoadFromCache(whitelistData)
 		}
 	}
+
+	// 恢复 blocklog_events 动态配置（由 loadDynamicConfigFromDB 写入 cfg.BlockLog 扩展字段）
+	if cfg.BlockLog.EventsEnabled || cfg.BlockLog.EventsSampleRate > 0 {
+		sampleRate := cfg.BlockLog.EventsSampleRate
+		if sampleRate == 0 {
+			sampleRate = 1
+		}
+		if err := c.XDP.SetBlocklogEventConfig(cfg.BlockLog.EventsEnabled, sampleRate); err != nil {
+			logger.Warnf("[BlockLog] Failed to restore blocklog_events config: %v", err)
+		} else {
+			logger.Infof("[BlockLog] Restored blocklog_events config: enabled=%v, sample_rate=%d",
+				cfg.BlockLog.EventsEnabled, sampleRate)
+		}
+	}
 }

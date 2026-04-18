@@ -87,7 +87,18 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		loaded["intel"] = fmt.Sprintf("enabled=%v", intel.Enabled)
 	}
 
-	modules := []string{"failguard", "waf", "rate_limit", "anomaly_detection", "geo_blocking", "intel"}
+	var blocklogEvents config.BlocklogEventsRuntime
+	if ok, err := svc.LoadTo("blocklog_events", &blocklogEvents); err != nil {
+		logger.Warnf("[Main] Failed to load blocklog_events dynamic config from DB: %v", err)
+	} else if ok {
+		// blocklog_events 的配置不在 cfg 中（直接操作 eBPF map），
+		// 存入 cfg.BlockLog 的扩展字段供 LoadCachedRules 恢复
+		cfg.BlockLog.EventsEnabled = blocklogEvents.Enabled
+		cfg.BlockLog.EventsSampleRate = blocklogEvents.SampleRate
+		loaded["blocklog_events"] = fmt.Sprintf("enabled=%v, sample_rate=%d", blocklogEvents.Enabled, blocklogEvents.SampleRate)
+	}
+
+	modules := []string{"failguard", "waf", "rate_limit", "anomaly_detection", "geo_blocking", "intel", "blocklog_events"}
 	logger.Info("[Main] Dynamic config loaded (DB values override YAML):")
 	for _, mod := range modules {
 		if val, exists := loaded[mod]; exists {
