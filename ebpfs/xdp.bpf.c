@@ -125,7 +125,7 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 1 << 20);  // 1MB buffer size
-} events SEC(".maps");
+} blocklog_events SEC(".maps");
 
 // Geo-blocking configuration map
 struct {
@@ -142,9 +142,9 @@ struct geo_config {
     __u32 padding;        /* Alignment padding */
 } __attribute__((packed));
 
-// Event reporting configuration map
+// Blocklog event reporting configuration map
 // Controls whether to report dropped packet events to userspace
-struct event_config {
+struct blocklog_config {
     __u32 enabled;        /* Event reporting enabled flag (0=disabled, 1=enabled) */
     __u32 sample_rate;    /* Sample rate: report 1 out of every N dropped packets (e.g., 1000 = 0.1%) */
     __u32 padding[2];     /* Alignment padding to 16 bytes */
@@ -153,9 +153,9 @@ struct event_config {
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, __u32);
-    __type(value, struct event_config);
+    __type(value, struct blocklog_config);
     __uint(max_entries, 1);
-} event_config SEC(".maps");
+} blocklog_config SEC(".maps");
 
 // Anomaly detection configuration map
 // Controls whether to sample packets for anomaly detection
@@ -631,7 +631,7 @@ submit:
 drop_and_report:
     {
         __u32 config_key = 0;
-        struct event_config *cfg = bpf_map_lookup_elem(&event_config, &config_key);
+        struct blocklog_config *cfg = bpf_map_lookup_elem(&blocklog_config, &config_key);
         
         // 只有在配置启用时才上报事件
         if (cfg && cfg->enabled) {
@@ -647,7 +647,7 @@ drop_and_report:
             // 如果 random % sample_rate == 0，则上报
             __u32 random_val = bpf_get_prandom_u32();
             if ((random_val % sample_rate) == 0) {
-                bpf_ringbuf_output(&events, pkt_info, sizeof(*pkt_info), 0);
+                bpf_ringbuf_output(&blocklog_events, pkt_info, sizeof(*pkt_info), 0);
             }
         }
     }

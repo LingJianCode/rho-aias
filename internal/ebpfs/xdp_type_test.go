@@ -226,7 +226,7 @@ func TestNewEventConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NewEventConfig(tt.enabled, tt.sampleRate)
+			got := NewBlocklogEventConfig(tt.enabled, tt.sampleRate)
 			if got != tt.want {
 				t.Errorf("NewEventConfig(%v, %v) = %v, want %v", tt.enabled, tt.sampleRate, got, tt.want)
 			}
@@ -235,7 +235,7 @@ func TestNewEventConfig(t *testing.T) {
 }
 
 func TestDefaultEventConfig(t *testing.T) {
-	got := DefaultEventConfig()
+	got := DefaultBlocklogEventConfig()
 	want := EventConfig{
 		Enabled:    0,    // 默认关闭
 		SampleRate: 1000, // 默认采样率

@@ -34,14 +34,14 @@ func NewBlockValueWithPreserve(sourceMask uint32, priority uint32, expiry uint64
 // 每个来源占用一个 bit，支持最多 31 个来源
 // 优先级: Manual > WAF > DDoS > Intel
 const (
-	SourceMaskIpsum      = 0x01 // Bit 0: IPSum 威胁情报
-	SourceMaskSpamhaus   = 0x02 // Bit 1: Spamhaus 威胁情报
-	SourceMaskManual     = 0x04 // Bit 2: 手动添加
-	SourceMaskWAF        = 0x08 // Bit 3: WAF
-	SourceMaskDDoS       = 0x10 // Bit 4: DDoS 异常检测
-	SourceMaskRateLimit  = 0x20 // Bit 5: 频率限制封禁
-	SourceMaskAnomaly    = 0x40 // Bit 6: 异常流量检测
-	SourceMaskFailGuard  = 0x80 // Bit 7: SSH 防爆破
+	SourceMaskIpsum     = 0x01 // Bit 0: IPSum 威胁情报
+	SourceMaskSpamhaus  = 0x02 // Bit 1: Spamhaus 威胁情报
+	SourceMaskManual    = 0x04 // Bit 2: 手动添加
+	SourceMaskWAF       = 0x08 // Bit 3: WAF
+	SourceMaskDDoS      = 0x10 // Bit 4: DDoS 异常检测
+	SourceMaskRateLimit = 0x20 // Bit 5: 频率限制封禁
+	SourceMaskAnomaly   = 0x40 // Bit 6: 异常流量检测
+	SourceMaskFailGuard = 0x80 // Bit 7: SSH 防爆破
 )
 
 // Rule 规则结构体 - 包含来源信息
@@ -53,7 +53,7 @@ type Rule struct {
 
 // IPv4TrieKey IPv4 CIDR LPM Trie 键结构
 type IPv4TrieKey struct {
-	PrefixLen uint32 // __u32 - CIDR 前缀长度
+	PrefixLen uint32  // __u32 - CIDR 前缀长度
 	Addr      [4]byte // IPv4 地址
 }
 
@@ -145,13 +145,13 @@ func NewGeoConfig(enabled bool, mode uint32) GeoConfig {
 
 // EventConfig 事件上报配置结构 - 与 eBPF C 中的 struct event_config 对应
 type EventConfig struct {
-	Enabled    uint32   // 事件上报启用标志 (0=禁用, 1=启用)
-	SampleRate uint32   // 采样率：每 N 个丢弃包上报 1 个 (例如 1000 = 0.1%)
+	Enabled    uint32    // 事件上报启用标志 (0=禁用, 1=启用)
+	SampleRate uint32    // 采样率：每 N 个丢弃包上报 1 个 (例如 1000 = 0.1%)
 	Padding    [2]uint32 // 对齐填充
 }
 
-// NewEventConfig 创建新的 EventConfig
-func NewEventConfig(enabled bool, sampleRate uint32) EventConfig {
+// NewBlocklogEventConfig 创建新的 EventConfig
+func NewBlocklogEventConfig(enabled bool, sampleRate uint32) EventConfig {
 	enabledVal := uint32(0)
 	if enabled {
 		enabledVal = 1
@@ -167,10 +167,10 @@ func NewEventConfig(enabled bool, sampleRate uint32) EventConfig {
 	}
 }
 
-// DefaultEventConfig 返回默认的事件配置
+// DefaultBlocklogEventConfig 返回默认的事件配置
 // 默认关闭上报，采样率 1000 (0.1%)
-func DefaultEventConfig() EventConfig {
-	return NewEventConfig(false, 1000)
+func DefaultBlocklogEventConfig() EventConfig {
+	return NewBlocklogEventConfig(false, 1000)
 }
 
 // ============================================
@@ -179,10 +179,10 @@ func DefaultEventConfig() EventConfig {
 
 // AnomalyConfig 异常检测采样配置结构 - 与 eBPF C 中的 struct anomaly_config 对应
 type AnomalyConfig struct {
-	Enabled           uint32   // 异常检测采样启用标志 (0=禁用, 1=启用)
-	SampleRate        uint32   // 采样率：每 N 个包采样 1 个 (例如 100 = 1%)
-	PortFilterEnabled uint32   // 端口过滤启用标志 (0=监控所有端口, 1=仅监控配置的端口)
-	Padding           uint32   // 对齐填充
+	Enabled           uint32 // 异常检测采样启用标志 (0=禁用, 1=启用)
+	SampleRate        uint32 // 采样率：每 N 个包采样 1 个 (例如 100 = 1%)
+	PortFilterEnabled uint32 // 端口过滤启用标志 (0=监控所有端口, 1=仅监控配置的端口)
+	Padding           uint32 // 对齐填充
 }
 
 // NewAnomalyConfig 创建新的 AnomalyConfig
@@ -202,5 +202,3 @@ func NewAnomalyConfig(enabled bool, sampleRate uint32) AnomalyConfig {
 		Padding:           0,
 	}
 }
-
-

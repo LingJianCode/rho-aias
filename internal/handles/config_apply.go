@@ -31,18 +31,18 @@ type rateLimitConfigRequest struct {
 }
 
 type anomalyDetectionConfigRequest struct {
-	Enabled    *bool                       `json:"enabled" validate:"omitempty"`
-	MinPackets *int                        `json:"min_packets" validate:"omitempty,gte=1,lte=100000"`
-	Ports      []int                       `json:"ports" validate:"omitempty,dive,gte=1,lte=65535"`
-	Baseline   *anomaly.BaselineConfig     `json:"baseline" validate:"omitempty"`
-	Attacks    *anomaly.AttacksConfig      `json:"attacks" validate:"omitempty"`
+	Enabled    *bool                   `json:"enabled" validate:"omitempty"`
+	MinPackets *int                    `json:"min_packets" validate:"omitempty,gte=1,lte=100000"`
+	Ports      []int                   `json:"ports" validate:"omitempty,dive,gte=1,lte=65535"`
+	Baseline   *anomaly.BaselineConfig `json:"baseline" validate:"omitempty"`
+	Attacks    *anomaly.AttacksConfig  `json:"attacks" validate:"omitempty"`
 }
 
 type geoBlockingConfigRequest struct {
-	Enabled          *bool                        `json:"enabled" validate:"omitempty"`
-	Mode             string                       `json:"mode" validate:"omitempty,oneof=whitelist blacklist"`
-	AllowedCountries []string                     `json:"allowed_countries" validate:"omitempty,dive,len=2"`
-	Sources          map[string]geoSourceConfig    `json:"sources" validate:"omitempty"`
+	Enabled          *bool                      `json:"enabled" validate:"omitempty"`
+	Mode             string                     `json:"mode" validate:"omitempty,oneof=whitelist blacklist"`
+	AllowedCountries []string                   `json:"allowed_countries" validate:"omitempty,dive,len=2"`
+	Sources          map[string]geoSourceConfig `json:"sources" validate:"omitempty"`
 }
 
 type geoSourceConfig struct {
@@ -53,7 +53,7 @@ type geoSourceConfig struct {
 }
 
 type intelConfigRequest struct {
-	Enabled *bool                       `json:"enabled"`
+	Enabled *bool                        `json:"enabled"`
 	Sources map[string]intelSourceConfig `json:"sources"`
 }
 
@@ -88,7 +88,9 @@ func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
 	findTime := intValue(mapInt(current, "find_time", 0), req.FindTime)
 	banDuration := intValue(mapInt(current, "ban_duration", 0), req.BanDuration)
 	mode := req.Mode
-	if mode == "" { mode = mapString(current, "mode", "") }
+	if mode == "" {
+		mode = mapString(current, "mode", "")
+	}
 
 	h.failguardMonitor.UpdateConfig(enabled, maxRetry, findTime, banDuration, mode)
 
@@ -174,7 +176,11 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 		Baseline:        baselineValue(rawCfg.Baseline, req.Baseline),
 		Attacks:         attacksValue(rawCfg.Attacks, req.Attacks),
 	}
-	if req.Ports != nil { cfg.Ports = req.Ports } else { cfg.Ports = rawCfg.Ports }
+	if req.Ports != nil {
+		cfg.Ports = req.Ports
+	} else {
+		cfg.Ports = rawCfg.Ports
+	}
 
 	h.anomalyDetector.UpdateConfig(cfg)
 
@@ -183,7 +189,9 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 			logger.Warnf("[ConfigAPI] Failed to set eBPF anomaly config: %v", err)
 		}
 		ports := make([]uint32, len(cfg.Ports))
-		for i, p := range cfg.Ports { ports[i] = uint32(p) }
+		for i, p := range cfg.Ports {
+			ports[i] = uint32(p)
+		}
 		if err := h.anomalyController.SetAnomalyPortFilter(len(ports) > 0, ports); err != nil {
 			logger.Warnf("[ConfigAPI] Failed to set eBPF anomaly port filter: %v", err)
 		}
@@ -233,8 +241,14 @@ func (h *ConfigHandle) applyGeoBlockingConfig(raw json.RawMessage) error {
 	}
 	current := h.geoBlockingMgr.GetConfig()
 	enabled := boolValue(mapBool(current, "enabled", false), req.Enabled)
-	mode := req.Mode; if mode == "" { mode = mapString(current, "mode", "") }
-	countries := req.AllowedCountries; if countries == nil { countries = mapStringSlice(current, "allowed_countries") }
+	mode := req.Mode
+	if mode == "" {
+		mode = mapString(current, "mode", "")
+	}
+	countries := req.AllowedCountries
+	if countries == nil {
+		countries = mapStringSlice(current, "allowed_countries")
+	}
 	if err := h.geoBlockingMgr.UpdateConfig(enabled, mode, countries); err != nil {
 		return fmt.Errorf("failed to update geoblocking base config: %w", err)
 	}
@@ -267,7 +281,9 @@ func (h *ConfigHandle) applyIntelConfig(raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
-	if req.Enabled != nil { h.intelMgr.UpdateConfig(*req.Enabled) }
+	if req.Enabled != nil {
+		h.intelMgr.UpdateConfig(*req.Enabled)
+	}
 
 	currentIntel := h.intelMgr.GetConfig()
 	for sourceID, srcCfg := range req.Sources {
@@ -287,18 +303,29 @@ func (h *ConfigHandle) applyIntelConfig(raw json.RawMessage) error {
 }
 
 func (h *ConfigHandle) applyXDPEventsConfig(raw json.RawMessage) error {
-	if h.xdp == nil { return fmt.Errorf("xdp_events module is not initialized (XDP not available)") }
+	if h.xdp == nil {
+		return fmt.Errorf("xdp_events module is not initialized (XDP not available)")
+	}
 
 	var req xdpEventsConfigRequest
-	if err := json.Unmarshal(raw, &req); err != nil { return fmt.Errorf("invalid config format: %w", err) }
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return fmt.Errorf("invalid config format: %w", err)
+	}
 
-	currentCfg, _ := h.xdp.GetEventConfig()
+	currentCfg, _ := h.xdp.GetBlocklogEventConfig()
 	enabled := currentCfg.Enabled == 1
 	sampleRate := currentCfg.SampleRate
-	if req.Enabled != nil { enabled = *req.Enabled }
-	if req.SampleRate != nil { sampleRate = *req.SampleRate; if sampleRate == 0 { sampleRate = 1 } }
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	if req.SampleRate != nil {
+		sampleRate = *req.SampleRate
+		if sampleRate == 0 {
+			sampleRate = 1
+		}
+	}
 
-	if err := h.xdp.SetEventConfig(enabled, sampleRate); err != nil {
+	if err := h.xdp.SetBlocklogEventConfig(enabled, sampleRate); err != nil {
 		return fmt.Errorf("failed to set xdp event config: %w", err)
 	}
 	logger.Infof("[ConfigAPI] XDPEvents config updated: enabled=%v, sample_rate=%d", enabled, sampleRate)
@@ -308,17 +335,27 @@ func (h *ConfigHandle) applyXDPEventsConfig(raw json.RawMessage) error {
 // ========== 辅助函数 ==========
 
 func tryStart(startFn func() error, prefix string) {
-	if err := startFn(); err != nil { logger.Warnf("%s start failed: %v", prefix, err) } else { logger.Info(prefix + " started") }
+	if err := startFn(); err != nil {
+		logger.Warnf("%s start failed: %v", prefix, err)
+	} else {
+		logger.Info(prefix + " started")
+	}
 }
 
 func getXDPEventsRuntimeConfig(xdp *ebpfs.Xdp) map[string]interface{} {
-	if xdp == nil { return nil }
-	config, err := xdp.GetEventConfig()
-	if err != nil { config = ebpfs.DefaultEventConfig() }
+	if xdp == nil {
+		return nil
+	}
+	config, err := xdp.GetBlocklogEventConfig()
+	if err != nil {
+		config = ebpfs.DefaultBlocklogEventConfig()
+	}
 	return map[string]interface{}{
-		"enabled": config.Enabled == 1,
+		"enabled":     config.Enabled == 1,
 		"sample_rate": config.SampleRate,
 	}
 }
 
-func (h *ConfigHandle) getXDPEventsRuntimeConfig() map[string]interface{} { return getXDPEventsRuntimeConfig(h.xdp) }
+func (h *ConfigHandle) getXDPEventsRuntimeConfig() map[string]interface{} {
+	return getXDPEventsRuntimeConfig(h.xdp)
+}

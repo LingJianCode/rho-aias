@@ -121,9 +121,9 @@ func (h *BlockLogHandle) GetEventStatus(c *gin.Context) {
 		response.OK(c, EventStatusResponse{Enabled: false, SampleRate: 0})
 		return
 	}
-	config, err := h.xdp.GetEventConfig()
+	config, err := h.xdp.GetBlocklogEventConfig()
 	if err != nil {
-		config = ebpfs.DefaultEventConfig()
+		config = ebpfs.DefaultBlocklogEventConfig()
 	}
 
 	response.OK(c, EventStatusResponse{

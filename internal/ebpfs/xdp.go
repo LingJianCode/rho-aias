@@ -67,7 +67,7 @@ func (x *Xdp) startInternal() error {
 		return fmt.Errorf("failed to load eBPF objects: %s", err.Error())
 	}
 	x.objects = &ebpfObj
-	x.reader, err = ringbuf.NewReader(x.objects.Events)
+	x.reader, err = ringbuf.NewReader(x.objects.BlocklogEvents)
 	if err != nil {
 		x.closeResources()
 		return fmt.Errorf("failed to create ringbuf reader: %s", err.Error())
@@ -180,12 +180,12 @@ func (x *Xdp) mapHasEntries(m *ebpf.Map) bool {
 // 事件监控
 // ============================================
 
-func (x *Xdp) MonitorEvents() {
-	logger.Info("[XDP] MonitorEvents started")
+func (x *Xdp) MonitorBlockLogEvents() {
+	logger.Info("[XDP] MonitorBlockLogEvents started")
 	for {
 		select {
 		case <-x.done:
-			logger.Info("[XDP] MonitorEvents exit")
+			logger.Info("[XDP] MonitorBlockLogEvents exit")
 			return
 		default:
 		}
@@ -203,7 +203,7 @@ func (x *Xdp) MonitorEvents() {
 			}
 			select {
 			case <-x.done:
-				logger.Info("[XDP] MonitorEvents exit after error")
+				logger.Info("[XDP] MonitorBlockLogEvents exit after error")
 				return
 			default:
 				continue
