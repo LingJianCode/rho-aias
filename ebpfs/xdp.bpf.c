@@ -144,7 +144,7 @@ struct geo_config {
 
 // Blocklog event reporting configuration map
 // Controls whether to report dropped packet events to userspace
-struct blocklog_config {
+struct blocklog_event_config {
     __u32 enabled;        /* Event reporting enabled flag (0=disabled, 1=enabled) */
     __u32 sample_rate;    /* Sample rate: report 1 out of every N dropped packets (e.g., 1000 = 0.1%) */
     __u32 padding[2];     /* Alignment padding to 16 bytes */
@@ -153,9 +153,9 @@ struct blocklog_config {
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, __u32);
-    __type(value, struct blocklog_config);
+    __type(value, struct blocklog_event_config);
     __uint(max_entries, 1);
-} blocklog_config SEC(".maps");
+} blocklog_event_config SEC(".maps");
 
 // Anomaly detection configuration map
 // Controls whether to sample packets for anomaly detection
@@ -631,7 +631,7 @@ submit:
 drop_and_report:
     {
         __u32 config_key = 0;
-        struct blocklog_config *cfg = bpf_map_lookup_elem(&blocklog_config, &config_key);
+        struct blocklog_event_config *cfg = bpf_map_lookup_elem(&blocklog_event_config, &config_key);
         
         // 只有在配置启用时才上报事件
         if (cfg && cfg->enabled) {

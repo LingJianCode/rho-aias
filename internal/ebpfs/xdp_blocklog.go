@@ -8,14 +8,14 @@ package ebpfs
 func (x *Xdp) SetBlocklogEventConfig(enabled bool, sampleRate uint32) error {
 	config := NewBlocklogEventConfig(enabled, sampleRate)
 	key := uint32(0)
-	return x.objects.BlocklogConfig.Put(&key, &config)
+	return x.objects.BlocklogEventConfig.Put(&key, &config)
 }
 
 // GetBlocklogEventConfig 获取当前事件上报配置
-func (x *Xdp) GetBlocklogEventConfig() (EventConfig, error) {
+func (x *Xdp) GetBlocklogEventConfig() (BlocklogEventConfig, error) {
 	key := uint32(0)
-	config := EventConfig{}
-	if err := x.objects.BlocklogConfig.Lookup(&key, &config); err != nil {
+	config := BlocklogEventConfig{}
+	if err := x.objects.BlocklogEventConfig.Lookup(&key, &config); err != nil {
 		return DefaultBlocklogEventConfig(), err
 	}
 	return config, nil

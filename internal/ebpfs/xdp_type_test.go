@@ -180,13 +180,13 @@ func TestNewEventConfig(t *testing.T) {
 		name       string
 		enabled    bool
 		sampleRate uint32
-		want       EventConfig
+		want       BlocklogEventConfig
 	}{
 		{
 			name:       "enabled with default sample rate",
 			enabled:    true,
 			sampleRate: 1000,
-			want: EventConfig{
+			want: BlocklogEventConfig{
 				Enabled:    1,
 				SampleRate: 1000,
 				Padding:    [2]uint32{0, 0},
@@ -196,7 +196,7 @@ func TestNewEventConfig(t *testing.T) {
 			name:       "disabled with custom sample rate",
 			enabled:    false,
 			sampleRate: 100,
-			want: EventConfig{
+			want: BlocklogEventConfig{
 				Enabled:    0,
 				SampleRate: 100,
 				Padding:    [2]uint32{0, 0},
@@ -206,7 +206,7 @@ func TestNewEventConfig(t *testing.T) {
 			name:       "enabled with sample rate 1",
 			enabled:    true,
 			sampleRate: 1,
-			want: EventConfig{
+			want: BlocklogEventConfig{
 				Enabled:    1,
 				SampleRate: 1,
 				Padding:    [2]uint32{0, 0},
@@ -216,7 +216,7 @@ func TestNewEventConfig(t *testing.T) {
 			name:       "zero sample rate defaults to 1000",
 			enabled:    true,
 			sampleRate: 0,
-			want: EventConfig{
+			want: BlocklogEventConfig{
 				Enabled:    1,
 				SampleRate: 1000, // 默认采样率
 				Padding:    [2]uint32{0, 0},
@@ -236,7 +236,7 @@ func TestNewEventConfig(t *testing.T) {
 
 func TestDefaultEventConfig(t *testing.T) {
 	got := DefaultBlocklogEventConfig()
-	want := EventConfig{
+	want := BlocklogEventConfig{
 		Enabled:    0,    // 默认关闭
 		SampleRate: 1000, // 默认采样率
 		Padding:    [2]uint32{0, 0},

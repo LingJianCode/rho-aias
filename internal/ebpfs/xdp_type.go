@@ -140,18 +140,17 @@ func NewGeoConfig(enabled bool, mode uint32) GeoConfig {
 }
 
 // ============================================
-// Event Reporting 相关类型
+// Blocklog Event Reporting 相关类型
 // ============================================
 
-// EventConfig 事件上报配置结构 - 与 eBPF C 中的 struct event_config 对应
-type EventConfig struct {
+// BlocklogEventConfig 事件上报配置结构 - 与 eBPF C 中的 struct blocklog_event_config 对应
+type BlocklogEventConfig struct {
 	Enabled    uint32    // 事件上报启用标志 (0=禁用, 1=启用)
 	SampleRate uint32    // 采样率：每 N 个丢弃包上报 1 个 (例如 1000 = 0.1%)
 	Padding    [2]uint32 // 对齐填充
 }
 
-// NewBlocklogEventConfig 创建新的 EventConfig
-func NewBlocklogEventConfig(enabled bool, sampleRate uint32) EventConfig {
+func NewBlocklogEventConfig(enabled bool, sampleRate uint32) BlocklogEventConfig {
 	enabledVal := uint32(0)
 	if enabled {
 		enabledVal = 1
@@ -160,7 +159,7 @@ func NewBlocklogEventConfig(enabled bool, sampleRate uint32) EventConfig {
 	if sampleRate == 0 {
 		sampleRate = 1000 // 默认采样率
 	}
-	return EventConfig{
+	return BlocklogEventConfig{
 		Enabled:    enabledVal,
 		SampleRate: sampleRate,
 		Padding:    [2]uint32{0, 0},
@@ -169,7 +168,7 @@ func NewBlocklogEventConfig(enabled bool, sampleRate uint32) EventConfig {
 
 // DefaultBlocklogEventConfig 返回默认的事件配置
 // 默认关闭上报，采样率 1000 (0.1%)
-func DefaultBlocklogEventConfig() EventConfig {
+func DefaultBlocklogEventConfig() BlocklogEventConfig {
 	return NewBlocklogEventConfig(false, 1000)
 }
 
