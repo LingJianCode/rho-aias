@@ -5,20 +5,6 @@ import (
 	"time"
 )
 
-func TestNewCacheData(t *testing.T) {
-	data := NewCacheData()
-
-	if data == nil {
-		t.Fatal("NewCacheData() returned nil")
-	}
-	if data.Version != 1 {
-		t.Errorf("Version = %d, want 1", data.Version)
-	}
-	if data.Sources == nil {
-		t.Error("Sources map should not be nil")
-	}
-}
-
 func TestNewGeoIPData(t *testing.T) {
 	data := NewGeoIPData(SourceMaxMind)
 
@@ -148,37 +134,5 @@ func TestSourceStatus_Struct(t *testing.T) {
 	}
 	if ss.RuleCount != 50 {
 		t.Errorf("SourceStatus.RuleCount = %d, want 50", ss.RuleCount)
-	}
-}
-
-func TestErrGeoIPCacheNotFound(t *testing.T) {
-	if ErrGeoIPCacheNotFound.Error() != "geoip cache not found" {
-		t.Errorf("Error message = %v, want 'geoip cache not found'", ErrGeoIPCacheNotFound)
-	}
-}
-
-func TestCacheData_Struct(t *testing.T) {
-	data := CacheData{
-		Version:   1,
-		Timestamp: time.Now().Unix(),
-		Config: GeoConfig{
-			Enabled:          true,
-			Mode:             "whitelist",
-			AllowedCountries: []string{"CN"},
-		},
-		Sources: map[SourceID]GeoIPData{
-			SourceMaxMind: {
-				IPv4CIDR:  []string{"1.0.0.0/24,CN"},
-				Timestamp: time.Now(),
-				Source:    SourceMaxMind,
-			},
-		},
-	}
-
-	if data.Version != 1 {
-		t.Errorf("Version = %d, want 1", data.Version)
-	}
-	if len(data.Sources) != 1 {
-		t.Errorf("Sources length = %d, want 1", len(data.Sources))
 	}
 }

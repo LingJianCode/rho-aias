@@ -3,8 +3,6 @@
 package threatintel
 
 import (
-	"encoding/gob"
-	"errors"
 	"time"
 
 	"rho-aias/internal/feed"
@@ -29,13 +27,6 @@ type IntelData struct {
 	Source    SourceID  // 数据来源标识
 }
 
-// CacheData 持久化缓存数据结构（使用 gob 二进制格式）
-type CacheData struct {
-	Version   uint32                 // 版本号
-	Timestamp int64                  // Unix 时间戳
-	Sources   map[SourceID]IntelData // 各情报源的数据
-}
-
 // Status 威胁情报模块状态
 type Status struct {
 	Enabled    bool                      `json:"enabled"`     // 是否启用威胁情报功能
@@ -57,15 +48,6 @@ func NewIntelData(source SourceID) *IntelData {
 	}
 }
 
-// NewCacheData 创建新的缓存数据
-func NewCacheData() *CacheData {
-	return &CacheData{
-		Version:   1,
-		Timestamp: time.Now().Unix(),
-		Sources:   make(map[SourceID]IntelData),
-	}
-}
-
 // AddIPv4 添加 IPv4 地址（精确匹配）
 func (d *IntelData) AddIPv4(ip string) {
 	d.IPv4Exact = append(d.IPv4Exact, ip)
@@ -81,11 +63,7 @@ func (d *IntelData) TotalCount() int {
 	return len(d.IPv4Exact) + len(d.IPv4CIDR)
 }
 
-var ErrThreatIntelCacheNotFound = errors.New("threat intelligence cache not found")
-
-// 初始化 gob 编码器，注册自定义类型
-func init() {
-	gob.Register(SourceID(""))
-	gob.Register(IntelData{})
-	gob.Register(CacheData{})
+// sourceFileExt 根据数据格式返回文件扩展名
+func sourceFileExt(format string) string {
+	return ".txt"
 }

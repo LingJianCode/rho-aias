@@ -1,8 +1,6 @@
 package geoblocking
 
 import (
-	"encoding/gob"
-	"errors"
 	"time"
 
 	"rho-aias/internal/feed"
@@ -28,14 +26,6 @@ func (d *GeoIPData) TotalCount() int {
 	return len(d.IPv4CIDR)
 }
 
-// CacheData 持久化缓存数据结构
-type CacheData struct {
-	Version   uint32
-	Timestamp int64
-	Config    GeoConfig
-	Sources   map[SourceID]GeoIPData
-}
-
 // GeoConfig 地域封禁配置
 type GeoConfig struct {
 	Enabled              bool     `json:"enabled"`
@@ -57,24 +47,6 @@ type Status struct {
 // SourceStatus 单个 GeoIP 数据源的状态（复用公共类型）
 type SourceStatus = feed.SourceStatus
 
-var ErrGeoIPCacheNotFound = errors.New("geoip cache not found")
-
-// 初始化 gob 编码器，注册自定义类型
-func init() {
-	gob.Register(SourceID(""))
-	gob.Register(GeoIPData{})
-	gob.Register(CacheData{})
-}
-
-// NewCacheData 创建新的缓存数据
-func NewCacheData() *CacheData {
-	return &CacheData{
-		Version:   1,
-		Timestamp: time.Now().Unix(),
-		Sources:   make(map[SourceID]GeoIPData),
-	}
-}
-
 // NewGeoIPData 创建新的 GeoIP 数据
 func NewGeoIPData(source SourceID) *GeoIPData {
 	return &GeoIPData{
@@ -92,4 +64,14 @@ func (d *GeoIPData) AddCIDR(cidr string) {
 // AddCIDRs 批量添加 CIDR 规则
 func (d *GeoIPData) AddCIDRs(cidrs []string) {
 	d.IPv4CIDR = append(d.IPv4CIDR, cidrs...)
+}
+
+// sourceFileExt 根据数据格式返回文件扩展名
+func sourceFileExt(format string) string {
+	switch format {
+	case "maxmind-db":
+		return ".mmdb"
+	default:
+		return ".txt"
+	}
 }

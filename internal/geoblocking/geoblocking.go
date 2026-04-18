@@ -3,6 +3,8 @@ package geoblocking
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -17,17 +19,17 @@ import (
 
 // Manager GeoIP 管理器
 type Manager struct {
-	config  *config.GeoBlockingConfig // GeoBlocking 配置
-	xdp     *ebpfs.Xdp                // XDP eBPF 程序接口
-	fetcher *feed.Fetcher             // 数据获取器（公共）
-	parser  *Parser                   // 数据解析器
-	cache   *feed.Cache[CacheData]    // 持久化缓存（公共泛型）
-	syncer  *Syncer                   // 内核同步器
-	cron    *cron.Cron                // Cron 调度器
-	jobIDs  map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
-	done    chan struct{}             // 停止信号
-	stopOnce sync.Once               // 确保 Stop 只执行一次
-	mu      sync.RWMutex              // 读写锁
+	config     *config.GeoBlockingConfig // GeoBlocking 配置
+	xdp        *ebpfs.Xdp               // XDP eBPF 程序接口
+	fetcher    *feed.Fetcher            // 数据获取器（公共）
+	parser     *Parser                  // 数据解析器
+	rawFileDir string                   // 原始文件持久化目录
+	syncer     *Syncer                  // 内核同步器
+	cron       *cron.Cron               // Cron 调度器
+	jobIDs     map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
+	done       chan struct{}            // 停止信号
+	stopOnce   sync.Once                // 确保 Stop 只执行一次
+	mu         sync.RWMutex             // 读写锁
 
 	// 状态管理
 	status       *Status                    // 模块状态
@@ -45,7 +47,7 @@ func NewManager(cfg *config.GeoBlockingConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Man
 		xdp:           xdp,
 		fetcher:       feed.NewFetcher(30 * time.Second),
 		parser:        NewParser(),
-		cache:         feed.NewCache[CacheData](cfg.PersistenceDir, "geoip_cache.bin"),
+		rawFileDir:    cfg.PersistenceDir,
 		syncer:        NewSyncer(xdp, cfg.BatchSize),
 		done:          make(chan struct{}),
 		sourceStatus:  make(map[SourceID]*SourceStatus),
@@ -72,11 +74,11 @@ func (m *Manager) Start() error {
 
 	logger.Info("[GeoBlocking] Starting geo-blocking manager...")
 
-	// 1. 加载本地缓存（离线启动）
-	if err := m.loadFromCache(); err != nil {
-		logger.Warnf("[GeoBlocking] Failed to load cache: %v", err)
+	// 1. 从本地原始文件加载（离线启动支持）
+	if err := m.loadFromRawFiles(); err != nil {
+		logger.Warnf("[GeoBlocking] Failed to load raw files: %v", err)
 	} else {
-		logger.Info("[GeoBlocking] Loaded cache successfully")
+		logger.Info("[GeoBlocking] Loaded raw files successfully")
 	}
 
 	// 2. 创建 Cron 调度器
@@ -123,9 +125,6 @@ func (m *Manager) scheduleSource(sourceID SourceID, src config.GeoIPSource) erro
 			logger.Errorf("[GeoBlocking] [%s] update failed: %v", sourceID, err)
 			m.updateSourceStatus(sourceID, false, 0, err.Error())
 		}
-		if err := m.saveCache(); err != nil {
-			logger.Errorf("[GeoBlocking] Failed to save cache: %v", err)
-		}
 	}))
 
 	m.jobIDs[sourceID] = jobID
@@ -157,10 +156,6 @@ func (m *Manager) updateAllSources() {
 			logger.Errorf("[GeoBlocking] [%s] update failed: %v", sourceID, err)
 			m.updateSourceStatus(sourceID, false, 0, err.Error())
 		}
-	}
-
-	if err := m.saveCache(); err != nil {
-		logger.Errorf("[GeoBlocking] Failed to save cache: %v", err)
 	}
 
 	logger.Info("[GeoBlocking] Update completed")
@@ -212,7 +207,12 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 	// 4. 更新状态
 	m.updateSourceStatus(sourceID, true, parsed.TotalCount(), "")
 
-	// 5. 记录成功状态 + 清理旧记录
+	// 5. 保存原始文件到本地
+	if err := m.saveRawFile(sourceID, src.Format, data); err != nil {
+		logger.Warnf("[GeoBlocking] [%s] Failed to save raw file: %v", sourceID, err)
+	}
+
+	// 6. 记录成功状态 + 清理旧记录
 	duration := time.Since(startTime).Milliseconds()
 	if err := feed.RecordStatus(m.db, feed.SourceTypeGeoBlocking, string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
 		logger.Errorf("[GeoBlocking] [%s] Failed to record status to DB: %v", sourceID, err)
@@ -224,37 +224,52 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 	return nil
 }
 
-// loadFromCache 从本地缓存加载 GeoIP（离线启动支持）
-func (m *Manager) loadFromCache() error {
-	if !m.cache.Exists() {
-		return ErrGeoIPCacheNotFound
-	}
+// loadFromRawFiles 从本地原始文件加载 GeoIP（离线启动支持）
+// 读取各源的原始文件，使用当前配置重新解析后加载到 eBPF map
+func (m *Manager) loadFromRawFiles() error {
+	loadedAny := false
 
-	cacheData, err := m.cache.Load()
-	if err != nil {
-		return err
-	}
-
-	logger.Infof("[GeoBlocking] Loading cache with %d sources...", len(cacheData.Sources))
-
-	now := time.Now()
-
-	for sourceID, data := range cacheData.Sources {
-		logger.Infof("[GeoBlocking] [%s] Loading %d rules from cache", sourceID, data.TotalCount())
-
-		geoConfig := &GeoConfig{
-			Enabled:              cacheData.Config.Enabled,
-			Mode:                 cacheData.Config.Mode,
-			AllowedCountries:     cacheData.Config.AllowedCountries,
-			AllowPrivateNetworks: m.config.AllowPrivateNetworks,
+	for id, src := range m.config.Sources {
+		if !src.Enabled {
+			continue
 		}
-		if err := m.syncer.LoadAll(&data, geoConfig); err != nil {
-			logger.Warnf("[GeoBlocking] [%s] Failed to load from cache: %v", sourceID, err)
+
+		sourceID := SourceID(id)
+		filePath := m.getRawFilePath(sourceID, src.Format)
+		rawBytes, err := os.ReadFile(filePath)
+		if err != nil {
+			logger.Warnf("[GeoBlocking] [%s] Raw file not found (%s), skipping", sourceID, filePath)
+			continue
+		}
+
+		logger.Infof("[GeoBlocking] [%s] Loading from raw file: %s (%d bytes)", sourceID, filePath, len(rawBytes))
+
+		// 用当前配置重新解析（天然解决配置变更一致性问题）
+		parsed, err := m.parser.Parse(rawBytes, src.Format, m.config.AllowedCountries, sourceID)
+		if err != nil {
+			logger.Warnf("[GeoBlocking] [%s] Failed to parse raw file: %v", sourceID, err)
 			m.setSourceStatusInline(sourceID, false, 0, err.Error())
 			continue
 		}
 
-		m.setSourceStatusInline(sourceID, true, data.TotalCount(), "")
+		geoConfig := &GeoConfig{
+			Enabled:              m.config.Enabled,
+			Mode:                 m.config.Mode,
+			AllowedCountries:     m.config.AllowedCountries,
+			AllowPrivateNetworks: m.config.AllowPrivateNetworks,
+		}
+		if err := m.syncer.LoadAll(parsed, geoConfig); err != nil {
+			logger.Warnf("[GeoBlocking] [%s] Failed to load from raw file: %v", sourceID, err)
+			m.setSourceStatusInline(sourceID, false, 0, err.Error())
+			continue
+		}
+
+		m.setSourceStatusInline(sourceID, true, parsed.TotalCount(), "")
+		loadedAny = true
+	}
+
+	if !loadedAny {
+		return fmt.Errorf("no raw files found for enabled sources")
 	}
 
 	// 计算总规则数
@@ -263,7 +278,7 @@ func (m *Manager) loadFromCache() error {
 		totalRules += s.RuleCount
 	}
 	m.status.TotalRules = totalRules
-	m.status.LastUpdate = now
+	m.status.LastUpdate = time.Now()
 
 	return nil
 }
@@ -286,30 +301,31 @@ func (m *Manager) setSourceStatusInline(sourceID SourceID, success bool, ruleCou
 	m.status.Sources[sourceID] = *status
 }
 
-// saveCache 保存 GeoIP 到本地缓存
-func (m *Manager) saveCache() error {
-	cacheData := NewCacheData()
-	cacheData.Config = GeoConfig{
-		Enabled:          m.config.Enabled,
-		Mode:             m.config.Mode,
-		AllowedCountries: m.config.AllowedCountries,
+// getRawFilePath 返回指定源的原始文件路径
+func (m *Manager) getRawFilePath(sourceID SourceID, format string) string {
+	ext := sourceFileExt(format)
+	return filepath.Join(m.rawFileDir, string(sourceID)+ext)
+}
+
+// saveRawFile 原子写入原始文件到本地磁盘
+func (m *Manager) saveRawFile(sourceID SourceID, format string, data []byte) error {
+	path := m.getRawFilePath(sourceID, format)
+	tmpPath := path + ".tmp"
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create raw file dir failed: %w", err)
 	}
 
-	m.mu.RLock()
-	for sourceID, status := range m.sourceStatus {
-		if status.Success && status.RuleCount > 0 {
-			rules, _ := m.xdp.GetGeoIPRules()
-			data := NewGeoIPData(sourceID)
-
-			for _, r := range rules {
-				data.AddCIDR(r)
-			}
-			cacheData.Sources[sourceID] = *data
-		}
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("write tmp file failed: %w", err)
 	}
-	m.mu.RUnlock()
 
-	return m.cache.Save(*cacheData)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename raw file failed: %w", err)
+	}
+
+	logger.Infof("[GeoBlocking] [%s] Saved raw file: %s (%d bytes)", sourceID, path, len(data))
+	return nil
 }
 
 // updateSourceStatus 更新 GeoIP 源状态
@@ -438,9 +454,6 @@ func (m *Manager) UpdateConfig(enabled bool, mode string, countries []string) er
 		go func() {
 			logger.Info("[GeoBlocking] Immediate fetch triggered by config enable")
 			m.updateAllSources()
-			if err := m.saveCache(); err != nil {
-				logger.Errorf("[GeoBlocking] Failed to save cache after immediate fetch: %v", err)
-			}
 		}()
 	case !enabled && wasEnabled:
 		// 从启用→禁用：立即清理所有 GeoIP 规则并从 eBPF map 中移除
@@ -450,9 +463,6 @@ func (m *Manager) UpdateConfig(enabled bool, mode string, countries []string) er
 				logger.Errorf("[GeoBlocking] Cleanup failed: %v", err)
 			} else {
 				logger.Info("[GeoBlocking] Cleanup completed, all GeoIP rules removed from eBPF")
-			}
-			if err := m.saveCache(); err != nil {
-				logger.Errorf("[GeoBlocking] Failed to save cache after cleanup: %v", err)
 			}
 		}()
 	}
@@ -534,9 +544,6 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, periodic boo
 		m.mu.RUnlock()
 		if err := m.updateSource(SourceID(sourceID), srcCfg); err != nil {
 			logger.Errorf("[GeoBlocking] [%s] Immediate fetch after config change failed: %v", sourceID, err)
-		}
-		if err := m.saveCache(); err != nil {
-			logger.Errorf("[GeoBlocking] Failed to save cache after source config update: %v", err)
 		}
 	}()
 
