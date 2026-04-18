@@ -82,9 +82,8 @@ func (c *blockLogCounters) increment(m map[string]*int64, key string) {
 // snapshot 读取当前计数器快照（用于整点轮转时刷入 DB）
 func (c *blockLogCounters) snapshot() Stats {
 	stats := Stats{
-		TotalBlocked:  int(atomic.LoadInt64(&c.totalBlocked)),
-		ByRuleSource:  make(map[string]int),
-		TopBlockedIPs: []IPCount{},
+		TotalBlocked: int(atomic.LoadInt64(&c.totalBlocked)),
+		ByRuleSource: make(map[string]int),
 	}
 
 	c.mu.RLock()
@@ -93,19 +92,7 @@ func (c *blockLogCounters) snapshot() Stats {
 			stats.ByRuleSource[k] = int(cnt)
 		}
 	}
-	for k, v := range c.topIPs {
-		if cnt := atomic.LoadInt64(v); cnt > 0 {
-			stats.TopBlockedIPs = append(stats.TopBlockedIPs, IPCount{IP: k, Count: int(cnt)})
-		}
-	}
 	c.mu.RUnlock()
-
-	sort.Slice(stats.TopBlockedIPs, func(i, j int) bool {
-		return stats.TopBlockedIPs[i].Count > stats.TopBlockedIPs[j].Count
-	})
-	if len(stats.TopBlockedIPs) > 50 {
-		stats.TopBlockedIPs = stats.TopBlockedIPs[:50]
-	}
 
 	return stats
 }
@@ -118,6 +105,42 @@ func (c *blockLogCounters) reset() {
 	c.byRuleSource = make(map[string]*int64)
 	c.topIPs = make(map[string]*int64)
 	c.mu.Unlock()
+}
+
+// snapshotTopIPs 读取当前 TopIP 快照（仅用于 GetTopIPs 融合查询）
+func (c *blockLogCounters) snapshotTopIPs(limit int) []IPCount {
+	c.mu.RLock()
+	ips := make([]IPCount, 0, len(c.topIPs))
+	for k, v := range c.topIPs {
+		if cnt := atomic.LoadInt64(v); cnt > 0 {
+			ips = append(ips, IPCount{IP: k, Count: int(cnt)})
+		}
+	}
+	c.mu.RUnlock()
+
+	sort.Slice(ips, func(i, j int) bool { return ips[i].Count > ips[j].Count })
+	if len(ips) > limit {
+		ips = ips[:limit]
+	}
+	return ips
+}
+
+// snapshotTopIPsAll 读取所有 TopIP 快照（用于整点轮转时写入 DB）
+func (c *blockLogCounters) snapshotTopIPsAll() []IPCount {
+	c.mu.RLock()
+	ips := make([]IPCount, 0, len(c.topIPs))
+	for k, v := range c.topIPs {
+		if cnt := atomic.LoadInt64(v); cnt > 0 {
+			ips = append(ips, IPCount{IP: k, Count: int(cnt)})
+		}
+	}
+	c.mu.RUnlock()
+
+	sort.Slice(ips, func(i, j int) bool { return ips[i].Count > ips[j].Count })
+	if len(ips) > 50 {
+		ips = ips[:50]
+	}
+	return ips
 }
 
 // NewBlockLogWithPersistence 创建带持久化的阻断日志管理器
@@ -254,9 +277,8 @@ type RecordFilter struct {
 
 // Stats 统计信息
 type Stats struct {
-	TotalBlocked  int            `json:"total_blocked"`   // 总阻断数
-	ByRuleSource  map[string]int `json:"by_rule_source"`  // 按规则来源统计
-	TopBlockedIPs []IPCount      `json:"top_blocked_ips"` // 被阻断最多的 IP
+	TotalBlocked int            `json:"total_blocked"`  // 总阻断数
+	ByRuleSource map[string]int `json:"by_rule_source"` // 按规则来源统计
 }
 
 // IPCount IP 计数
@@ -292,24 +314,6 @@ func (bl *BlockLog) GetStats() Stats {
 		dbStats.ByRuleSource[k] += v
 	}
 
-	// 合并 TopBlockedIPs：map 聚合后排序
-	ipMap := make(map[string]int)
-	for _, ip := range dbStats.TopBlockedIPs {
-		ipMap[ip.IP] += ip.Count
-	}
-	for _, ip := range memSnap.TopBlockedIPs {
-		ipMap[ip.IP] += ip.Count
-	}
-	mergedIPs := make([]IPCount, 0, len(ipMap))
-	for ip, count := range ipMap {
-		mergedIPs = append(mergedIPs, IPCount{IP: ip, Count: count})
-	}
-	sort.Slice(mergedIPs, func(i, j int) bool { return mergedIPs[i].Count > mergedIPs[j].Count })
-	if len(mergedIPs) > 10 {
-		mergedIPs = mergedIPs[:10]
-	}
-	dbStats.TopBlockedIPs = mergedIPs
-
 	return dbStats
 }
 
@@ -320,8 +324,9 @@ func (bl *BlockLog) SnapshotHourlyCounters(t time.Time) {
 	}
 	hourKey := t.Format("2006-01-02T15")
 	snap := bl.counters.snapshot()
+	topIPs := bl.counters.snapshotTopIPsAll()
 	if snap.TotalBlocked > 0 {
-		bl.statsStore.SnapshotHour(hourKey, snap)
+		bl.statsStore.SnapshotHour(hourKey, snap, topIPs)
 	}
 	bl.counters.reset()
 }
@@ -348,18 +353,17 @@ func (bl *BlockLog) GetTopIPs(limit int) ([]IPCount, int64) {
 		return nil, 0
 	}
 
-	dbIPs, total := bl.statsStore.GetTopIPs(defaultRetentionDays, limit)
+	dbIPs, _ := bl.statsStore.GetTopIPs(defaultRetentionDays, limit)
 
-	// 融合内存计数器
-	memSnap := bl.counters.snapshot()
+	// 融合内存计数器中的 TopIP
+	memIPs := bl.counters.snapshotTopIPs(limit)
 
 	ipMap := make(map[string]int)
 	for _, ip := range dbIPs {
 		ipMap[ip.IP] += ip.Count
 	}
-	for _, ip := range memSnap.TopBlockedIPs {
+	for _, ip := range memIPs {
 		ipMap[ip.IP] += ip.Count
-		total++
 	}
 
 	mergedIPs := make([]IPCount, 0, len(ipMap))
@@ -371,7 +375,7 @@ func (bl *BlockLog) GetTopIPs(limit int) ([]IPCount, int64) {
 		mergedIPs = mergedIPs[:limit]
 	}
 
-	return mergedIPs, total
+	return mergedIPs, int64(len(ipMap))
 }
 
 // Flush 刷新缓冲区到磁盘

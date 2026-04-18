@@ -27,7 +27,7 @@ func NewStatsStore(db *gorm.DB) *StatsStore {
 }
 
 // SnapshotHour 将指定小时的统计快照写入数据库（整点轮转时调用）
-func (ss *StatsStore) SnapshotHour(hour string, stats Stats) {
+func (ss *StatsStore) SnapshotHour(hour string, stats Stats, topIPs []IPCount) {
 	if ss.db == nil {
 		return
 	}
@@ -66,7 +66,7 @@ func (ss *StatsStore) SnapshotHour(hour string, stats Stats) {
 	}
 
 	// 写入 TopIPs（带 hour 列，支持按时间范围查询）
-	for _, ipCount := range stats.TopBlockedIPs {
+	for _, ipCount := range topIPs {
 		err := ss.db.Exec(
 			`INSERT INTO blocklog_top_ips (hour, ip, count) VALUES (?, ?, ?)
 			 ON CONFLICT(hour, ip) DO UPDATE SET count = count + excluded.count`,
@@ -88,8 +88,7 @@ func (ss *StatsStore) GetAggregatedStats(retentionDays int) Stats {
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).Format("2006-01-02T15")
 
 	stats := Stats{
-		ByRuleSource:  make(map[string]int),
-		TopBlockedIPs: []IPCount{},
+		ByRuleSource: make(map[string]int),
 	}
 
 	// Total
@@ -108,22 +107,6 @@ func (ss *StatsStore) GetAggregatedStats(retentionDays int) Stats {
 		Find(&sourceResults)
 	for _, r := range sourceResults {
 		stats.ByRuleSource[r.DimValue] = int(r.Count)
-	}
-
-	// TopBlockedIPs (from blocklog_top_ips, with time filter)
-	var topIPResults []struct {
-		IP    string `json:"ip"`
-		Total int64  `json:"total"`
-	}
-	ss.db.Model(&models.BlocklogTopIP{}).
-		Select("ip, SUM(count) as total").
-		Where("hour >= ?", cutoff).
-		Group("ip").
-		Order("total DESC").
-		Limit(10).
-		Scan(&topIPResults)
-	for _, r := range topIPResults {
-		stats.TopBlockedIPs = append(stats.TopBlockedIPs, IPCount{IP: r.IP, Count: int(r.Total)})
 	}
 
 	return stats
