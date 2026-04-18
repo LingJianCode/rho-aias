@@ -4,10 +4,10 @@ import (
 	"testing"
 )
 
-func TestNewBlockLog(t *testing.T) {
-	bl := NewBlockLog(100)
+func TestNewManager(t *testing.T) {
+	bl := NewManager(100)
 	if bl == nil {
-		t.Fatal("NewBlockLog returned nil")
+		t.Fatal("NewManager returned nil")
 	}
 	if bl.maxSize != 100 {
 		t.Errorf("Expected maxSize 100, got %d", bl.maxSize)
@@ -18,7 +18,7 @@ func TestNewBlockLog(t *testing.T) {
 }
 
 func TestAddRecord(t *testing.T) {
-	bl := NewBlockLog(10)
+	bl := NewManager(10)
 
 	// 添加记录
 	record := BlockRecord{
@@ -48,7 +48,7 @@ func TestAddRecord(t *testing.T) {
 }
 
 func TestMaxSize(t *testing.T) {
-	bl := NewBlockLog(3)
+	bl := NewManager(3)
 
 	// 添加 5 条记录
 	for i := 0; i < 5; i++ {
@@ -66,7 +66,7 @@ func TestMaxSize(t *testing.T) {
 }
 
 func TestGetRecordsByFilter(t *testing.T) {
-	bl := NewBlockLog(100)
+	bl := NewManager(100)
 
 	// 添加不同类型的记录
 	bl.AddRecord(BlockRecord{SrcIP: "192.168.1.1", MatchType: "ip4_exact", RuleSource: "manual"})
@@ -111,7 +111,7 @@ func TestGetRecordsByFilter(t *testing.T) {
 }
 
 func TestGetStats(t *testing.T) {
-	bl := NewBlockLog(100)
+	bl := NewManager(100)
 
 	// 添加记录
 	bl.AddRecord(BlockRecord{SrcIP: "192.168.1.1", MatchType: "ip4_exact", RuleSource: "manual"})

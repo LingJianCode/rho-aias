@@ -73,7 +73,7 @@ func (r *mockBlockRecorder) waitForBlock(ip string, timeout time.Duration) bool 
 }
 
 // newTestDetector 创建用于测试的 Detector（短间隔）
-func newTestDetector(recorder *mockBlockRecorder) *Detector {
+func newTestDetector(recorder *mockBlockRecorder) *Manager {
 	config := AnomalyDetectionConfig{
 		Enabled:         true,
 		CheckInterval:    1,
@@ -114,11 +114,11 @@ func newTestDetector(recorder *mockBlockRecorder) *Detector {
 			},
 		},
 	}
-	return NewDetector(config, recorder.blockFn, recorder.unblockFn)
+	return NewManager(config, recorder.blockFn, recorder.unblockFn)
 }
 
 // floodIP 持续向 detector 注入攻击流量，直到 stop channel 关闭
-func floodIP(detector *Detector, ip string, protocol uint8, tcpFlags uint8, packetsPerSec int, stop <-chan struct{}) {
+func floodIP(detector *Manager, ip string, protocol uint8, tcpFlags uint8, packetsPerSec int, stop <-chan struct{}) {
 	ticker := time.NewTicker(time.Millisecond * 10) // 100 bursts/sec
 	defer ticker.Stop()
 	perBurst := packetsPerSec / 100
@@ -277,7 +277,7 @@ func TestDetector_Disabled_NoBlock(t *testing.T) {
 			},
 		},
 	}
-	detector := NewDetector(config, recorder.blockFn, recorder.unblockFn)
+	detector := NewManager(config, recorder.blockFn, recorder.unblockFn)
 	if err := detector.Start(); err != nil {
 		t.Fatalf("detector.Start() failed: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestDetector_BaselineAnomaly_EndToEnd(t *testing.T) {
 			AckFlood:  AttackConfig{Enabled: false},
 		},
 	}
-	detector := NewDetector(config, recorder.blockFn, recorder.unblockFn)
+	detector := NewManager(config, recorder.blockFn, recorder.unblockFn)
 	if err := detector.Start(); err != nil {
 		t.Fatalf("detector.Start() failed: %v", err)
 	}

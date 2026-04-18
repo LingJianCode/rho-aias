@@ -81,7 +81,6 @@ type GeoIPSource struct {
 
 // ManualConfig 手动规则配置(包含黑名单和白名单)
 type ManualConfig struct {
-	Enabled        bool   `yaml:"enabled"`         // 是否启用手动规则持久化
 	PersistenceDir string `yaml:"persistence_dir"` // 持久化目录
 	AutoLoad       bool   `yaml:"auto_load"`       // 启动时自动加载
 }

@@ -53,10 +53,10 @@ type IntelConfigUpdater interface {
 type ConfigHandle struct {
 	configService         *services.DynamicConfigService
 	validate              *validator.Validate
-	failguardMonitor      *failguard.Monitor
-	wafMonitor            *waf.Monitor
-	rateLimitMonitor      *ratelimit.Monitor
-	anomalyDetector       *anomaly.Detector
+	failguardMgr    *failguard.Manager
+	wafMgr          *waf.Manager
+	rateLimitMgr    *ratelimit.Manager
+	anomalyDetector       *anomaly.Manager
 	geoBlockingMgr        GeoBlockingConfigUpdater
 	intelMgr              IntelConfigUpdater
 	xdp                   *ebpfs.Xdp
@@ -68,27 +68,24 @@ type ConfigHandle struct {
 
 func NewConfigHandle(
 	configService *services.DynamicConfigService,
-	failguardMonitor *failguard.Monitor,
-	wafMonitor *waf.Monitor,
-	rateLimitMonitor *ratelimit.Monitor,
-	anomalyDetector *anomaly.Detector,
+	failguardMgr *failguard.Manager,
+	wafMgr *waf.Manager,
+	rateLimitMgr *ratelimit.Manager,
+	anomalyDetector *anomaly.Manager,
 	geoBlockingMgr GeoBlockingConfigUpdater,
 	intelMgr IntelConfigUpdater,
 	xdp *ebpfs.Xdp,
+	anomalyController AnomalyController,
+	anomalyRecordPacketFn ebpfs.AnomalyEventCallback,
 ) *ConfigHandle {
 	h := &ConfigHandle{
 		configService, validator.New(),
-		failguardMonitor, wafMonitor, rateLimitMonitor,
-		anomalyDetector, geoBlockingMgr, intelMgr, xdp, nil, nil, nil, sync.Mutex{},
+		failguardMgr, wafMgr, rateLimitMgr,
+		anomalyDetector, geoBlockingMgr, intelMgr, xdp,
+		anomalyController, anomalyRecordPacketFn, nil, sync.Mutex{},
 	}
 	return h
 }
-
-func (h *ConfigHandle) SetAnomalyController(c AnomalyController, f ebpfs.AnomalyEventCallback) {
-	h.anomalyController = c
-	h.anomalyRecordPacketFn = f
-}
-func (h *ConfigHandle) SetXDP(x *ebpfs.Xdp) { h.xdp = x }
 
 // ========== HTTP API Handlers ==========
 
@@ -195,11 +192,11 @@ func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 	switch module {
 	case models.ModuleFailGuard:
-		return h.failguardMonitor.GetConfig()
+		return h.failguardMgr.GetConfig()
 	case models.ModuleWAF:
-		return h.wafMonitor.GetConfig()
+		return h.wafMgr.GetConfig()
 	case models.ModuleRateLimit:
-		return h.rateLimitMonitor.GetConfig()
+		return h.rateLimitMgr.GetConfig()
 	case models.ModuleAnomalyDetection:
 		return h.anomalyDetector.GetConfig()
 	case models.ModuleGeoBlocking:
@@ -311,11 +308,11 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 func (h *ConfigHandle) getMergedConfig(module string) (interface{}, error) {
 	switch module {
 	case models.ModuleFailGuard:
-		return h.failguardMonitor.GetConfig(), nil
+		return h.failguardMgr.GetConfig(), nil
 	case models.ModuleWAF:
-		return h.wafMonitor.GetConfig(), nil
+		return h.wafMgr.GetConfig(), nil
 	case models.ModuleRateLimit:
-		return h.rateLimitMonitor.GetConfig(), nil
+		return h.rateLimitMgr.GetConfig(), nil
 	case models.ModuleAnomalyDetection:
 		return h.anomalyDetector.GetConfig(), nil
 	case models.ModuleGeoBlocking:

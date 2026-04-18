@@ -20,11 +20,11 @@ import (
 
 // DetectorDeps 检测模块工厂结果
 type DetectorDeps struct {
-	IntelMgr         *threatintel.Manager
-	GeoMgr           *geoblocking.Manager
-	WAFMonitor       *waf.Monitor
-	RateLimitMonitor *ratelimit.Monitor
-	FailGuardMonitor *failguard.Monitor
+	IntelMgr        *threatintel.Manager
+	GeoMgr          *geoblocking.Manager
+	WAFMgr          *waf.Manager
+	RateLimitMgr    *ratelimit.Manager
+	FailGuardMgr    *failguard.Manager
 }
 
 // InitDetectors 初始化 Intel / Geo / WAF / RateLimit / FailGuard
@@ -54,47 +54,50 @@ func InitDetectors(
 		}
 	}
 
-	wafMonitor := waf.NewMonitor(&cfg.WAF, xdp, ctx)
-	wafMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.WAF.OffsetStateFile))
-	wafMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-	wafMonitor.SetBanRecordStore(services.NewBanRecordService(dbConn))
+	wafMgr := waf.NewManager(&cfg.WAF, xdp, ctx,
+		watcher.NewOffsetStore(cfg.WAF.OffsetStateFile),
+		services.NewBanRecordService(dbConn),
+		whitelistChecker.IsWhitelisted,
+	)
 	if cfg.WAF.Enabled {
-		if err := wafMonitor.Start(); err != nil {
-			logger.Warnf("[Main] WAF monitor start failed: %v", err)
+		if err := wafMgr.Start(); err != nil {
+			logger.Warnf("[Main] WAF manager start failed: %v", err)
 		} else {
-			logger.Info("[Main] WAF monitor module initialized")
+			logger.Info("[Main] WAF module initialized")
 		}
 	}
 
-	rateLimitMonitor := ratelimit.NewMonitor(&cfg.RateLimit, xdp, ctx)
-	rateLimitMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.RateLimit.OffsetStateFile))
-	rateLimitMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-	rateLimitMonitor.SetBanRecordStore(services.NewBanRecordService(dbConn))
+	rateLimitMgr := ratelimit.NewManager(&cfg.RateLimit, xdp, ctx,
+		watcher.NewOffsetStore(cfg.RateLimit.OffsetStateFile),
+		services.NewBanRecordService(dbConn),
+		whitelistChecker.IsWhitelisted,
+	)
 	if cfg.RateLimit.Enabled {
-		if err := rateLimitMonitor.Start(); err != nil {
-			logger.Warnf("[Main] Rate Limit monitor start failed: %v", err)
+		if err := rateLimitMgr.Start(); err != nil {
+			logger.Warnf("[Main] Rate Limit manager start failed: %v", err)
 		} else {
-			logger.Info("[Main] Rate Limit monitor module initialized")
+			logger.Info("[Main] Rate Limit module initialized")
 		}
 	}
 
-	failguardMonitor := failguard.NewMonitor(&cfg.FailGuard, xdp, ctx)
-	failguardMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.FailGuard.OffsetStateFile))
-	failguardMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-	failguardMonitor.SetBanRecordStore(services.NewBanRecordService(dbConn))
+	failguardMgr := failguard.NewManager(&cfg.FailGuard, xdp, ctx,
+		watcher.NewOffsetStore(cfg.FailGuard.OffsetStateFile),
+		services.NewBanRecordService(dbConn),
+		whitelistChecker.IsWhitelisted,
+	)
 	if cfg.FailGuard.Enabled {
-		if err := failguardMonitor.Start(); err != nil {
-			logger.Warnf("[Main] FailGuard monitor start failed: %v", err)
+		if err := failguardMgr.Start(); err != nil {
+			logger.Warnf("[Main] FailGuard manager start failed: %v", err)
 		} else {
 			logger.Info("[Main] FailGuard module initialized")
 		}
 	}
 
 	return &DetectorDeps{
-		IntelMgr:         intelMgr,
-		GeoMgr:           geoMgr,
-		WAFMonitor:       wafMonitor,
-		RateLimitMonitor: rateLimitMonitor,
-		FailGuardMonitor: failguardMonitor,
+		IntelMgr:     intelMgr,
+		GeoMgr:       geoMgr,
+		WAFMgr:       wafMgr,
+		RateLimitMgr: rateLimitMgr,
+		FailGuardMgr: failguardMgr,
 	}
 }

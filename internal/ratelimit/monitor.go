@@ -24,8 +24,8 @@ type LogEntry struct {
 	Msg      string `json:"msg"`
 }
 
-// Monitor Rate Limit 日志监控器
-type Monitor struct {
+// Manager Rate Limit 日志管理器
+type Manager struct {
 	mu sync.RWMutex
 
 	cfg     *config.RateLimitConfig
@@ -37,32 +37,22 @@ type Monitor struct {
 	ipRegex *regexp.Regexp
 }
 
-// NewMonitor 创建 Rate Limit 日志监控器
-func NewMonitor(cfg *config.RateLimitConfig, xdp watcher.XDPRuleManager, ctx context.Context) *Monitor {
-	return &Monitor{
+// NewManager 创建 Rate Limit 日志管理器
+func NewManager(cfg *config.RateLimitConfig, xdp watcher.XDPRuleManager, ctx context.Context,
+	offsetStore *watcher.OffsetStore, banRecordStore watcher.BanRecordStore, whitelistCheck func(ip string) bool) *Manager {
+	w := watcher.NewLogWatcher("RateLimit", "rate_limit", xdp, ctx)
+	w.SetOffsetStore(offsetStore)
+	w.SetBanRecordStore(banRecordStore)
+	w.SetWhitelistCheck(whitelistCheck)
+	return &Manager{
 		cfg:     cfg,
-		watcher: watcher.NewLogWatcher("RateLimit", "rate_limit", xdp, ctx),
+		watcher: w,
 		ipRegex: regexp.MustCompile(utils.IPv4RegexPattern),
 	}
 }
 
-// SetBanRecordStore 设置封禁记录持久化存储
-func (m *Monitor) SetBanRecordStore(store watcher.BanRecordStore) {
-	m.watcher.SetBanRecordStore(store)
-}
-
-// SetOffsetStore 设置偏移量持久化存储（可选）
-func (m *Monitor) SetOffsetStore(store *watcher.OffsetStore) {
-	m.watcher.SetOffsetStore(store)
-}
-
-// SetWhitelistCheck 设置白名单检查函数
-func (m *Monitor) SetWhitelistCheck(fn func(ip string) bool) {
-	m.watcher.SetWhitelistCheck(fn)
-}
-
 // Start 启动 Rate Limit 日志监控
-func (m *Monitor) Start() error {
+func (m *Manager) Start() error {
 	m.watcher.SetLineHandler(m.handleLine)
 
 	logPath := m.cfg.LogPath
@@ -94,7 +84,7 @@ func (m *Monitor) Start() error {
 }
 
 // Stop 停止监控
-func (m *Monitor) Stop() {
+func (m *Manager) Stop() {
 	if m.cron != nil {
 		m.cron.Stop()
 	}
@@ -104,7 +94,7 @@ func (m *Monitor) Stop() {
 }
 
 // handleLine 处理一行日志，返回是否需要封禁
-func (m *Monitor) handleLine(line string) (string, uint32, string, int, bool) {
+func (m *Manager) handleLine(line string) (string, uint32, string, int, bool) {
 	ip := m.extractIP(line)
 	if ip == "" {
 		return "", 0, "", 0, false
@@ -113,7 +103,7 @@ func (m *Monitor) handleLine(line string) (string, uint32, string, int, bool) {
 }
 
 // extractIP 从 Rate limit 日志行中提取 IP
-func (m *Monitor) extractIP(line string) string {
+func (m *Manager) extractIP(line string) string {
 	trimmed := json.RawMessage{}
 	if err := json.Unmarshal([]byte(line), &trimmed); err == nil {
 		var entry LogEntry
@@ -129,7 +119,7 @@ func (m *Monitor) extractIP(line string) string {
 }
 
 // UpdateConfig 热更新 RateLimit 动态配置
-func (m *Monitor) UpdateConfig(enabled bool, banDuration int) {
+func (m *Manager) UpdateConfig(enabled bool, banDuration int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -139,7 +129,7 @@ func (m *Monitor) UpdateConfig(enabled bool, banDuration int) {
 }
 
 // GetConfig 获取当前 RateLimit 配置（返回可动态化的字段）
-func (m *Monitor) GetConfig() map[string]interface{} {
+func (m *Manager) GetConfig() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -150,22 +140,22 @@ func (m *Monitor) GetConfig() map[string]interface{} {
 }
 
 // GetBannedIPs 获取当前已封禁的 IP 列表
-func (m *Monitor) GetBannedIPs() []string {
+func (m *Manager) GetBannedIPs() []string {
 	return m.watcher.GetBannedIPs()
 }
 
 // GetBanCount 获取当前封禁的 IP 数量
-func (m *Monitor) GetBanCount() int {
+func (m *Manager) GetBanCount() int {
 	return m.watcher.GetBanCount()
 }
 
 // IsBanned 检查 IP 是否被封禁
-func (m *Monitor) IsBanned(ip string) bool {
+func (m *Manager) IsBanned(ip string) bool {
 	return m.watcher.IsBanned(ip)
 }
 
 // IsRunning 检查监控器是否正在运行
-func (m *Monitor) IsRunning() bool {
+func (m *Manager) IsRunning() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.running

@@ -141,12 +141,12 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 		FlushInterval:   100 * time.Millisecond,
 	}
 
-	bl, err := NewBlockLogWithPersistence(100, config)
+	bl, err := NewManagerWithPersistence(100, config, nil)
 	if err != nil {
 		t.Fatalf("Failed to create block log with persistence: %v", err)
 	}
 
-	// 注入内存中的 GORM SQLite 连接（模拟两阶段初始化）
+	// 注入内存中的 GORM SQLite 连接
 	testDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("Failed to open test db: %v", err)
@@ -154,7 +154,7 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 	if err := testDB.AutoMigrate(&models.BlocklogHourlyStat{}, &models.BlocklogTopIP{}); err != nil {
 		t.Fatalf("Failed to migrate test db: %v", err)
 	}
-	bl.AttachStatsStore(testDB)
+	bl.statsStore = NewStatsStore(testDB)
 
 	record := BlockRecord{
 		Timestamp:  time.Now().UnixNano(),

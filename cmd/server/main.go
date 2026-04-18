@@ -52,8 +52,11 @@ func main() {
 	dbs := bootstrap.InitDatabase(cfg)
 	defer dbs.AuthDB.Close()
 
+	// AuthDB / BizDB 在 InitDatabase 中已保证非 nil（失败时 FatalExit）
+	dbConn := dbs.BizDB.DB
+
 	// 核心基础设施 (XDP / Manual / Whitelist / BlockLog)
-	core := bootstrap.InitCore(cfg)
+	core := bootstrap.InitCore(cfg, dbConn)
 	defer core.XDP.Close()
 
 	if err := core.XDP.Start(); err != nil {
@@ -63,12 +66,6 @@ func main() {
 
 	// 加载持久化的缓存规则到 eBPF map（必须在 Start 之后）
 	core.LoadCachedRules(cfg)
-
-	// AuthDB / BizDB 在 InitDatabase 中已保证非 nil（失败时 FatalExit）
-	dbConn := dbs.BizDB.DB
-
-	// 将 StatsStore 注入 BlockLog（两阶段初始化：bizDB 在 Phase 2 才就绪）
-	core.BlockLogHandle.AttachStatsStore(dbConn)
 
 	// Phase 3: 检测模块工厂 (Intel / Geo / WAF / RateLimit / FailGuard)
 	detectors := bootstrap.InitDetectors(cfg, core.XDP, ctx, dbConn, core.WhitelistHandle.GetWhitelistChecker())

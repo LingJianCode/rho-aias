@@ -14,7 +14,7 @@ import (
 
 // AnomalyDeps 异常检测初始化结果
 type AnomalyDeps struct {
-	Detector       *anomaly.Detector
+	Manager        *anomaly.Manager
 	RecordPacketFn ebpfs.AnomalyEventCallback
 }
 
@@ -100,17 +100,17 @@ func InitAnomaly(
 		return nil
 	}
 
-	var detector *anomaly.Detector
+	var manager *anomaly.Manager
 
 	recordPacketFn := func(srcIP string, protocol uint8, tcpFlags uint8, pktSize uint32) {
-		detector.RecordPacket(srcIP, protocol, tcpFlags, pktSize)
+		manager.RecordPacket(srcIP, protocol, tcpFlags, pktSize)
 	}
 
-	detector = anomaly.NewDetector(anomalyConfig, blockCallback, unblockCallback)
+	manager = anomaly.NewManager(anomalyConfig, blockCallback, unblockCallback)
 
 	if cfg.AnomalyDetection.Enabled {
-		if err := detector.Start(); err != nil {
-			logger.Warnf("[Main] Anomaly detector start failed: %v", err)
+		if err := manager.Start(); err != nil {
+			logger.Warnf("[Main] Anomaly manager start failed: %v", err)
 		} else {
 			logger.Info("[Main] Anomaly detection module initialized")
 
@@ -132,7 +132,7 @@ func InitAnomaly(
 	}
 
 	return &AnomalyDeps{
-		Detector:       detector,
+		Manager:        manager,
 		RecordPacketFn: recordPacketFn,
 	}
 }

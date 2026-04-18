@@ -18,8 +18,8 @@ import (
 
 
 
-// Monitor FailGuard 日志监控器
-type Monitor struct {
+// Manager FailGuard 日志管理器
+type Manager struct {
 	cfg     *config.FailGuardConfig
 	watcher *watcher.LogWatcher
 	cron    *cron.Cron
@@ -35,11 +35,17 @@ type Monitor struct {
 	failMu   sync.RWMutex
 }
 
-// NewMonitor 创建 FailGuard 日志监控器
-func NewMonitor(cfg *config.FailGuardConfig, xdp watcher.XDPRuleManager, ctx context.Context) *Monitor {
-	m := &Monitor{
+// NewManager 创建 FailGuard 日志管理器
+func NewManager(cfg *config.FailGuardConfig, xdp watcher.XDPRuleManager, ctx context.Context,
+	offsetStore *watcher.OffsetStore, banRecordStore watcher.BanRecordStore, whitelistCheck func(ip string) bool) *Manager {
+	w := watcher.NewLogWatcher("FailGuard", "failguard", xdp, ctx)
+	w.SetOffsetStore(offsetStore)
+	w.SetBanRecordStore(banRecordStore)
+	w.SetWhitelistCheck(whitelistCheck)
+
+	m := &Manager{
 		cfg:     cfg,
-		watcher: watcher.NewLogWatcher("FailGuard", "failguard", xdp, ctx),
+		watcher: w,
 	}
 
 	// 确定使用的正则：用户配置覆盖或使用内置默认值
@@ -86,23 +92,8 @@ func NewMonitor(cfg *config.FailGuardConfig, xdp watcher.XDPRuleManager, ctx con
 	return m
 }
 
-// SetOffsetStore 设置偏移量持久化存储（可选）
-func (m *Monitor) SetOffsetStore(store *watcher.OffsetStore) {
-	m.watcher.SetOffsetStore(store)
-}
-
-// SetBanRecordStore 设置封禁记录持久化存储
-func (m *Monitor) SetBanRecordStore(store watcher.BanRecordStore) {
-	m.watcher.SetBanRecordStore(store)
-}
-
-// SetWhitelistCheck 设置白名单检查函数
-func (m *Monitor) SetWhitelistCheck(fn func(ip string) bool) {
-	m.watcher.SetWhitelistCheck(fn)
-}
-
 // Start 启动 FailGuard 日志监控
-func (m *Monitor) Start() error {
+func (m *Manager) Start() error {
 	if m.cfg.LogPath == "" {
 		return fmt.Errorf("log_path is required")
 	}
@@ -150,7 +141,7 @@ func (m *Monitor) Start() error {
 }
 
 // Stop 停止监控
-func (m *Monitor) Stop() {
+func (m *Manager) Stop() {
 	if m.cron != nil {
 		m.cron.Stop()
 	}
@@ -161,7 +152,7 @@ func (m *Monitor) Stop() {
 
 // handleLine 处理一行日志：ignore 检查 → fail 匹配 → 白名单 → 已封禁 → 滑动窗口计数
 // 实现 watcher.LineHandler 接口
-func (m *Monitor) handleLine(line string) (string, uint32, string, int, bool) {
+func (m *Manager) handleLine(line string) (string, uint32, string, int, bool) {
 	// 1. ignoreregex 匹配 → 跳过
 	if m.matchIgnore(line) {
 		return "", 0, "", 0, false
@@ -192,7 +183,7 @@ func (m *Monitor) handleLine(line string) (string, uint32, string, int, bool) {
 }
 
 // matchIgnore 检查行是否匹配忽略规则
-func (m *Monitor) matchIgnore(line string) bool {
+func (m *Manager) matchIgnore(line string) bool {
 	for _, re := range m.ignoreRegex {
 		if re.MatchString(line) {
 			return true
@@ -202,7 +193,7 @@ func (m *Monitor) matchIgnore(line string) bool {
 }
 
 // matchFail 检查行是否匹配失败规则，返回提取的 IP
-func (m *Monitor) matchFail(line string) string {
+func (m *Manager) matchFail(line string) string {
 	for _, re := range m.failRegex {
 		matches := re.FindStringSubmatch(line)
 		if len(matches) > 0 {
@@ -224,7 +215,7 @@ func (m *Monitor) matchFail(line string) string {
 }
 
 // isIgnoredIP 检查 IP 是否在忽略列表中
-func (m *Monitor) isIgnoredIP(ip string) bool {
+func (m *Manager) isIgnoredIP(ip string) bool {
 	parsedIP := net.ParseIP(ip)
 	if parsedIP == nil {
 		return false
@@ -238,7 +229,7 @@ func (m *Monitor) isIgnoredIP(ip string) bool {
 }
 
 // addFailureAndCheck 添加失败记录并检查是否达到阈值
-func (m *Monitor) addFailureAndCheck(ip string) bool {
+func (m *Manager) addFailureAndCheck(ip string) bool {
 	m.failMu.Lock()
 	defer m.failMu.Unlock()
 
@@ -259,7 +250,7 @@ func (m *Monitor) addFailureAndCheck(ip string) bool {
 }
 
 // cleanupFailures 清理过期的失败计数记录
-func (m *Monitor) cleanupFailures() {
+func (m *Manager) cleanupFailures() {
 	m.failMu.Lock()
 	defer m.failMu.Unlock()
 
@@ -286,7 +277,7 @@ func (m *Monitor) cleanupFailures() {
 }
 
 // UpdateConfig 热更新 FailGuard 动态配置
-func (m *Monitor) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int, mode string) {
+func (m *Manager) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int, mode string) {
 	m.failMu.Lock()
 	defer m.failMu.Unlock()
 
@@ -303,7 +294,7 @@ func (m *Monitor) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int
 }
 
 // GetConfig 获取当前 FailGuard 配置（返回可动态化的字段）
-func (m *Monitor) GetConfig() map[string]interface{} {
+func (m *Manager) GetConfig() map[string]interface{} {
 	m.failMu.RLock()
 	defer m.failMu.RUnlock()
 
@@ -317,21 +308,21 @@ func (m *Monitor) GetConfig() map[string]interface{} {
 }
 
 // GetBannedIPs 获取当前已封禁的 IP 列表
-func (m *Monitor) GetBannedIPs() []string {
+func (m *Manager) GetBannedIPs() []string {
 	return m.watcher.GetBannedIPs()
 }
 
 // GetBanCount 获取当前封禁的 IP 数量
-func (m *Monitor) GetBanCount() int {
+func (m *Manager) GetBanCount() int {
 	return m.watcher.GetBanCount()
 }
 
 // IsBanned 检查 IP 是否被封禁
-func (m *Monitor) IsBanned(ip string) bool {
+func (m *Manager) IsBanned(ip string) bool {
 	return m.watcher.IsBanned(ip)
 }
 
 // IsRunning 检查监控器是否正在运行
-func (m *Monitor) IsRunning() bool {
+func (m *Manager) IsRunning() bool {
 	return m.running
 }

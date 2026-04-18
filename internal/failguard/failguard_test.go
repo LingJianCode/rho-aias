@@ -72,7 +72,7 @@ func TestMatchFail_Aggressive(t *testing.T) {
 		LogPath:    "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	tests := []struct {
 		name    string
@@ -183,7 +183,7 @@ func TestMatchIgnore(t *testing.T) {
 		LogPath:    "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	tests := []struct {
 		name    string
@@ -237,7 +237,7 @@ func TestIsIgnoredIP(t *testing.T) {
 		IgnoreIPs:  []string{"10.0.0.0/8", "172.16.0.0/12"},
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	tests := []struct {
 		ip   string
@@ -275,7 +275,7 @@ func TestAddFailureAndCheck_ReachesThreshold(t *testing.T) {
 		LogPath:    "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	// 前两次不应触发封禁
 	if monitor.addFailureAndCheck("1.2.3.4") {
@@ -299,7 +299,7 @@ func TestAddFailureAndCheck_WindowExpiry(t *testing.T) {
 		LogPath:    "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	// 添加 2 次失败
 	monitor.addFailureAndCheck("1.2.3.4")
@@ -328,7 +328,7 @@ func TestAddFailureAndCheck_IndependentPerIP(t *testing.T) {
 		LogPath:    "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	// 不同 IP 独立计数
 	ban1 := monitor.addFailureAndCheck("1.1.1.1")
@@ -360,7 +360,7 @@ func TestHandleLine_AggressiveMode(t *testing.T) {
 		LogPath:     "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	// normal 规则：Failed password
 	ip, sourceMask, reason, duration, shouldBan := monitor.handleLine(realSSHLogNormal)
@@ -409,7 +409,7 @@ func TestReadLogFile_RealSSHLog_Aggressive(t *testing.T) {
 		LogPath:     "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	monitor.watcher.SetLineHandler(monitor.handleLine)
 
@@ -459,7 +459,7 @@ func TestReadLogFile_RealSSHPreauth_Aggressive(t *testing.T) {
 		LogPath:     "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	monitor.watcher.SetLineHandler(monitor.handleLine)
 
@@ -502,7 +502,7 @@ func TestCleanupFailures(t *testing.T) {
 		LogPath:    "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	// 添加失败记录
 	monitor.addFailureAndCheck("1.2.3.4")
@@ -533,7 +533,7 @@ func TestStop_WithoutStart(t *testing.T) {
 		LogPath:    "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	monitor.Stop() // 不应 panic
 }
@@ -551,7 +551,7 @@ func TestConcurrentHandleLine(t *testing.T) {
 		LogPath:    "/var/log/auth.log",
 	}
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	var wg sync.WaitGroup
 	const goroutines = 10

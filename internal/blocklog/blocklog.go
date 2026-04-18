@@ -34,8 +34,8 @@ type blockLogCounters struct {
 	mu           sync.RWMutex      // 写端保护 map 结构变更，读端 RLock 无阻塞
 }
 
-// BlockLog 阻断日志管理器
-type BlockLog struct {
+// Manager 阻断日志管理器
+type Manager struct {
 	mu          sync.RWMutex
 	records     []BlockRecord
 	maxSize     int
@@ -45,9 +45,9 @@ type BlockLog struct {
 	counters    *blockLogCounters
 }
 
-// NewBlockLog 创建新的阻断日志管理器
-func NewBlockLog(maxSize int) *BlockLog {
-	return &BlockLog{
+// NewManager 创建新的阻断日志管理器
+func NewManager(maxSize int) *Manager {
+	return &Manager{
 		records:  make([]BlockRecord, 0, maxSize),
 		maxSize:  maxSize,
 		counters: newBlockLogCounters(),
@@ -143,58 +143,55 @@ func (c *blockLogCounters) snapshotTopIPsAll() []IPCount {
 	return ips
 }
 
-// NewBlockLogWithPersistence 创建带持久化的阻断日志管理器
-// StatsStore 延迟注入，由调用方在 bizDB 就绪后通过 AttachStatsStore 注入
-func NewBlockLogWithPersistence(maxSize int, config Config) (*BlockLog, error) {
-	bl := NewBlockLog(maxSize)
+// NewManagerWithPersistence 创建带持久化的阻断日志管理器
+func NewManagerWithPersistence(maxSize int, config Config, db *gorm.DB) (*Manager, error) {
+	m := NewManager(maxSize)
 
 	// 创建异步写入器（注入 onRotate 回调）
 	asyncWriter, err := NewAsyncWriter(config, func(t time.Time) {
-		bl.SnapshotHourlyCounters(t)
+		m.SnapshotHourlyCounters(t)
 	})
 	if err != nil {
 		return nil, err
 	}
-	bl.asyncWriter = asyncWriter
+	m.asyncWriter = asyncWriter
 
 	// 创建 JSONL 查询器（复用同一个 logDir）
-	bl.jsonReader = NewJsonLogReader(config.LogDir)
+	m.jsonReader = NewJsonLogReader(config.LogDir)
 
-	// StatsStore 不再在此创建，等待 AttachStatsStore 注入
+	// 注入统计存储
+	if db != nil {
+		m.statsStore = NewStatsStore(db)
+	}
 
-	return bl, nil
-}
-
-// AttachStatsStore 注入统计存储（需在业务数据库初始化后调用）
-func (bl *BlockLog) AttachStatsStore(db *gorm.DB) {
-	bl.statsStore = NewStatsStore(db)
+	return m, nil
 }
 
 // AddRecord 添加阻断记录
-func (bl *BlockLog) AddRecord(record BlockRecord) {
-	bl.mu.Lock()
+func (m *Manager) AddRecord(record BlockRecord) {
+	m.mu.Lock()
 
 	// 如果超过最大记录数，删除最旧的记录
 	// 使用 copy 而非 slice 重切，避免底层数组无限增长导致内存泄漏
-	if len(bl.records) >= bl.maxSize {
-		copy(bl.records, bl.records[1:])
-		bl.records = bl.records[:len(bl.records)-1]
+	if len(m.records) >= m.maxSize {
+		copy(m.records, m.records[1:])
+		m.records = m.records[:len(m.records)-1]
 	}
 
-	bl.records = append(bl.records, record)
+	m.records = append(m.records, record)
 
 	// 异步写入文件（Write 是非阻塞的，可以安全地在锁内调用）
-	if bl.asyncWriter != nil {
-		if err := bl.asyncWriter.Write(record); err != nil {
+	if m.asyncWriter != nil {
+		if err := m.asyncWriter.Write(record); err != nil {
 			logger.Warnf("async write failed: %v", err)
 		}
 	}
 
-	bl.mu.Unlock()
+	m.mu.Unlock()
 
 	// 增量计数器更新（原子操作，无锁，仅用于整点轮转时的写缓冲）
-	if bl.counters != nil {
-		c := bl.counters
+	if m.counters != nil {
+		c := m.counters
 		atomic.AddInt64(&c.totalBlocked, 1)
 		c.increment(c.byRuleSource, record.RuleSource)
 		c.increment(c.topIPs, record.SrcIP)
@@ -203,33 +200,33 @@ func (bl *BlockLog) AddRecord(record BlockRecord) {
 
 // GetRecords 获取阻断记录
 // limit: 返回记录数量限制，0 表示返回所有
-func (bl *BlockLog) GetRecords(limit int) []BlockRecord {
-	bl.mu.RLock()
-	defer bl.mu.RUnlock()
+func (m *Manager) GetRecords(limit int) []BlockRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	if limit <= 0 || limit > len(bl.records) {
-		limit = len(bl.records)
+	if limit <= 0 || limit > len(m.records) {
+		limit = len(m.records)
 	}
 
 	// 返回最近的记录（从后往前）
 	result := make([]BlockRecord, limit)
 	for i := 0; i < limit; i++ {
-		result[i] = bl.records[len(bl.records)-1-i]
+		result[i] = m.records[len(m.records)-1-i]
 	}
 
 	return result
 }
 
 // GetRecordsByFilter 按条件筛选阻断记录（内存查询）
-func (bl *BlockLog) GetRecordsByFilter(filter RecordFilter) []BlockRecord {
-	bl.mu.RLock()
-	defer bl.mu.RUnlock()
+func (m *Manager) GetRecordsByFilter(filter RecordFilter) []BlockRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	var result []BlockRecord
 
 	// 从后往前遍历（最新的记录优先）
-	for i := len(bl.records) - 1; i >= 0; i-- {
-		record := bl.records[i]
+	for i := len(m.records) - 1; i >= 0; i-- {
+		record := m.records[i]
 
 		// 应用过滤条件
 		if filter.MatchType != "" && record.MatchType != filter.MatchType {
@@ -256,11 +253,11 @@ func (bl *BlockLog) GetRecordsByFilter(filter RecordFilter) []BlockRecord {
 }
 
 // QueryJSONLRecords 从 JSONL 文件分页查询记录
-func (bl *BlockLog) QueryJSONLRecords(filter RecordFilter) (*PageResult, error) {
-	if bl.jsonReader == nil {
+func (m *Manager) QueryJSONLRecords(filter RecordFilter) (*PageResult, error) {
+	if m.jsonReader == nil {
 		return nil, fmt.Errorf("json reader not initialized")
 	}
-	return bl.jsonReader.QueryPage(filter.Hour, filter)
+	return m.jsonReader.QueryPage(filter.Hour, filter)
 }
 
 // RecordFilter 记录过滤条件
@@ -291,20 +288,20 @@ type IPCount struct {
 const defaultRetentionDays = 30
 
 // GetStats 获取统计信息（融合查询：DB 历史数据 + 内存实时计数器）
-func (bl *BlockLog) GetStats() Stats {
-	if bl.statsStore == nil {
+func (m *Manager) GetStats() Stats {
+	if m.statsStore == nil {
 		// 无 DB 时直接返回内存快照
-		if bl.counters != nil {
-			return bl.counters.snapshot()
+		if m.counters != nil {
+			return m.counters.snapshot()
 		}
 		return Stats{}
 	}
 
 	// 从 DB 获取历史数据（带时间边界）
-	dbStats := bl.statsStore.GetAggregatedStats(defaultRetentionDays)
+	dbStats := m.statsStore.GetAggregatedStats(defaultRetentionDays)
 
 	// 融合内存计数器（当前小时，尚未 flush 到 DB）
-	memSnap := bl.counters.snapshot()
+	memSnap := m.counters.snapshot()
 
 	// 合并 TotalBlocked
 	dbStats.TotalBlocked += memSnap.TotalBlocked
@@ -318,45 +315,45 @@ func (bl *BlockLog) GetStats() Stats {
 }
 
 // SnapshotHourlyCounters 将当前内存计数器快照写入 DB 并重置（整点轮转时由回调调用）
-func (bl *BlockLog) SnapshotHourlyCounters(t time.Time) {
-	if bl.counters == nil || bl.statsStore == nil {
+func (m *Manager) SnapshotHourlyCounters(t time.Time) {
+	if m.counters == nil || m.statsStore == nil {
 		return
 	}
 	hourKey := t.Format("2006-01-02T15")
-	snap := bl.counters.snapshot()
-	topIPs := bl.counters.snapshotTopIPsAll()
+	snap := m.counters.snapshot()
+	topIPs := m.counters.snapshotTopIPsAll()
 	if snap.TotalBlocked > 0 {
-		bl.statsStore.SnapshotHour(hourKey, snap, topIPs)
+		m.statsStore.SnapshotHour(hourKey, snap, topIPs)
 	}
-	bl.counters.reset()
+	m.counters.reset()
 }
 
 // Close 关闭阻断日志管理器（停止异步写入器）
-func (bl *BlockLog) Close() error {
-	if bl.asyncWriter != nil {
-		return bl.asyncWriter.Stop()
+func (m *Manager) Close() error {
+	if m.asyncWriter != nil {
+		return m.asyncWriter.Stop()
 	}
 	return nil
 }
 
 // GetHourlyTrend 获取丢弃计数的小时趋势
-func (bl *BlockLog) GetHourlyTrend(hours int) []HourlyTrendItem {
-	if bl.statsStore == nil {
+func (m *Manager) GetHourlyTrend(hours int) []HourlyTrendItem {
+	if m.statsStore == nil {
 		return nil
 	}
-	return bl.statsStore.GetHourlyTrend(hours)
+	return m.statsStore.GetHourlyTrend(hours)
 }
 
 // GetTopIPs 从数据库查询 Top N 被阻断 IP（融合查询：DB + 内存）
-func (bl *BlockLog) GetTopIPs(limit int) []IPCount {
-	if bl.statsStore == nil {
+func (m *Manager) GetTopIPs(limit int) []IPCount {
+	if m.statsStore == nil {
 		return nil
 	}
 
-	dbIPs := bl.statsStore.GetTopIPs(defaultRetentionDays, limit)
+	dbIPs := m.statsStore.GetTopIPs(defaultRetentionDays, limit)
 
 	// 融合内存计数器中的 TopIP
-	memIPs := bl.counters.snapshotTopIPs(limit)
+	memIPs := m.counters.snapshotTopIPs(limit)
 
 	ipMap := make(map[string]int)
 	for _, ip := range dbIPs {
@@ -379,19 +376,19 @@ func (bl *BlockLog) GetTopIPs(limit int) []IPCount {
 }
 
 // Flush 刷新缓冲区到磁盘
-func (bl *BlockLog) Flush() error {
-	if bl.asyncWriter != nil {
-		return bl.asyncWriter.Flush()
+func (m *Manager) Flush() error {
+	if m.asyncWriter != nil {
+		return m.asyncWriter.Flush()
 	}
 	return nil
 }
 
 // Count 获取记录总数
-func (bl *BlockLog) Count() int {
-	bl.mu.RLock()
-	defer bl.mu.RUnlock()
+func (m *Manager) Count() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	return len(bl.records)
+	return len(m.records)
 }
 
 // CreateRecord 创建阻断记录的便捷方法

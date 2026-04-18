@@ -92,18 +92,18 @@ const realRateLimitLog = `{"level":"warn","ts":1743500924.725,"logger":"http.han
 const realRateLimitLogNoIP = `{"level":"warn","ts":1743500924.725,"logger":"http.handlers.rate_limit","msg":"rate limit exceeded","request":{"method":"GET","uri":"/api/data"}}`
 
 // ============================================
-// NewMonitor 测试
+// NewManager 测试
 // ============================================
 
-func TestNewMonitor(t *testing.T) {
+func TestNewManager(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
 
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	if monitor == nil {
-		t.Fatal("NewMonitor() returned nil")
+		t.Fatal("NewManager() returned nil")
 	}
 
 	if monitor.cfg != cfg {
@@ -126,14 +126,14 @@ func TestNewMonitor(t *testing.T) {
 	}
 }
 
-func TestNewMonitor_CreatesChildContext(t *testing.T) {
+func TestNewManager_CreatesChildContext(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 
 	parentCtx, parentCancel := context.WithCancel(context.Background())
 	defer parentCancel()
 
-	monitor := NewMonitor(cfg, mockXDP, parentCtx)
+	monitor := NewManager(cfg, mockXDP, parentCtx, nil, nil, nil)
 
 	// 新行为：child context 在 Start() 时才创建，构造时 Context() 返回 nil
 	if monitor.watcher.Context() != nil {
@@ -175,7 +175,7 @@ func TestNewMonitor_CreatesChildContext(t *testing.T) {
 func TestExtractIP_NoMatch(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	tests := []struct {
 		name string
@@ -202,7 +202,7 @@ func TestExtractIP_NoMatch(t *testing.T) {
 func TestExtractIP_JsonRemoteIP(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	tests := []struct {
 		name string
@@ -234,7 +234,7 @@ func TestExtractIP_JsonRemoteIP(t *testing.T) {
 func TestExtractIP_FallbackToRegex(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	tests := []struct {
 		name string
@@ -266,7 +266,7 @@ func TestExtractIP_FallbackToRegex(t *testing.T) {
 func TestExtractIP_IPv4BoundaryValues(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	tests := []struct {
 		name string
@@ -297,7 +297,7 @@ func TestBanIP_NewBan(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskRateLimit, "test ban", cfg.BanDuration)
 
@@ -329,7 +329,7 @@ func TestBanIP_DuplicateBanSkipped(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskRateLimit, "test ban", cfg.BanDuration)
 	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskRateLimit, "test ban", cfg.BanDuration)
@@ -346,7 +346,7 @@ func TestBanIP_ReBanAfterExpiry(t *testing.T) {
 	cfg := testConfig(1)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskRateLimit, "test ban", cfg.BanDuration)
 	time.Sleep(1100 * time.Millisecond)
@@ -364,7 +364,7 @@ func TestBanIP_MultipleDifferentIPs(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	ips := []string{"1.2.3.4", "5.6.7.8", "10.20.30.40"}
 	for _, ip := range ips {
@@ -390,7 +390,7 @@ func TestBanIP_XDPError(t *testing.T) {
 	mockXDP := newMockXDPRuleManager()
 	mockXDP.addErr = fmt.Errorf("xdp operation failed")
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskRateLimit, "test ban", cfg.BanDuration)
 
@@ -410,7 +410,7 @@ func TestCleanup_RemovesExpiredBans(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	now := time.Now()
 	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
@@ -444,7 +444,7 @@ func TestCleanup_NoExpiredBans(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	now := time.Now()
 	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
@@ -465,7 +465,7 @@ func TestCleanup_EmptyBans(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	monitor.watcher.CleanupExpiredBans()
 
@@ -485,7 +485,7 @@ func TestGetBannedIPs_ReturnsOnlyActive(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	now := time.Now()
 	monitor.watcher.SetBanRecordForTest("1.2.3.4", watcher.IPBanRecord{
@@ -518,7 +518,7 @@ func TestIsBanned(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	if monitor.IsBanned("1.2.3.4") {
 		t.Error("non-existent IP should not be banned")
@@ -548,7 +548,7 @@ func TestReadLogFile_FileRotation(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	monitor.watcher.SetLineHandler(monitor.handleLine)
 
@@ -605,7 +605,7 @@ func TestReadLogFile_NonExistentFile(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	err := monitor.watcher.ReadLogFile("/nonexistent/path/file.log")
 	if err != nil {
@@ -617,7 +617,7 @@ func TestReadLogFile_IncrementalReading(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	monitor.watcher.SetLineHandler(monitor.handleLine)
 
@@ -673,7 +673,7 @@ func TestStop_WithoutStart(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	monitor.Stop()
 }
@@ -686,7 +686,7 @@ func TestConcurrentBanAndQuery(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	var wg sync.WaitGroup
 	const goroutines = 10
@@ -731,7 +731,7 @@ func TestFullWorkflow_BanAndCleanup(t *testing.T) {
 	cfg := testConfig(1)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	monitor.watcher.BanIP("1.2.3.4", ebpfs.SourceMaskRateLimit, "test ban", cfg.BanDuration)
 	monitor.watcher.BanIP("5.6.7.8", ebpfs.SourceMaskRateLimit, "rate limit ban", cfg.BanDuration)
@@ -770,7 +770,7 @@ func TestFullWorkflow_BanAndCleanup(t *testing.T) {
 func TestRealLog_RateLimitExtraction(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	ip := monitor.extractIP(realRateLimitLog)
 	if ip != "192.168.1.100" {
@@ -781,7 +781,7 @@ func TestRealLog_RateLimitExtraction(t *testing.T) {
 func TestRealLog_HandleLine(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	ip, sourceMask, reason, duration, shouldBan := monitor.handleLine(realRateLimitLog)
 	if !shouldBan {
@@ -804,7 +804,7 @@ func TestRealLog_HandleLine(t *testing.T) {
 func TestRealLog_HandleLine_NoIP(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
-	monitor := NewMonitor(cfg, mockXDP, context.Background())
+	monitor := NewManager(cfg, mockXDP, context.Background(), nil, nil, nil)
 
 	_, _, _, _, shouldBan := monitor.handleLine(realRateLimitLogNoIP)
 	if shouldBan {
@@ -816,7 +816,7 @@ func TestRealLog_ReadLogFile(t *testing.T) {
 	cfg := testConfig(3600)
 	mockXDP := newMockXDPRuleManager()
 	ctx := context.Background()
-	monitor := NewMonitor(cfg, mockXDP, ctx)
+	monitor := NewManager(cfg, mockXDP, ctx, nil, nil, nil)
 
 	monitor.watcher.SetLineHandler(monitor.handleLine)
 

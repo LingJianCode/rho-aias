@@ -48,7 +48,6 @@ geo_blocking:
       url: http://localhost:8008/GeoLite2-Country.mmdb  # MMDB 文件 URL
       format: maxmind-db  # 使用 MMDB 二进制格式
 manual:
-  enabled: true          # 启用手动规则持久化
   persistence_dir: ./data/manual  # 持久化目录
   auto_load: true        # 启动时自动加载
 

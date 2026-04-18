@@ -48,11 +48,6 @@ func (w *WhitelistHandle) GetWhitelistChecker() *manual.WhitelistChecker {
 	return w.checker
 }
 
-// SetWhitelistChecker 设置白名单检查器（支持延迟注入）
-func (m *BlacklistHandle) SetWhitelistChecker(checker *manual.WhitelistChecker) {
-	m.checker = checker
-}
-
 // AddBlacklistRule 添加过滤规则
 func (m *BlacklistHandle) AddBlacklistRule(c *gin.Context) {
 	var req rule

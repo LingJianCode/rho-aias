@@ -9,6 +9,8 @@ import (
 	"rho-aias/internal/handles"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
+
+	"gorm.io/gorm"
 )
 
 // CoreDependencies 核心基础设施初始化结果
@@ -20,26 +22,19 @@ type CoreDependencies struct {
 }
 
 // InitCore 初始化核心 eBPF 基础设施（不加载缓存规则，缓存需在 Start 后通过 LoadCachedRules 加载）
-func InitCore(cfg *config.Config) *CoreDependencies {
+func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 	xdp := ebpfs.NewXdp(cfg.Ebpf.InterfaceName)
 
-	var manualCache *manual.Cache
-	if cfg.Manual.Enabled {
-		manualCache = manual.NewCache(cfg.Manual.PersistenceDir)
-	}
-	manualHandle := handles.NewBlacklistHandle(xdp, manualCache, nil)
+	blacklistCache := manual.NewCache(cfg.Manual.PersistenceDir)
 
-	var whitelistCache *manual.Cache
-	var whitelistHandle *handles.WhitelistHandle
 	manual.InitProtectedNets(logger.Infof)
 	whitelistChecker := manual.NewWhitelistChecker()
-	if cfg.Manual.Enabled {
-		whitelistCache = manual.NewCache(cfg.Manual.PersistenceDir)
-	}
-	whitelistHandle = handles.NewWhitelistHandle(xdp, whitelistCache, whitelistChecker)
-	manualHandle.SetWhitelistChecker(whitelistChecker)
+	whitelistCache := manual.NewCache(cfg.Manual.PersistenceDir)
 
-	var blockLog *blocklog.BlockLog
+	whitelistHandle := handles.NewWhitelistHandle(xdp, whitelistCache, whitelistChecker)
+	blacklistHandle := handles.NewBlacklistHandle(xdp, blacklistCache, whitelistChecker)
+
+	var blockLogMgr *blocklog.Manager
 	{
 		blConfig := blocklog.Config{
 			LogDir:          cfg.BlockLog.LogDir,
@@ -48,7 +43,7 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 			FlushInterval:   time.Duration(cfg.BlockLog.FlushInterval) * time.Second,
 		}
 		var err error
-		blockLog, err = blocklog.NewBlockLogWithPersistence(cfg.BlockLog.MemoryCacheSize, blConfig)
+		blockLogMgr, err = blocklog.NewManagerWithPersistence(cfg.BlockLog.MemoryCacheSize, blConfig, dbConn)
 		if err != nil {
 			logger.Fatalf("[BlockLog] Failed to initialize with persistence: %v", err)
 		}
@@ -57,13 +52,13 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 
 	xdp.SetCallback(func(srcIP, dstIP, matchType, ruleSource, countryCode string, packetSize uint32) {
 		record := blocklog.CreateRecord(srcIP, dstIP, matchType, ruleSource, countryCode, packetSize)
-		blockLog.AddRecord(record)
+		blockLogMgr.AddRecord(record)
 	})
-	blockLogHandle := handles.NewBlockLogHandle(blockLog, xdp)
+	blockLogHandle := handles.NewBlockLogHandle(blockLogMgr, xdp)
 
 	return &CoreDependencies{
 		XDP:             xdp,
-		BlacklistHandle: manualHandle,
+		BlacklistHandle: blacklistHandle,
 		WhitelistHandle: whitelistHandle,
 		BlockLogHandle:  blockLogHandle,
 	}
@@ -71,9 +66,6 @@ func InitCore(cfg *config.Config) *CoreDependencies {
 
 // LoadCachedRules 在 XDP.Start() 之后加载持久化的缓存规则到 eBPF map
 func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
-	if !cfg.Manual.Enabled {
-		return
-	}
 
 	// 将内置保护网段写入 eBPF 白名单 map（防止内核层误封云平台元数据/内网服务）
 	protectedNets := manual.ProtectedNets()

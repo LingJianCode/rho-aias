@@ -58,16 +58,12 @@ func registerBizRoutes(
 	authSvc *services.AuthService,
 	apiKeySvc *services.APIKeyService,
 ) {
-	if intelMgr != nil {
-		intelHandle := handles.NewIntelHandle(intelMgr)
-		routers.RegisterIntelRoutes(api, intelHandle, enforcer, authSvc, apiKeySvc)
-	}
 
-	if geoMgr != nil {
-		geoHandle := handles.NewGeoBlockingHandle(geoMgr)
-		routers.RegisterGeoBlockingRoutes(api, geoHandle, enforcer, authSvc, apiKeySvc)
-	}
+	intelHandle := handles.NewIntelHandle(intelMgr)
+	routers.RegisterIntelRoutes(api, intelHandle, enforcer, authSvc, apiKeySvc)
 
+	geoHandle := handles.NewGeoBlockingHandle(geoMgr)
+	routers.RegisterGeoBlockingRoutes(api, geoHandle, enforcer, authSvc, apiKeySvc)
 	banRecordService := services.NewBanRecordService(bizDB.DB)
 	banRecordHandle := handles.NewBanRecordHandle(banRecordService, xdp)
 	routers.RegisterBanRecordRoutes(api, banRecordHandle, enforcer, authSvc, apiKeySvc)
@@ -82,14 +78,15 @@ func newConfigHandle(
 ) *handles.ConfigHandle {
 	configHandle := handles.NewConfigHandle(
 		dynamicConfigSvc,
-		detectors.FailGuardMonitor,
-		detectors.WAFMonitor,
-		detectors.RateLimitMonitor,
-		anomaly.Detector,
+		detectors.FailGuardMgr,
+		detectors.WAFMgr,
+		detectors.RateLimitMgr,
+		anomaly.Manager,
 		detectors.GeoMgr,
 		detectors.IntelMgr,
 		xdp,
+		xdp,
+		anomaly.RecordPacketFn,
 	)
-	configHandle.SetAnomalyController(xdp, anomaly.RecordPacketFn)
 	return configHandle
 }

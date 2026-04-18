@@ -22,14 +22,14 @@ func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	wasRunning := h.failguardMonitor.IsRunning()
+	wasRunning := h.failguardMgr.IsRunning()
 
-	h.failguardMonitor.UpdateConfig(req.Enabled, req.MaxRetry, req.FindTime, req.BanDuration, req.Mode)
+	h.failguardMgr.UpdateConfig(req.Enabled, req.MaxRetry, req.FindTime, req.BanDuration, req.Mode)
 
 	if !wasRunning && req.Enabled {
-		tryStart(h.failguardMonitor.Start, "[ConfigAPI] FailGuard")
+		tryStart(h.failguardMgr.Start, "[ConfigAPI] FailGuard")
 	} else if wasRunning && !req.Enabled {
-		h.failguardMonitor.Stop()
+		h.failguardMgr.Stop()
 		logger.Info("[ConfigAPI] FailGuard stopped")
 	}
 	return nil
@@ -44,14 +44,14 @@ func (h *ConfigHandle) applyWAFConfig(raw json.RawMessage) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	wasRunning := h.wafMonitor.IsRunning()
+	wasRunning := h.wafMgr.IsRunning()
 
-	h.wafMonitor.UpdateConfig(req.Enabled, req.BanDuration)
+	h.wafMgr.UpdateConfig(req.Enabled, req.BanDuration)
 
 	if !wasRunning && req.Enabled {
-		tryStart(h.wafMonitor.Start, "[ConfigAPI] WAF")
+		tryStart(h.wafMgr.Start, "[ConfigAPI] WAF")
 	} else if wasRunning && !req.Enabled {
-		h.wafMonitor.Stop()
+		h.wafMgr.Stop()
 		logger.Info("[ConfigAPI] WAF stopped")
 	}
 	return nil
@@ -66,14 +66,14 @@ func (h *ConfigHandle) applyRateLimitConfig(raw json.RawMessage) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	wasRunning := h.rateLimitMonitor.IsRunning()
+	wasRunning := h.rateLimitMgr.IsRunning()
 
-	h.rateLimitMonitor.UpdateConfig(req.Enabled, req.BanDuration)
+	h.rateLimitMgr.UpdateConfig(req.Enabled, req.BanDuration)
 
 	if !wasRunning && req.Enabled {
-		tryStart(h.rateLimitMonitor.Start, "[ConfigAPI] RateLimit")
+		tryStart(h.rateLimitMgr.Start, "[ConfigAPI] RateLimit")
 	} else if wasRunning && !req.Enabled {
-		h.rateLimitMonitor.Stop()
+		h.rateLimitMgr.Stop()
 		logger.Info("[ConfigAPI] RateLimit stopped")
 	}
 	return nil
