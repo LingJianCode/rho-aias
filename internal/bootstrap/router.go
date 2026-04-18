@@ -32,7 +32,7 @@ func RegisterAllRoutes(
 	routers.RegisterUserRoutes(api, authDeps.UserHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterAuditRoutes(api, authDeps.AuditHandle, enforcer, authSvc, apiKeySvc)
 
-	routers.RegisterManualRoutes(api, core.blacklistHandle, enforcer, authSvc, apiKeySvc)
+	routers.RegisterManualRoutes(api, core.ManualHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterWhitelistRoutes(api, core.WhitelistHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterBlockLogRoutes(api, core.BlockLogHandle, enforcer, authSvc, apiKeySvc)
 
