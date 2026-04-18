@@ -13,11 +13,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterAllRoutes 统一注册所有路由（不含 ConfigHandle）
+// RegisterAllRoutes 统一注册所有路由
 func RegisterAllRoutes(
 	api *gin.RouterGroup,
 	core *CoreDependencies,
-	dbDeps *DatabaseDeps,
+	dbDeps *Databases,
 	detectorDeps *DetectorDeps,
 	anomalyDeps *AnomalyDeps,
 	authDeps *AuthDeps,
@@ -32,7 +32,7 @@ func RegisterAllRoutes(
 	routers.RegisterUserRoutes(api, authDeps.UserHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterAuditRoutes(api, authDeps.AuditHandle, enforcer, authSvc, apiKeySvc)
 
-	routers.RegisterManualRoutes(api, core.ManualHandle, enforcer, authSvc, apiKeySvc)
+	routers.RegisterManualRoutes(api, core.blacklistHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterWhitelistRoutes(api, core.WhitelistHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterBlockLogRoutes(api, core.BlockLogHandle, enforcer, authSvc, apiKeySvc)
 
@@ -41,6 +41,10 @@ func RegisterAllRoutes(
 
 	registerBizRoutes(api, core.XDP, dbDeps.BizDB, detectorDeps.IntelMgr, detectorDeps.GeoMgr,
 		enforcer, authSvc, apiKeySvc)
+
+	// ConfigHandle
+	configHandle := newConfigHandle(dbDeps.DynamicConfigSvc, detectorDeps, anomalyDeps, core.XDP)
+	routers.RegisterConfigRoutes(api, configHandle, enforcer, authSvc, apiKeySvc)
 }
 
 // registerBizRoutes 注册需要 bizDB 的业务路由
@@ -54,10 +58,6 @@ func registerBizRoutes(
 	authSvc *services.AuthService,
 	apiKeySvc *services.APIKeyService,
 ) {
-	if bizDB == nil {
-		return
-	}
-
 	if intelMgr != nil {
 		intelHandle := handles.NewIntelHandle(intelMgr)
 		routers.RegisterIntelRoutes(api, intelHandle, enforcer, authSvc, apiKeySvc)
@@ -73,14 +73,12 @@ func registerBizRoutes(
 	routers.RegisterBanRecordRoutes(api, banRecordHandle, enforcer, authSvc, apiKeySvc)
 }
 
-// SetupConfigHandle 创建 ConfigHandle，返回供 defer 使用
-func SetupConfigHandle(
+// newConfigHandle 创建 ConfigHandle（包内使用）
+func newConfigHandle(
 	dynamicConfigSvc *services.DynamicConfigService,
 	detectors *DetectorDeps,
 	anomaly *AnomalyDeps,
 	xdp *ebpfs.Xdp,
-	geoMgr *geoblocking.Manager,
-	intelMgr *threatintel.Manager,
 ) *handles.ConfigHandle {
 	configHandle := handles.NewConfigHandle(
 		dynamicConfigSvc,
@@ -88,8 +86,8 @@ func SetupConfigHandle(
 		detectors.WAFMonitor,
 		detectors.RateLimitMonitor,
 		anomaly.Detector,
-		geoMgr,
-		intelMgr,
+		detectors.GeoMgr,
+		detectors.IntelMgr,
 		xdp,
 	)
 	configHandle.SetAnomalyController(xdp, anomaly.RecordPacketFn)

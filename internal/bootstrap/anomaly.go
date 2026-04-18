@@ -78,11 +78,9 @@ func InitAnomaly(
 			logger.Errorf("[AnomalyDetection] Failed to block IP %s: %v", ip, err)
 			return err
 		}
-		if bizDB != nil {
-			banRecordService := services.NewBanRecordService(bizDB)
-			if err := banRecordService.UpsertActiveBan(ip, models.BanSourceAnomaly, reason, duration); err != nil {
-				logger.Warnf("[AnomalyDetection] Failed to persist ban record for IP %s: %v", ip, err)
-			}
+		banRecordService := services.NewBanRecordService(bizDB)
+		if err := banRecordService.UpsertActiveBan(ip, models.BanSourceAnomaly, reason, duration); err != nil {
+			logger.Warnf("[AnomalyDetection] Failed to persist ban record for IP %s: %v", ip, err)
 		}
 		logger.Infof("[AnomalyDetection] Blocked IP %s for %ds, reason: %s", ip, duration, reason)
 		return nil
@@ -94,11 +92,9 @@ func InitAnomaly(
 			logger.Warnf("[AnomalyDetection] Failed to unblock IP %s: %v", ip, err)
 			return err
 		}
-		if bizDB != nil {
-			banRecordService := services.NewBanRecordService(bizDB)
-			if err := banRecordService.MarkExpired(ip, models.BanSourceAnomaly); err != nil {
-				logger.Warnf("[AnomalyDetection] Failed to mark ban record expired for IP %s: %v", ip, err)
-			}
+		banRecordService := services.NewBanRecordService(bizDB)
+		if err := banRecordService.MarkExpired(ip, models.BanSourceAnomaly); err != nil {
+			logger.Warnf("[AnomalyDetection] Failed to mark ban record expired for IP %s: %v", ip, err)
 		}
 		logger.Infof("[AnomalyDetection] Unblocked IP %s (ban expired)", ip)
 		return nil

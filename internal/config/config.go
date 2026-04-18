@@ -79,7 +79,7 @@ type GeoIPSource struct {
 	Format   string `yaml:"format"`   // maxmind, dbip 等
 }
 
-// ManualConfig 手动规则配置
+// ManualConfig 手动规则配置(包含黑名单和白名单)
 type ManualConfig struct {
 	Enabled        bool   `yaml:"enabled"`         // 是否启用手动规则持久化
 	PersistenceDir string `yaml:"persistence_dir"` // 持久化目录

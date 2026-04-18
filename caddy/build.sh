@@ -1,5 +1,5 @@
 #!/bin/bash
 # build
-docker build --no-cache -t docker.cnb.cool/makecnbgreatagain/rho-aias/rho-aias-caddy . 
+docker build -t docker.cnb.cool/makecnbgreatagain/rho-aias/rho-aias-caddy . 
 # push
 docker push docker.cnb.cool/makecnbgreatagain/rho-aias/rho-aias-caddy 

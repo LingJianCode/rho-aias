@@ -38,24 +38,6 @@ type AnomalyController interface {
 	MonitorAnomalyEvents(callback ebpfs.AnomalyEventCallback, extraDone <-chan struct{})
 }
 
-type LifecycleManager struct {
-	mu       sync.Mutex
-	stoppers []func()
-}
-
-func (lm *LifecycleManager) Register(fn func()) {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
-	lm.stoppers = append(lm.stoppers, fn)
-}
-func (lm *LifecycleManager) ShutdownAll() {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
-	for i := len(lm.stoppers) - 1; i >= 0; i-- {
-		lm.stoppers[i]()
-	}
-}
-
 type GeoBlockingConfigUpdater interface {
 	UpdateConfig(enabled bool, mode string, countries []string) error
 	UpdateSourceConfig(sourceID string, enabled bool, periodic bool, schedule string, url string) error
@@ -81,7 +63,6 @@ type ConfigHandle struct {
 	anomalyController     AnomalyController
 	anomalyRecordPacketFn ebpfs.AnomalyEventCallback
 	anomalyMonitorCancel  context.CancelFunc
-	lifecycle             *LifecycleManager
 	mu                    sync.Mutex
 }
 
@@ -95,28 +76,14 @@ func NewConfigHandle(
 	intelMgr IntelConfigUpdater,
 	xdp *ebpfs.Xdp,
 ) *ConfigHandle {
-	lifecycle := &LifecycleManager{}
 	h := &ConfigHandle{
 		configService, validator.New(),
 		failguardMonitor, wafMonitor, rateLimitMonitor,
-		anomalyDetector, geoBlockingMgr, intelMgr, xdp, nil, nil, nil, lifecycle, sync.Mutex{},
-	}
-	if failguardMonitor != nil {
-		lifecycle.Register(failguardMonitor.Stop)
-	}
-	if wafMonitor != nil {
-		lifecycle.Register(wafMonitor.Stop)
-	}
-	if rateLimitMonitor != nil {
-		lifecycle.Register(rateLimitMonitor.Stop)
-	}
-	if anomalyDetector != nil {
-		lifecycle.Register(anomalyDetector.Stop)
+		anomalyDetector, geoBlockingMgr, intelMgr, xdp, nil, nil, nil, sync.Mutex{},
 	}
 	return h
 }
 
-func (h *ConfigHandle) GetLifecycle() *LifecycleManager { return h.lifecycle }
 func (h *ConfigHandle) SetAnomalyController(c AnomalyController, f ebpfs.AnomalyEventCallback) {
 	h.anomalyController = c
 	h.anomalyRecordPacketFn = f

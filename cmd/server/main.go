@@ -8,14 +8,10 @@ import (
 	"rho-aias/internal/bootstrap"
 	"rho-aias/internal/config"
 	"rho-aias/internal/frontend"
-	"rho-aias/internal/handles"
 	"rho-aias/internal/kernel"
 	"rho-aias/internal/logger"
-	"rho-aias/internal/routers"
 
 	"github.com/gin-gonic/gin"
-
-	"gorm.io/gorm"
 )
 
 func main() {
@@ -53,8 +49,8 @@ func main() {
 	logger.Debugf("Loaded config: %+v", cfg)
 
 	// 数据库初始化 + 迁移 + 动态配置恢复
-	dbDeps := bootstrap.InitDatabase(cfg)
-	defer dbDeps.AuthDB.Close()
+	dbs := bootstrap.InitDatabase(cfg)
+	defer dbs.AuthDB.Close()
 
 	// 核心基础设施 (XDP / Manual / Whitelist / BlockLog)
 	core := bootstrap.InitCore(cfg)
@@ -68,30 +64,23 @@ func main() {
 	// 加载持久化的缓存规则到 eBPF map（必须在 Start 之后）
 	core.LoadCachedRules(cfg)
 
-	if dbDeps.AuthDB == nil {
-		logger.Fatalf("[Main] Failed to initialize auth database, authentication is mandatory")
-		return
-	}
+	// AuthDB / BizDB 在 InitDatabase 中已保证非 nil（失败时 FatalExit）
+	dbConn := dbs.BizDB.DB
 
-	var dbConn *gorm.DB
-	if dbDeps.BizDB != nil {
-		dbConn = dbDeps.BizDB.DB
-
-		// 将 StatsStore 注入 BlockLog（两阶段初始化：bizDB 在 Phase 2 才就绪）
-		core.BlockLogHandle.AttachStatsStore(dbConn)
-	}
+	// 将 StatsStore 注入 BlockLog（两阶段初始化：bizDB 在 Phase 2 才就绪）
+	core.BlockLogHandle.AttachStatsStore(dbConn)
 
 	// Phase 3: 检测模块工厂 (Intel / Geo / WAF / RateLimit / FailGuard)
 	detectors := bootstrap.InitDetectors(cfg, core.XDP, ctx, dbConn, core.WhitelistHandle.GetWhitelistChecker())
 
 	// Phase 4: 异常检测
-	anomalyDeps := bootstrap.InitAnomaly(cfg, core.XDP, dbConn, core.WhitelistHandle.GetWhitelistChecker())
+	anomaly := bootstrap.InitAnomaly(cfg, core.XDP, dbConn, core.WhitelistHandle.GetWhitelistChecker())
 
 	// Phase 5: 认证系统 (Casbin / JWT / Captcha)
-	authDeps := bootstrap.InitAuth(cfg, dbDeps.AuthDB)
+	auth := bootstrap.InitAuth(cfg, dbs.AuthDB)
 
 	// 初始化 API Keys from config（依赖 Enforcer）
-	if err := dbDeps.AuthDB.InitAPIKeysFromConfig(authDeps.Enforcer, cfg.Auth.APIKeys); err != nil {
+	if err := dbs.AuthDB.InitAPIKeysFromConfig(auth.Enforcer, cfg.Auth.APIKeys); err != nil {
 		logger.Warnf("[Auth] Failed to initialize API keys from config: %v", err)
 	}
 
@@ -103,23 +92,12 @@ func main() {
 	r.Use(logger.GinLogger(), logger.GinRecovery())
 	api := r.Group("/api")
 
-	// Phase 6: 统一路由注册
-	bootstrap.RegisterAllRoutes(api, core, dbDeps, detectors, anomalyDeps, authDeps)
-
-	// ConfigHandle 注册路由
-	var configHandle *handles.ConfigHandle
-	if dbDeps.DynamicConfigSvc != nil {
-		configHandle = bootstrap.SetupConfigHandle(
-			dbDeps.DynamicConfigSvc, detectors, anomalyDeps,
-			core.XDP, detectors.GeoMgr, detectors.IntelMgr,
-		)
-		defer configHandle.GetLifecycle().ShutdownAll()
-		routers.RegisterConfigRoutes(api, configHandle, authDeps.Enforcer, authDeps.AuthService, authDeps.APIKeyService)
-	}
+	// Phase 6: 统一路由注册（含 ConfigHandle）
+	bootstrap.RegisterAllRoutes(api, core, dbs, detectors, anomaly, auth)
 
 	// Phase 6.5: 注册前端静态文件（SPA fallback）
 	frontend.RegisterFrontend(r)
 
 	// Phase 7: 启动 Server + 优雅退出
-	bootstrap.StartServer(cfg, r, ctx, cancel, dbDeps.BizDB)
+	bootstrap.StartServer(cfg, r, ctx, cancel, dbs.BizDB)
 }

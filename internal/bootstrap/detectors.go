@@ -57,9 +57,7 @@ func InitDetectors(
 	wafMonitor := waf.NewMonitor(&cfg.WAF, xdp, ctx)
 	wafMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.WAF.OffsetStateFile))
 	wafMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-	if dbConn != nil {
-		wafMonitor.SetBanRecordStore(services.NewBanRecordService(dbConn))
-	}
+	wafMonitor.SetBanRecordStore(services.NewBanRecordService(dbConn))
 	if cfg.WAF.Enabled {
 		if err := wafMonitor.Start(); err != nil {
 			logger.Warnf("[Main] WAF monitor start failed: %v", err)
@@ -71,9 +69,7 @@ func InitDetectors(
 	rateLimitMonitor := ratelimit.NewMonitor(&cfg.RateLimit, xdp, ctx)
 	rateLimitMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.RateLimit.OffsetStateFile))
 	rateLimitMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-	if dbConn != nil {
-		rateLimitMonitor.SetBanRecordStore(services.NewBanRecordService(dbConn))
-	}
+	rateLimitMonitor.SetBanRecordStore(services.NewBanRecordService(dbConn))
 	if cfg.RateLimit.Enabled {
 		if err := rateLimitMonitor.Start(); err != nil {
 			logger.Warnf("[Main] Rate Limit monitor start failed: %v", err)
@@ -85,9 +81,7 @@ func InitDetectors(
 	failguardMonitor := failguard.NewMonitor(&cfg.FailGuard, xdp, ctx)
 	failguardMonitor.SetOffsetStore(watcher.NewOffsetStore(cfg.FailGuard.OffsetStateFile))
 	failguardMonitor.SetWhitelistCheck(whitelistChecker.IsWhitelisted)
-	if dbConn != nil {
-		failguardMonitor.SetBanRecordStore(services.NewBanRecordService(dbConn))
-	}
+	failguardMonitor.SetBanRecordStore(services.NewBanRecordService(dbConn))
 	if cfg.FailGuard.Enabled {
 		if err := failguardMonitor.Start(); err != nil {
 			logger.Warnf("[Main] FailGuard monitor start failed: %v", err)

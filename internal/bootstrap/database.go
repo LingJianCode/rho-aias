@@ -7,15 +7,15 @@ import (
 	"rho-aias/internal/services"
 )
 
-// DatabaseDeps 数据库初始化结果
-type DatabaseDeps struct {
+// Databases 数据库初始化结果
+type Databases struct {
 	AuthDB           *database.Database
 	BizDB            *database.Database
 	DynamicConfigSvc *services.DynamicConfigService
 }
 
 // InitDatabase 初始化数据库、迁移表、恢复动态配置
-func InitDatabase(cfg *config.Config) *DatabaseDeps {
+func InitDatabase(cfg *config.Config) *Databases {
 	authDB, err := database.NewDatabase(cfg.Auth.DatabasePath, cfg.Log.Level == "debug")
 	if err != nil {
 		logger.Fatalf("[Main] Failed to initialize auth database (authentication is mandatory): %v", err)
@@ -32,23 +32,21 @@ func InitDatabase(cfg *config.Config) *DatabaseDeps {
 	}
 
 	var dynamicConfigSvc *services.DynamicConfigService
-	if bizDB != nil {
-		if err := bizDB.AutoMigrateBusiness(); err != nil {
-			logger.Fatalf("[Main] Failed to migrate business database: %v", err)
-		}
-
-		banRecordService := services.NewBanRecordService(bizDB.DB)
-		if count, err := banRecordService.MarkAllActiveAsAutoUnblock(); err != nil {
-			logger.Warnf("[Main] Failed to mark active bans as auto_unblock: %v", err)
-		} else if count > 0 {
-			logger.Infof("[Main] Marked %d active ban records as auto_unblock (eBPF state lost on restart)", count)
-		}
-
-		dynamicConfigSvc = services.NewDynamicConfigService(bizDB.DB)
-		loadDynamicConfigFromDB(dynamicConfigSvc, cfg)
+	if err := bizDB.AutoMigrateBusiness(); err != nil {
+		logger.Fatalf("[Main] Failed to migrate business database: %v", err)
 	}
 
-	return &DatabaseDeps{
+	banRecordService := services.NewBanRecordService(bizDB.DB)
+	if count, err := banRecordService.MarkAllActiveAsAutoUnblock(); err != nil {
+		logger.Warnf("[Main] Failed to mark active bans as auto_unblock: %v", err)
+	} else if count > 0 {
+		logger.Infof("[Main] Marked %d active ban records as auto_unblock (eBPF state lost on restart)", count)
+	}
+
+	dynamicConfigSvc = services.NewDynamicConfigService(bizDB.DB)
+	loadDynamicConfigFromDB(dynamicConfigSvc, cfg)
+
+	return &Databases{
 		AuthDB:           authDB,
 		BizDB:            bizDB,
 		DynamicConfigSvc: dynamicConfigSvc,
