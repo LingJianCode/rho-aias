@@ -102,15 +102,9 @@ export interface BlockLogListResponse {
   page_size: number
 }
 
-export interface IPCount {
-  ip: string
-  count: number
-}
-
 export interface BlockLogStats {
   total_blocked: number
   by_rule_source: Record<string, number>
-  top_blocked_ips: IPCount[]
 }
 
 // ============================================

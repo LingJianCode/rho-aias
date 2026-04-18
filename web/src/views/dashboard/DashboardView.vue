@@ -41,33 +41,6 @@
         </el-card>
       </el-col>
     </el-row>
-
-    <!-- 第三行：最近阻断记录（快捷入口） -->
-    <el-card style="margin-top: 20px">
-      <template #header>
-        <div class="card-header">
-          <span>最近阻断记录</span>
-          <el-button type="primary" link @click="$router.push('/logs/blocklog')">查看全部</el-button>
-        </div>
-      </template>
-      <el-table :data="recentBlocks" stripe>
-        <el-table-column prop="timestamp" label="时间" width="180">
-          <template #default="{ row }">{{ formatNanoTimestamp(row.timestamp) }}</template>
-        </el-table-column>
-        <el-table-column prop="src_ip" label="源 IP" min-width="140" />
-        <el-table-column prop="rule_source" label="来源" width="100">
-          <template #default="{ row }">
-            <RuleSourceTag :source="row.rule_source" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="match_type" label="匹配类型" width="100" />
-        <el-table-column prop="country_code" label="国家" width="100">
-          <template #default="{ row }">
-            <CountryFlag :code="row.country_code" />
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
   </div>
 </template>
 
@@ -85,7 +58,7 @@ function formatNanoTimestamp(ts: number | string): string {
   return formatDateTime(ts)
 }
 // 统计与趋势
-import { getBlockLogStats, getBlockLogs, getBlockedTopIPs, getHourlyTrend } from '@/api/blocklog'
+import { getBlockLogStats,  getBlockedTopIPs, getHourlyTrend } from '@/api/blocklog'
 import type { BlockLog } from '@/types/api'
 
 const chartRef = ref<HTMLElement>()
@@ -98,8 +71,7 @@ const blockTrend = ref<{ date: string; count: number }[]>([])
 async function fetchDashboardData() {
   await Promise.all([
     fetchBlockStatsAndTrend(),
-    fetchTopIPs(),
-    fetchRecentBlocks(),
+    fetchTopIPs()
   ])
   updateChart()
 }
@@ -123,17 +95,6 @@ async function fetchTopIPs() {
     const res = await getBlockedTopIPs(10)
     if (res.data?.top_blocked_ips) {
       topIPs.value = res.data.top_blocked_ips
-    }
-  } catch {
-    // Error handled
-  }
-}
-
-async function fetchRecentBlocks() {
-  try {
-    const res = await getBlockLogs({ page_size: 5 })
-    if (res.data?.records) {
-      recentBlocks.value = res.data.records
     }
   } catch {
     // Error handled

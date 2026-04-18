@@ -8,14 +8,12 @@
       <el-col :span="5">
         <StatsCard label="阻断总数" :value="stats.total_blocked" :icon="DataLine" icon-color="#409eff" />
       </el-col>
-      <el-col :span="5">
-        <StatsCard label="阻断 IP 数" :value="stats.top_blocked_ips.length" :icon="Monitor" icon-color="#67c23a" />
-      </el-col>
-      <el-col :span="5">
-        <StatsCard label="数据来源" :value="Object.keys(stats.by_rule_source).length" :icon="Connection" icon-color="#909399" />
+    </el-row>
+    <el-row :gutter="12" class="stats-row">
+      <el-col :span="5" v-for="(value, key) in stats.by_rule_source">
+        <StatsCard :label="key" :value="value" :icon="Connection" icon-color="#67c23a" />
       </el-col>
     </el-row>
-
     <el-card class="filter-card">
       <el-form :inline="true" :model="filters" class="filter-form">
         <el-form-item label="查询时间">
@@ -105,8 +103,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { DataLine, Monitor, Connection } from '@element-plus/icons-vue'
+import { DataLine, Connection } from '@element-plus/icons-vue'
 import StatsCard from '@/components/StatsCard.vue'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
@@ -146,7 +143,6 @@ const filters = reactive({
 const stats = reactive<BlockLogStats>({
   total_blocked: 0,
   by_rule_source: {},
-  top_blocked_ips: [],
 })
 
 async function fetchStats() {
