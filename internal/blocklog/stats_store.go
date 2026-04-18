@@ -149,15 +149,12 @@ func (ss *StatsStore) GetHourlyTrend(hours int) []HourlyTrendItem {
 
 // GetTopIPs 从 blocklog_top_ips 表查询时间范围内 Top N IP
 // retentionDays: 查询最近 N 天的数据
-func (ss *StatsStore) GetTopIPs(retentionDays int, limit int) ([]IPCount, int64) {
+func (ss *StatsStore) GetTopIPs(retentionDays int, limit int) []IPCount {
 	if ss.db == nil {
-		return nil, 0
+		return nil
 	}
 
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).Format("2006-01-02T15")
-
-	var total int64
-	ss.db.Model(&models.BlocklogTopIP{}).Where("hour >= ?", cutoff).Count(&total)
 
 	var results []struct {
 		IP    string `json:"ip"`
@@ -175,7 +172,7 @@ func (ss *StatsStore) GetTopIPs(retentionDays int, limit int) ([]IPCount, int64)
 	for i, r := range results {
 		ips[i] = IPCount{IP: r.IP, Count: int(r.Total)}
 	}
-	return ips, total
+	return ips
 }
 
 // Cleanup 清理 N 天前的历史数据

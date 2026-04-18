@@ -78,11 +78,10 @@ func (h *BlockLogHandle) GetBlockedTopIPs(c *gin.Context) {
 		}
 	}
 
-	topIPs, total := h.blockLog.GetTopIPs(limit)
+	topIPs := h.blockLog.GetTopIPs(limit)
 
 	response.OK(c, gin.H{
-		"total_blocked_ips": total,
-		"top_blocked_ips":   topIPs,
+		"top_blocked_ips": topIPs,
 	})
 }
 

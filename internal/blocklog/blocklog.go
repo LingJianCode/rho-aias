@@ -348,12 +348,12 @@ func (bl *BlockLog) GetHourlyTrend(hours int) []HourlyTrendItem {
 }
 
 // GetTopIPs 从数据库查询 Top N 被阻断 IP（融合查询：DB + 内存）
-func (bl *BlockLog) GetTopIPs(limit int) ([]IPCount, int64) {
+func (bl *BlockLog) GetTopIPs(limit int) []IPCount {
 	if bl.statsStore == nil {
-		return nil, 0
+		return nil
 	}
 
-	dbIPs, _ := bl.statsStore.GetTopIPs(defaultRetentionDays, limit)
+	dbIPs := bl.statsStore.GetTopIPs(defaultRetentionDays, limit)
 
 	// 融合内存计数器中的 TopIP
 	memIPs := bl.counters.snapshotTopIPs(limit)
@@ -375,7 +375,7 @@ func (bl *BlockLog) GetTopIPs(limit int) ([]IPCount, int64) {
 		mergedIPs = mergedIPs[:limit]
 	}
 
-	return mergedIPs, int64(len(ipMap))
+	return mergedIPs
 }
 
 // Flush 刷新缓冲区到磁盘

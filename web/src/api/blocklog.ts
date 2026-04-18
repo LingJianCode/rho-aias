@@ -23,7 +23,7 @@ export function getHourlyTrend(hours?: number): Promise<ApiResponse<{ hours: num
   return request.get('/api/blocklog/hourly-trend', { params: { hours } }).then((res) => res.data)
 }
 
-export function getBlockedTopIPs(limit?: number): Promise<ApiResponse<{ total_blocked_ips: number; top_blocked_ips: { ip: string; count: number }[] }>> {
+export function getBlockedTopIPs(limit?: number): Promise<ApiResponse<{ top_blocked_ips: { ip: string; count: number }[] }>> {
   return request.get('/api/blocklog/blocked-top-ips', { params: { limit } }).then((res) => res.data)
 }
 
