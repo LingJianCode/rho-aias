@@ -10,13 +10,13 @@ const (
 	ModuleAnomalyDetection = "anomaly_detection"
 	ModuleGeoBlocking      = "geo_blocking"
 	ModuleIntel            = "intel"
-	ModuleXDPEvents        = "xdp_events"
+	ModuleBlocklogEvents   = "blocklog_events"
 )
 
 // IsValidModule 检查模块名是否合法（供 handles、services 等外部包调用）
 func IsValidModule(module string) bool {
 	switch module {
-	case ModuleFailGuard, ModuleWAF, ModuleRateLimit, ModuleAnomalyDetection, ModuleGeoBlocking, ModuleIntel, ModuleXDPEvents:
+	case ModuleFailGuard, ModuleWAF, ModuleRateLimit, ModuleAnomalyDetection, ModuleGeoBlocking, ModuleIntel, ModuleBlocklogEvents:
 		return true
 	default:
 		return false

@@ -196,18 +196,18 @@
         </template>
 
         <!-- XDP Events -->
-        <template v-else-if="activeModule === 'xdp_events'">
+        <template v-else-if="activeModule === 'blocklog_events'">
           <h3>XDP 事件上报</h3>
-          <el-form :model="xdpEvents" label-width="140px" style="max-width: 480px">
+          <el-form :model="blocklogEvents" label-width="140px" style="max-width: 480px">
             <el-form-item label="启用状态">
-              <el-switch v-model="xdpEvents.enabled" />
+              <el-switch v-model="blocklogEvents.enabled" />
             </el-form-item>
             <el-form-item label="采样">
-              <el-slider v-model="xdpEvents.sample_rate" :min="1" :max="10000" show-input input-size="small" />
+              <el-slider v-model="blocklogEvents.sample_rate" :min="1" :max="10000" show-input input-size="small" />
               <div class="form-hint">控制上报到后端的事件比例（每N个包采样一个，1000 表示 0.1% 的采样率），1为全部上报</div>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="prepareSave('xdp_events', xdpEvents)" :loading="saving">保存</el-button>
+              <el-button type="primary" @click="prepareSave('blocklog_events', blocklogEvents)" :loading="saving">保存</el-button>
             </el-form-item>
           </el-form>
         </template>
@@ -304,7 +304,7 @@ const fieldLabels: Record<string, Record<string, string>> = {
   intel: {
     enabled: '启用状态',
   },
-  xdp_events: {
+  blocklog_events: {
     enabled: '启用状态',
     sample_rate: '采样率(%)',
   },
@@ -448,8 +448,8 @@ function takeSnapshot(module: ConfigModuleName) {
     case 'intel':
       originalSnapshot.value[module] = JSON.parse(JSON.stringify(intel))
       break
-    case 'xdp_events':
-      originalSnapshot.value[module] = JSON.parse(JSON.stringify(xdpEvents))
+    case 'blocklog_events':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(blocklogEvents))
       break
   }
 }
@@ -461,7 +461,7 @@ const modules: { key: ConfigModuleName; label: string }[] = [
   { key: 'anomaly_detection', label: '异常检测' },
   { key: 'geo_blocking', label: '地域封禁' },
   { key: 'intel', label: '威胁情报' },
-  { key: 'xdp_events', label: 'XDP 上报' },
+  { key: 'blocklog_events', label: 'XDP 上报' },
 ]
 
 const failguard = reactive({ enabled: false, max_retry: 5, find_time: 600, ban_duration: 3600, mode: 'normal' as string })
@@ -471,7 +471,7 @@ const baseline = reactive({ packets_per_sec: 0, bytes_per_sec: 0 })
 const anomaly = reactive({ enabled: false, min_packets: 10, ports: [80, 443] })
 const geo = reactive({ enabled: false, mode: 'whitelist' as string, allowed_countries: [] as string[], sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
 const intel = reactive({ enabled: false, sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
-const xdpEvents = reactive({ enabled: false, sample_rate: 100 })
+const blocklogEvents = reactive({ enabled: false, sample_rate: 100 })
 
 const countryOptions = [
   { code: 'CN', name: '中国', flag: '\u{1F1E8}\u{1F1F3}' }, { code: 'US', name: '美国', flag: '\u{1F1FA}\u{1F1F8}' },
@@ -503,7 +503,7 @@ async function loadModuleConfig(module: ConfigModuleName) {
     }
     else if (module === 'geo_blocking') Object.assign(geo, { enabled: data.enabled, mode: data.mode || 'whitelist', allowed_countries: data.allowed_countries || [], sources: data.sources || {} })
     else if (module === 'intel') Object.assign(intel, { enabled: data.enabled, sources: data.sources || {} })
-    else if (module === 'xdp_events') Object.assign(xdpEvents, { enabled: data.enabled, sample_rate: data.sample_rate ?? 100 })
+    else if (module === 'blocklog_events') Object.assign(blocklogEvents, { enabled: data.enabled, sample_rate: data.sample_rate ?? 100 })
 
     // 加载完成后快照原始值
     takeSnapshot(module)

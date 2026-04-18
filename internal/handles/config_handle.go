@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"rho-aias/internal/anomaly"
+	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/failguard"
 	"rho-aias/internal/logger"
@@ -24,7 +25,7 @@ import (
 var supportedModules = []string{
 	models.ModuleFailGuard, models.ModuleWAF, models.ModuleRateLimit,
 	models.ModuleAnomalyDetection, models.ModuleGeoBlocking, models.ModuleIntel,
-	models.ModuleXDPEvents,
+	models.ModuleBlocklogEvents,
 }
 
 // IsValidModule 导出给外部调用
@@ -79,7 +80,7 @@ type ConfigHandle struct {
 	xdp                   *ebpfs.Xdp
 	anomalyController     AnomalyController
 	anomalyRecordPacketFn ebpfs.AnomalyEventCallback
-	anomalyMonitorCancel  context.CancelFunc // 用于取消旧 anomaly 监听 goroutine
+	anomalyMonitorCancel  context.CancelFunc
 	lifecycle             *LifecycleManager
 	mu                    sync.Mutex
 }
@@ -138,7 +139,7 @@ func (h *ConfigHandle) GetAllConfig(c *gin.Context) {
 		dbConfigs[r.Module] = json.RawMessage(r.Value)
 	}
 
-	modules := []string{models.ModuleFailGuard, models.ModuleWAF, models.ModuleRateLimit, models.ModuleAnomalyDetection, models.ModuleGeoBlocking, models.ModuleIntel, models.ModuleXDPEvents}
+	modules := []string{models.ModuleFailGuard, models.ModuleWAF, models.ModuleRateLimit, models.ModuleAnomalyDetection, models.ModuleGeoBlocking, models.ModuleIntel, models.ModuleBlocklogEvents}
 	for _, module := range modules {
 		runtimeConfig := h.getRuntimeConfig(module)
 		if runtimeConfig != nil {
@@ -223,7 +224,7 @@ func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 	response.OKMsg(c, fmt.Sprintf("Module %s config updated successfully", module))
 }
 
-// getRuntimeConfig 获取模块运行时配置（调度到各子文件）
+// getRuntimeConfig 获取模块运行时配置
 func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 	switch module {
 	case models.ModuleFailGuard:
@@ -242,13 +243,13 @@ func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 		if h.intelMgr != nil && !isNilInterface(h.intelMgr) {
 			return h.intelMgr.GetConfig()
 		}
-	case models.ModuleXDPEvents:
+	case models.ModuleBlocklogEvents:
 		return h.getXDPEventsRuntimeConfig()
 	}
 	return nil
 }
 
-// applyConfig 将配置应用到模块（调度到各子文件）
+// applyConfig 将配置应用到模块
 func (h *ConfigHandle) applyConfig(module string, raw json.RawMessage) error {
 	switch module {
 	case models.ModuleFailGuard:
@@ -263,45 +264,45 @@ func (h *ConfigHandle) applyConfig(module string, raw json.RawMessage) error {
 		return h.applyGeoBlockingConfig(raw)
 	case models.ModuleIntel:
 		return h.applyIntelConfig(raw)
-	case models.ModuleXDPEvents:
-		return h.applyXDPEventsConfig(raw)
+	case models.ModuleBlocklogEvents:
+		return h.applyBlocklogEventsConfig(raw)
 	default:
 		return fmt.Errorf("unsupported module: %s", module)
 	}
 }
 
-// validateConfig 校验请求参数
+// validateConfig 校验请求参数（使用 config.Runtime 结构体）
 func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error {
 	switch module {
 	case models.ModuleFailGuard:
-		var req failGuardConfigRequest
+		var req config.FailGuardRuntime
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
 		}
 		return h.validate.Struct(req)
 	case models.ModuleWAF:
-		var req wafConfigRequest
+		var req config.WAFRuntime
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
 		}
 		return h.validate.Struct(req)
 	case models.ModuleRateLimit:
-		var req rateLimitConfigRequest
+		var req config.RateLimitRuntime
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
 		}
 		return h.validate.Struct(req)
 	case models.ModuleAnomalyDetection:
-		var req anomalyDetectionConfigRequest
+		var req config.AnomalyDetectionRuntime
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
 		}
 		if err := h.validate.Struct(req); err != nil {
 			return err
 		}
-		return validateAnomalyNestedFields(req.Baseline, req.Attacks)
+		return validateAnomalyRuntimeFields(&req.Baseline, &req.Attacks)
 	case models.ModuleGeoBlocking:
-		var req geoBlockingConfigRequest
+		var req config.GeoBlockingRuntime
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
 		}
@@ -315,7 +316,7 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 		}
 		return nil
 	case models.ModuleIntel:
-		var req intelConfigRequest
+		var req config.IntelRuntime
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
 		}
@@ -328,8 +329,8 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 			}
 		}
 		return nil
-	case models.ModuleXDPEvents:
-		var req xdpEventsConfigRequest
+	case models.ModuleBlocklogEvents:
+		var req config.BlocklogEventsRuntime
 		if err := json.Unmarshal(raw, &req); err != nil {
 			return fmt.Errorf("invalid format: %w", err)
 		}
@@ -360,9 +361,9 @@ func (h *ConfigHandle) getMergedConfig(module string) (interface{}, error) {
 			return nil, fmt.Errorf("intel module is not initialized")
 		}
 		return h.intelMgr.GetConfig(), nil
-	case models.ModuleXDPEvents:
+	case models.ModuleBlocklogEvents:
 		if h.xdp == nil {
-			return nil, fmt.Errorf("xdp_events module is not initialized (XDP not available)")
+			return nil, fmt.Errorf("blocklog_events module is not initialized (XDP not available)")
 		}
 		return h.getXDPEventsRuntimeConfig(), nil
 	default:
