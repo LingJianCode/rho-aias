@@ -14,7 +14,7 @@ func TestNewManager(t *testing.T) {
 func TestAddRecord(t *testing.T) {
 	bl := NewManager()
 
-	// 添加记录
+	// 添加记录（无 DB 时仅写入 asyncWriter，不会 panic）
 	record := BlockRecord{
 		Timestamp:   1234567890,
 		SrcIP:       "192.168.1.1",
@@ -28,10 +28,10 @@ func TestAddRecord(t *testing.T) {
 
 	bl.AddRecord(record)
 
-	// 验证计数器更新
+	// 无 DB 时 GetStats 返回空 Stats
 	stats := bl.GetStats()
-	if stats.TotalBlocked != 1 {
-		t.Errorf("Expected total 1, got %d", stats.TotalBlocked)
+	if stats.TotalBlocked != 0 {
+		t.Errorf("Expected total 0 (no DB), got %d", stats.TotalBlocked)
 	}
 }
 
@@ -44,17 +44,10 @@ func TestGetStats(t *testing.T) {
 	bl.AddRecord(BlockRecord{SrcIP: "192.168.1.3", MatchType: "geo_block", RuleSource: "geo", CountryCode: "US"})
 	bl.AddRecord(BlockRecord{SrcIP: "192.168.1.4", MatchType: "geo_block", RuleSource: "geo", CountryCode: "CN"})
 
+	// 无 DB 时 GetStats 返回空 Stats
 	stats := bl.GetStats()
-
-	// 无 DB 时 GetStats 返回内存快照（融合查询降级为纯内存）
-	if stats.TotalBlocked != 4 {
-		t.Errorf("Expected total 4 (memory snapshot), got %d", stats.TotalBlocked)
-	}
-	if stats.ByRuleSource["manual"] != 2 {
-		t.Errorf("Expected by_rule_source.manual=2, got %d", stats.ByRuleSource["manual"])
-	}
-	if stats.ByRuleSource["geo"] != 2 {
-		t.Errorf("Expected by_rule_source.geo=2, got %d", stats.ByRuleSource["geo"])
+	if stats.TotalBlocked != 0 {
+		t.Errorf("Expected total 0 (no DB), got %d", stats.TotalBlocked)
 	}
 }
 

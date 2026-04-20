@@ -59,10 +59,11 @@ func NewAsyncWriter(config Config, db *gorm.DB, onRotate func(time.Time)) (*Asyn
 		return nil, fmt.Errorf("failed to add flush cron job: %w", err)
 	}
 
-	// 整点轮转回调（触发统计快照）
+	// 整点轮转回调（每小时第 3 分钟执行，聚合上一小时数据，避免整点临界时刻缓冲区未落盘）
 	if onRotate != nil {
-		if _, err := aw.cron.AddFunc("0 0 * * * *", func() {
-			onRotate(time.Now())
+		if _, err := aw.cron.AddFunc("0 3 * * * *", func() {
+			lastHour := time.Now().Add(-1 * time.Hour)
+			onRotate(lastHour)
 		}); err != nil {
 			return nil, fmt.Errorf("failed to add rotate cron job: %w", err)
 		}

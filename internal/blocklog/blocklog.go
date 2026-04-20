@@ -4,8 +4,6 @@ package blocklog
 
 import (
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"rho-aias/internal/logger"
@@ -25,77 +23,15 @@ type BlockRecord struct {
 	PacketSize  uint32 `json:"packet_size"`  // 数据包大小
 }
 
-// blockLogCounters 增量统计计数器（原子操作，无锁热路径）
-// 整点轮转时刷入 DB 后归零；查询时通过融合查询（DB + 内存快照）实现实时统计
-type blockLogCounters struct {
-	totalBlocked int64
-	byRuleSource map[string]*int64 // 每种规则来源的计数指针
-	mu           sync.RWMutex      // 写端保护 map 结构变更，读端 RLock 无阻塞
-}
-
 // Manager 阻断日志管理器
 type Manager struct {
 	asyncWriter *AsyncWriter
 	statsStore  *StatsStore // 统计存储（可选）
-	counters    *blockLogCounters
 }
 
 // NewManager 创建新的阻断日志管理器
 func NewManager() *Manager {
-	return &Manager{
-		counters: newBlockLogCounters(),
-	}
-}
-
-// newBlockLogCounters 创建增量统计计数器
-func newBlockLogCounters() *blockLogCounters {
-	return &blockLogCounters{
-		byRuleSource: make(map[string]*int64),
-	}
-}
-
-// increment 安全地递增计数器（不包含总计数）
-func (c *blockLogCounters) increment(m map[string]*int64, key string) {
-	if key == "" {
-		return
-	}
-	// 先尝试无锁读，命中则直接原子加；未命中才走锁路径
-	c.mu.Lock()
-	ptr, ok := m[key]
-	if !ok {
-		var v int64 = 0
-		ptr = &v
-		m[key] = ptr
-	}
-	c.mu.Unlock()
-	atomic.AddInt64(ptr, 1)
-}
-
-// snapshot 读取当前计数器快照（用于整点轮转时刷入 DB）
-func (c *blockLogCounters) snapshot() Stats {
-	stats := Stats{
-		TotalBlocked: int(atomic.LoadInt64(&c.totalBlocked)),
-		ByRuleSource: make(map[string]int),
-	}
-
-	c.mu.RLock()
-	for k, v := range c.byRuleSource {
-		if cnt := atomic.LoadInt64(v); cnt > 0 {
-			stats.ByRuleSource[k] = int(cnt)
-		}
-	}
-	c.mu.RUnlock()
-
-	return stats
-}
-
-// reset 重置所有计数器（整点轮转刷入 DB 后调用）
-func (c *blockLogCounters) reset() {
-	atomic.StoreInt64(&c.totalBlocked, 0)
-
-	c.mu.Lock()
-	c.byRuleSource = make(map[string]*int64)
-	c.mu.Unlock()
+	return &Manager{}
 }
 
 // NewManagerWithPersistence 创建带持久化的阻断日志管理器
@@ -104,7 +40,7 @@ func NewManagerWithPersistence(config Config, db *gorm.DB) (*Manager, error) {
 
 	// 创建异步写入器（注入 onRotate 回调 + db）
 	asyncWriter, err := NewAsyncWriter(config, db, func(t time.Time) {
-		m.SnapshotHourlyCounters(t)
+		m.RotateHourlyStats(t)
 	})
 	if err != nil {
 		return nil, err
@@ -128,13 +64,6 @@ func (m *Manager) AddRecord(record BlockRecord) {
 		if err := m.asyncWriter.Write(record); err != nil {
 			logger.Warnf("async write failed: %v", err)
 		}
-	}
-
-	// 增量计数器更新（原子操作，无锁，仅用于整点轮转时的写缓冲）
-	if m.counters != nil {
-		c := m.counters
-		atomic.AddInt64(&c.totalBlocked, 1)
-		c.increment(c.byRuleSource, record.RuleSource)
 	}
 }
 
@@ -182,48 +111,41 @@ type PageResult struct {
 // defaultRetentionDays 默认查询最近天数
 const defaultRetentionDays = 30
 
-// GetStats 获取统计信息（融合查询：DB 历史数据 + 内存实时计数器）
+// GetStats 获取统计信息（纯 DB 查询：历史预聚合 + 当前小时实时 SQL 聚合）
 func (m *Manager) GetStats() Stats {
 	if m.statsStore == nil {
-		// 无 DB 时直接返回内存快照
-		if m.counters != nil {
-			return m.counters.snapshot()
-		}
 		return Stats{}
 	}
 
-	// 从 DB 获取历史数据（带时间边界）
+	// 从 DB 获取历史数据（blocklog_hourly_stats 预聚合）
 	dbStats := m.statsStore.GetAggregatedStats(defaultRetentionDays)
 
-	// 融合内存计数器（当前小时，尚未 flush 到 DB）
-	memSnap := m.counters.snapshot()
+	// 当前小时：从分表实时 SQL 聚合
+	currentHourKey := time.Now().Format("2006-01-02T15")
+	currentStats := m.statsStore.AggregateStatsFromTable(currentHourKey)
 
-	// 合并 TotalBlocked
-	dbStats.TotalBlocked += memSnap.TotalBlocked
-
-	// 合并 ByRuleSource
-	for k, v := range memSnap.ByRuleSource {
+	// 合并
+	dbStats.TotalBlocked += currentStats.TotalBlocked
+	for k, v := range currentStats.ByRuleSource {
 		dbStats.ByRuleSource[k] += v
 	}
 
 	return dbStats
 }
 
-// SnapshotHourlyCounters 将当前内存计数器快照写入 DB 并重置（整点轮转时由回调调用）
-func (m *Manager) SnapshotHourlyCounters(t time.Time) {
-	if m.counters == nil || m.statsStore == nil {
+// RotateHourlyStats 整点轮转：从分表 SQL 聚合上一小时统计并写入 blocklog_hourly_stats
+// 由 cron 定时任务在每小时第 3 分钟调用，聚合上一小时数据
+func (m *Manager) RotateHourlyStats(t time.Time) {
+	if m.statsStore == nil {
 		return
 	}
 	hourKey := t.Format("2006-01-02T15")
-	snap := m.counters.snapshot()
-
-	// 从 SQLite 按天分表聚合 topIPs
+	stats := m.statsStore.AggregateStatsFromTable(hourKey)
 	topIPs := m.statsStore.AggregateTopIPsFromTable(hourKey)
 
-	if snap.TotalBlocked > 0 || len(topIPs) > 0 {
-		m.statsStore.SnapshotHour(hourKey, snap, topIPs)
+	if stats.TotalBlocked > 0 || len(topIPs) > 0 {
+		m.statsStore.SnapshotHour(hourKey, stats, topIPs)
 	}
-	m.counters.reset()
 }
 
 // Close 关闭阻断日志管理器（停止异步写入器）

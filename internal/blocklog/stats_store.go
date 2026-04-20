@@ -347,6 +347,59 @@ func (ss *StatsStore) AggregateTopIPsFromTable(hourKey string) []IPCount {
 	return ips
 }
 
+// AggregateStatsFromTable 从按天分表 SQL 聚合指定小时的统计数据
+// hourKey 格式: "2026-04-17T14"
+func (ss *StatsStore) AggregateStatsFromTable(hourKey string) Stats {
+	if ss.db == nil {
+		return Stats{}
+	}
+
+	// hourKey 格式: "2026-04-17T14"
+	parts := strings.SplitN(hourKey, "T", 2)
+	if len(parts) != 2 {
+		return Stats{}
+	}
+
+	dateStr := parts[0] // "2026-04-17"
+	hourStr := parts[1] // "14"
+
+	parsedDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return Stats{}
+	}
+
+	tableName := "blocklog_" + parsedDate.Format("20060102")
+	if !ss.db.Migrator().HasTable(tableName) {
+		return Stats{}
+	}
+
+	var hour int
+	fmt.Sscanf(hourStr, "%d", &hour)
+
+	stats := Stats{
+		ByRuleSource: make(map[string]int),
+	}
+
+	// 按 rule_source 聚合
+	var results []struct {
+		RuleSource string `json:"rule_source"`
+		Count      int64  `json:"count"`
+	}
+
+	ss.db.Table(tableName).
+		Select("rule_source, COUNT(*) as count").
+		Where("hour = ?", hour).
+		Group("rule_source").
+		Find(&results)
+
+	for _, r := range results {
+		stats.ByRuleSource[r.RuleSource] = int(r.Count)
+		stats.TotalBlocked += int(r.Count)
+	}
+
+	return stats
+}
+
 // CleanupOldDayTables 清理 N 天前的按天分表（DROP TABLE）
 func (ss *StatsStore) CleanupOldDayTables(retainDays int) error {
 	if ss.db == nil {
