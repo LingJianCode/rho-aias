@@ -119,30 +119,64 @@ func (ss *StatsStore) GetHourlyTrend(hours int) []HourlyTrendItem {
 		return nil
 	}
 	now := time.Now()
-	result := make([]HourlyTrendItem, 0, hours)
+	currentHourKey := now.Format("2006-01-02T15")
+	startHour := now.Add(-time.Duration(hours-1) * time.Hour).Format("2006-01-02T15")
 
+	// 构建 hour -> HourlyTrendItem 的映射
+	hourMap := make(map[string]*HourlyTrendItem, hours)
+
+	// ---- 1. 从 blocklog_hourly_stats 批量查询历史小时数据（当前小时之前） ----
+	var statItems []models.BlocklogHourlyStat
+	err := ss.db.Select("hour, dim_value, SUM(count) as count").
+		Where("hour >= ? AND hour < ? AND dimension = ?", startHour, currentHourKey, "rule_source").
+		Group("hour, dim_value").
+		Find(&statItems).Error
+	if err != nil {
+		logger.Warnf("[StatsStore] query trend from hourly_stats failed: %v", err)
+	}
+	for _, row := range statItems {
+		if _, ok := hourMap[row.Hour]; !ok {
+			hourMap[row.Hour] = &HourlyTrendItem{Hour: row.Hour, Breakdown: make(map[string]int64)}
+		}
+		hourMap[row.Hour].Breakdown[row.DimValue] = row.Count
+		hourMap[row.Hour].Total += row.Count
+	}
+
+	// ---- 2. 从当天 BlocklogRecord 分表实时聚合当前小时数据 ----
+	tableName := "blocklog_" + now.Format("20060102")
+	currentHour := now.Hour()
+	var liveItems []struct {
+		RuleSource string `json:"rule_source"`
+		Count      int64  `json:"count"`
+	}
+	err = ss.db.Table(tableName).
+		Select("rule_source, COUNT(*) as count").
+		Where("hour = ?", currentHour).
+		Group("rule_source").
+		Find(&liveItems).Error
+	if err != nil {
+		logger.Warnf("[StatsStore] query live trend from %s failed: %v", tableName, err)
+		// 当前小时无数据时填零
+		hourMap[currentHourKey] = &HourlyTrendItem{Hour: currentHourKey, Total: 0, Breakdown: make(map[string]int64)}
+	} else {
+		item := &HourlyTrendItem{Hour: currentHourKey, Breakdown: make(map[string]int64)}
+		for _, row := range liveItems {
+			item.Breakdown[row.RuleSource] = row.Count
+			item.Total += row.Count
+		}
+		hourMap[currentHourKey] = item
+	}
+
+	// ---- 3. 按时间顺序组装结果，缺失的小时填零 ----
+	result := make([]HourlyTrendItem, 0, hours)
 	for i := hours - 1; i >= 0; i-- {
 		t := now.Add(-time.Duration(i) * time.Hour)
 		hourKey := t.Format("2006-01-02T15")
-
-		var items []models.BlocklogHourlyStat
-		err := ss.db.Select("dim_value, SUM(count) as count").
-			Where("hour = ? AND dimension = ?", hourKey, "rule_source").
-			Group("dim_value").
-			Find(&items).Error
-		if err != nil {
-			logger.Warnf("[StatsStore] query trend failed for %s: %v", hourKey, err)
+		if item, ok := hourMap[hourKey]; ok {
+			result = append(result, *item)
+		} else {
 			result = append(result, HourlyTrendItem{Hour: hourKey, Total: 0, Breakdown: make(map[string]int64)})
-			continue
 		}
-
-		item := HourlyTrendItem{Hour: hourKey, Breakdown: make(map[string]int64)}
-		for _, row := range items {
-			item.Total += row.Count
-			item.Breakdown[row.DimValue] = row.Count
-		}
-
-		result = append(result, item)
 	}
 
 	return result
@@ -271,10 +305,10 @@ func (ss *StatsStore) QueryRecords(filter RecordFilter) (*PageResult, error) {
 	var total int64
 	query.Count(&total)
 
-	// 分页查询（按 id ASC）
+	// 分页查询（按 id DASC）
 	var rows []models.BlocklogRecord
 	offset := (page - 1) * pageSize
-	if err := query.Order("id ASC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
+	if err := query.Order("id DASC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("query records failed: %w", err)
 	}
 
