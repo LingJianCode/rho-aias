@@ -470,9 +470,10 @@ class TestBlockLog(unittest.TestCase):
         success, resp = self.api_client.get_records()
         self.assertTrue(success, f"Failed to get stats: {resp}")
         data = resp.get("data", {})
-        total_blocked = len(data)
+        records = resp.get("records", {})
+        total_blocked = len(records)
 
-        logger.info(f"Sent pings: {ping_count}, stats.total_blocked: {total_blocked}")
+        logger.info(f"Sent pings: {ping_count}, records count: {total_blocked}")
         self.assertGreaterEqual(total_blocked, ping_count,
                                 f"records count ({total_blocked}) should >= {ping_count} (sent pings)")
 
