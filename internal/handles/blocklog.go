@@ -2,6 +2,7 @@ package handles
 
 import (
 	"strconv"
+	"time"
 
 	"rho-aias/internal/blocklog"
 	"rho-aias/internal/ebpfs"
@@ -36,8 +37,7 @@ func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 
 	// 验证 date 参数必填
 	if filter.Date == "" {
-		response.BadRequest(c, "date parameter is required (format: YYYY-MM-DD)")
-		return
+		filter.Date = time.Now().Format("20060102")
 	}
 
 	// 验证 start_hour 和 end_hour

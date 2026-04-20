@@ -457,7 +457,7 @@ class TestBlockLog(unittest.TestCase):
         self.api_client.delete_rule("10.0.1.2")
 
     def test_03_stats_consistency(self):
-        """测试统计一致性：发包阻断数量与 stats.total_blocked 对得上"""
+        """测试统计一致性：发包阻断数量与 记录条数 对得上"""
         self.assertTrue(
             self._start_rho("rho_bl_veth0"),
             "Failed to start rho-aias"
@@ -465,17 +465,16 @@ class TestBlockLog(unittest.TestCase):
 
         ping_count = 3
         self._do_block_cycle("10.0.1.2", ping_count=ping_count)
-
-        # 获取 stats 并验证 total_blocked 与发包数量对得上
-        success, resp = self.api_client.get_stats()
+        time.sleep(6)
+        # 获取 记录 并验证 total_blocked 与发包数量对得上
+        success, resp = self.api_client.get_records()
         self.assertTrue(success, f"Failed to get stats: {resp}")
-        stats = resp.get("data", {})
-        total_blocked = stats.get("total_blocked", 0)
+        data = resp.get("data", {})
+        total_blocked = len(data)
 
         logger.info(f"Sent pings: {ping_count}, stats.total_blocked: {total_blocked}")
-        time.sleep(6)
         self.assertGreaterEqual(total_blocked, ping_count,
-                                f"stats.total_blocked ({total_blocked}) should >= {ping_count} (sent pings)")
+                                f"records count ({total_blocked}) should >= {ping_count} (sent pings)")
 
         # 验证 by_rule_source 中 manual 类型数量与发包数量对得上
         by_source = stats.get("by_rule_source", {})
