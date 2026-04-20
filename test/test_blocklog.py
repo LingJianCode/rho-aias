@@ -473,6 +473,7 @@ class TestBlockLog(unittest.TestCase):
         total_blocked = stats.get("total_blocked", 0)
 
         logger.info(f"Sent pings: {ping_count}, stats.total_blocked: {total_blocked}")
+        time.sleep(6)
         self.assertGreaterEqual(total_blocked, ping_count,
                                 f"stats.total_blocked ({total_blocked}) should >= {ping_count} (sent pings)")
 
