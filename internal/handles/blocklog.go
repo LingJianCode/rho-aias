@@ -35,7 +35,6 @@ func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 		return
 	}
 
-	// 验证 date 参数必填
 	if filter.Date == "" {
 		filter.Date = time.Now().Format("20060102")
 	}

@@ -77,15 +77,15 @@ func (m *Manager) QueryRecords(filter RecordFilter) (*PageResult, error) {
 
 // RecordFilter 记录过滤条件
 type RecordFilter struct {
-	Date        string `form:"date" binding:"required"` // 日期查询 (格式: 2026-04-17)
-	StartHour   int    `form:"start_hour"`              // 起始小时 (0-23, 默认 0)
-	EndHour     int    `form:"end_hour"`                // 结束小时 (0-23, 默认 23)
-	MatchType   string `form:"match_type"`              // 匹配类型过滤
-	RuleSource  string `form:"rule_source"`             // 规则来源过滤
-	SrcIP       string `form:"src_ip"`                  // 源 IP 过滤
-	CountryCode string `form:"country_code"`            // 国家代码过滤
-	Page        int    `form:"page"`                    // 页码 (从1开始)
-	PageSize    int    `form:"page_size"`               // 每页数量
+	Date        string `form:"date"`         // 日期查询 (格式: 2026-04-17)
+	StartHour   int    `form:"start_hour"`   // 起始小时 (0-23, 默认 0)
+	EndHour     int    `form:"end_hour"`     // 结束小时 (0-23, 默认 23)
+	MatchType   string `form:"match_type"`   // 匹配类型过滤
+	RuleSource  string `form:"rule_source"`  // 规则来源过滤
+	SrcIP       string `form:"src_ip"`       // 源 IP 过滤
+	CountryCode string `form:"country_code"` // 国家代码过滤
+	Page        int    `form:"page"`         // 页码 (从1开始)
+	PageSize    int    `form:"page_size"`    // 每页数量
 }
 
 // Stats 统计信息
