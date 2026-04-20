@@ -4,7 +4,6 @@ package blocklog
 
 import (
 	"fmt"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,7 +29,6 @@ type BlockRecord struct {
 type blockLogCounters struct {
 	totalBlocked int64
 	byRuleSource map[string]*int64 // 每种规则来源的计数指针
-	topIPs       map[string]*int64 // 每个 IP 的计数指针
 	mu           sync.RWMutex      // 写端保护 map 结构变更，读端 RLock 无阻塞
 }
 
@@ -58,7 +56,6 @@ func NewManager(maxSize int) *Manager {
 func newBlockLogCounters() *blockLogCounters {
 	return &blockLogCounters{
 		byRuleSource: make(map[string]*int64),
-		topIPs:       make(map[string]*int64),
 	}
 }
 
@@ -103,44 +100,7 @@ func (c *blockLogCounters) reset() {
 
 	c.mu.Lock()
 	c.byRuleSource = make(map[string]*int64)
-	c.topIPs = make(map[string]*int64)
 	c.mu.Unlock()
-}
-
-// snapshotTopIPs 读取当前 TopIP 快照（仅用于 GetTopIPs 融合查询）
-func (c *blockLogCounters) snapshotTopIPs(limit int) []IPCount {
-	c.mu.RLock()
-	ips := make([]IPCount, 0, len(c.topIPs))
-	for k, v := range c.topIPs {
-		if cnt := atomic.LoadInt64(v); cnt > 0 {
-			ips = append(ips, IPCount{IP: k, Count: int(cnt)})
-		}
-	}
-	c.mu.RUnlock()
-
-	sort.Slice(ips, func(i, j int) bool { return ips[i].Count > ips[j].Count })
-	if len(ips) > limit {
-		ips = ips[:limit]
-	}
-	return ips
-}
-
-// snapshotTopIPsAll 读取所有 TopIP 快照（用于整点轮转时写入 DB）
-func (c *blockLogCounters) snapshotTopIPsAll() []IPCount {
-	c.mu.RLock()
-	ips := make([]IPCount, 0, len(c.topIPs))
-	for k, v := range c.topIPs {
-		if cnt := atomic.LoadInt64(v); cnt > 0 {
-			ips = append(ips, IPCount{IP: k, Count: int(cnt)})
-		}
-	}
-	c.mu.RUnlock()
-
-	sort.Slice(ips, func(i, j int) bool { return ips[i].Count > ips[j].Count })
-	if len(ips) > 50 {
-		ips = ips[:50]
-	}
-	return ips
 }
 
 // NewManagerWithPersistence 创建带持久化的阻断日志管理器
@@ -194,7 +154,6 @@ func (m *Manager) AddRecord(record BlockRecord) {
 		c := m.counters
 		atomic.AddInt64(&c.totalBlocked, 1)
 		c.increment(c.byRuleSource, record.RuleSource)
-		c.increment(c.topIPs, record.SrcIP)
 	}
 }
 
@@ -321,7 +280,13 @@ func (m *Manager) SnapshotHourlyCounters(t time.Time) {
 	}
 	hourKey := t.Format("2006-01-02T15")
 	snap := m.counters.snapshot()
-	topIPs := m.counters.snapshotTopIPsAll()
+
+	// 从 JSONL 文件批量聚合 topIPs（替代内存实时计数，数据最多落后 1 小时）
+	var topIPs []IPCount
+	if m.jsonReader != nil {
+		topIPs = m.jsonReader.AggregateTopIPs(hourKey)
+	}
+
 	if snap.TotalBlocked > 0 {
 		m.statsStore.SnapshotHour(hourKey, snap, topIPs)
 	}
@@ -344,35 +309,12 @@ func (m *Manager) GetHourlyTrend(hours int) []HourlyTrendItem {
 	return m.statsStore.GetHourlyTrend(hours)
 }
 
-// GetTopIPs 从数据库查询 Top N 被阻断 IP（融合查询：DB + 内存）
+// GetTopIPs 从数据库查询 Top N 被阻断 IP（纯 DB 查询，数据最多落后 1 小时）
 func (m *Manager) GetTopIPs(limit int) []IPCount {
 	if m.statsStore == nil {
 		return nil
 	}
-
-	dbIPs := m.statsStore.GetTopIPs(defaultRetentionDays, limit)
-
-	// 融合内存计数器中的 TopIP
-	memIPs := m.counters.snapshotTopIPs(limit)
-
-	ipMap := make(map[string]int)
-	for _, ip := range dbIPs {
-		ipMap[ip.IP] += ip.Count
-	}
-	for _, ip := range memIPs {
-		ipMap[ip.IP] += ip.Count
-	}
-
-	mergedIPs := make([]IPCount, 0, len(ipMap))
-	for ip, count := range ipMap {
-		mergedIPs = append(mergedIPs, IPCount{IP: ip, Count: count})
-	}
-	sort.Slice(mergedIPs, func(i, j int) bool { return mergedIPs[i].Count > mergedIPs[j].Count })
-	if len(mergedIPs) > limit {
-		mergedIPs = mergedIPs[:limit]
-	}
-
-	return mergedIPs
+	return m.statsStore.GetTopIPs(defaultRetentionDays, limit)
 }
 
 // Flush 刷新缓冲区到磁盘

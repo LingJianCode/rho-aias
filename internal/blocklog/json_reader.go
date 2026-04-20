@@ -25,10 +25,10 @@ var hourFormatRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}_\d{2}$`)
 
 // PageResult 分页查询结果
 type PageResult struct {
-	Records []BlockRecord `json:"records"`
-	Total   int           `json:"total"`
-	Page    int           `json:"page"`
-	PageSize int          `json:"page_size"`
+	Records  []BlockRecord `json:"records"`
+	Total    int           `json:"total"`
+	Page     int           `json:"page"`
+	PageSize int           `json:"page_size"`
 }
 
 // QueryPage 从单个小时的 JSONL 文件中分页查询记录
@@ -144,6 +144,71 @@ func (r *JsonLogReader) QueryPage(hour string, filter RecordFilter) (*PageResult
 		Page:     page,
 		PageSize: pageSize,
 	}, nil
+}
+
+// AggregateTopIPs 从指定小时的 JSONL 文件中聚合 IP 计数
+// hour 格式: "2026-04-17T14"（自动转为文件名格式 2026-04-17_14.jsonl）
+func (r *JsonLogReader) AggregateTopIPs(hour string) []IPCount {
+	// 构造文件路径：将 "2026-04-17T14" 格式转为 "2026-04-17_14"
+	fileHour := strings.ReplaceAll(hour, "T", "_")
+
+	// 验证转换后的 hour 格式
+	if !hourFormatRegex.MatchString(fileHour) {
+		return nil
+	}
+
+	filename := fileHour + ".jsonl"
+	filePath := filepath.Join(r.logDir, filename)
+
+	// 安全检查：防止路径遍历
+	if strings.Contains(fileHour, "..") {
+		return nil
+	}
+
+	// 打开文件
+	f, err := os.Open(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return nil
+	}
+	defer f.Close()
+
+	// 逐行扫描聚合 IP 计数
+	ipCounts := make(map[string]int)
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var record BlockRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			continue
+		}
+
+		if record.SrcIP != "" {
+			ipCounts[record.SrcIP]++
+		}
+	}
+
+	if len(ipCounts) == 0 {
+		return nil
+	}
+
+	// 截取阻断数大于1
+	result := make([]IPCount, 0, len(ipCounts))
+	for ip, count := range ipCounts {
+		if count > 1 {
+			result = append(result, IPCount{IP: ip, Count: count})
+		}
+	}
+
+	return result
 }
 
 // matchFilter 检查记录是否匹配过滤条件

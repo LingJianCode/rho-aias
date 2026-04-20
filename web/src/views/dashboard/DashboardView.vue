@@ -20,7 +20,7 @@
         <el-card>
           <template #header>
             <div class="card-header">
-              <span>TOP 被封 IP</span>
+              <span>TOP 阻断 IP</span>
             </div>
           </template>
           <div v-if="topIPs.length" class="rank-list">
