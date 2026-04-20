@@ -89,6 +89,7 @@ export interface BlockLog {
   timestamp: number
   src_ip: string
   dst_ip: string
+  dst_port: number
   match_type: string
   rule_source: string
   country_code: string
