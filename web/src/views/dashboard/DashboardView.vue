@@ -46,7 +46,22 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import {
+  TitleComponent,
+  TooltipComponent,
+  GridComponent,
+} from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([
+  LineChart,
+  TitleComponent,
+  TooltipComponent,
+  GridComponent,
+  CanvasRenderer,
+])
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
 import { formatDateTime, formatNumber } from '@/utils/format'

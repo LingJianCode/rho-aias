@@ -52,7 +52,8 @@
       <el-header class="header">
         <div class="header-left">
           <el-icon class="collapse-btn" @click="toggleSidebar">
-            <component :is="collapsed ? 'Expand' : 'Fold'" />
+            <Fold v-if="!collapsed" />
+            <Expand v-else />
           </el-icon>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item v-for="item in breadcrumbs" :key="item.path" :to="item.path">
@@ -62,11 +63,12 @@
         </div>
         <div class="header-right">
           <el-icon class="theme-btn" @click="toggleDarkMode">
-            <component :is="darkMode ? 'Sunny' : 'Moon'" />
+            <Sunny v-if="darkMode" />
+            <Moon v-else />
           </el-icon>
           <el-dropdown @command="handleCommand">
             <span class="user-dropdown">
-              <el-avatar :size="32" icon="User" />
+              <el-avatar :size="32" :icon="User" />
               <span class="username">{{ authStore.user?.username }}</span>
             </span>
             <template #dropdown>
@@ -91,7 +93,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import {
   Odometer, Aim, Document, Monitor, Setting,
-  Fold, Expand, Moon, Sunny
+  Fold, Expand, Moon, Sunny, User
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
