@@ -236,11 +236,17 @@ func (ss *StatsStore) QueryRecords(filter RecordFilter) (*PageResult, error) {
 	}
 
 	// 设置默认小时范围
-	startHour := filter.StartHour
+	startHour := 0
+	if filter.StartHour != nil {
+		startHour = *filter.StartHour
+	}
 	if startHour < 0 || startHour > 23 {
 		startHour = 0
 	}
-	endHour := filter.EndHour
+	endHour := 23
+	if filter.EndHour != nil {
+		endHour = *filter.EndHour
+	}
 	if endHour < 0 || endHour > 23 {
 		endHour = 23
 	}

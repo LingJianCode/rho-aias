@@ -193,9 +193,6 @@ class RhoAiasProcess:
             finally:
                 self.log_file = None
 
-        if os.path.exists(self.config_dir):
-            shutil.rmtree(self.config_dir)
-
 
 class BlockLogAPIClient:
     """BlockLog API 客户端"""
@@ -470,8 +467,7 @@ class TestBlockLog(unittest.TestCase):
         success, resp = self.api_client.get_records()
         self.assertTrue(success, f"Failed to get stats: {resp}")
         data = resp.get("data", {})
-        records = resp.get("records", {})
-        total_blocked = len(records)
+        total_blocked = resp.get("total", {})
 
         logger.info(f"Sent pings: {ping_count}, records count: {total_blocked}")
         self.assertGreaterEqual(total_blocked, ping_count,

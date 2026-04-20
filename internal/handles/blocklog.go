@@ -39,14 +39,22 @@ func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 		filter.Date = time.Now().Format("2006-01-02")
 	}
 
-	// 验证 start_hour 和 end_hour
-	if filter.StartHour < 0 || filter.StartHour > 23 {
-		filter.StartHour = 0
+	// 设置默认小时范围
+	if filter.StartHour == nil {
+		defaultStart := 0
+		filter.StartHour = &defaultStart
+	} else if *filter.StartHour < 0 || *filter.StartHour > 23 {
+		defaultStart := 0
+		filter.StartHour = &defaultStart
 	}
-	if filter.EndHour < 0 || filter.EndHour > 23 {
-		filter.EndHour = 23
+	if filter.EndHour == nil {
+		defaultEnd := 23
+		filter.EndHour = &defaultEnd
+	} else if *filter.EndHour < 0 || *filter.EndHour > 23 {
+		defaultEnd := 23
+		filter.EndHour = &defaultEnd
 	}
-	if filter.StartHour > filter.EndHour {
+	if *filter.StartHour > *filter.EndHour {
 		response.BadRequest(c, "start_hour must be <= end_hour")
 		return
 	}
