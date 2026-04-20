@@ -36,7 +36,7 @@ func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 	}
 
 	if filter.Date == "" {
-		filter.Date = time.Now().Format("20060102")
+		filter.Date = time.Now().Format("2006-01-02")
 	}
 
 	// 验证 start_hour 和 end_hour
