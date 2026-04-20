@@ -146,7 +146,7 @@ func (r *JsonLogReader) QueryPage(hour string, filter RecordFilter) (*PageResult
 	}, nil
 }
 
-// AggregateTopIPs 从指定小时的 JSONL 文件中聚合 IP 计数
+// AggregateTopIPs 从指定小时的 JSONL 文件中聚合 IP 计数，仅返回阻断次数 > 1 的 IP
 // hour 格式: "2026-04-17T14"（自动转为文件名格式 2026-04-17_14.jsonl）
 func (r *JsonLogReader) AggregateTopIPs(hour string) []IPCount {
 	// 构造文件路径：将 "2026-04-17T14" 格式转为 "2026-04-17_14"
@@ -200,8 +200,8 @@ func (r *JsonLogReader) AggregateTopIPs(hour string) []IPCount {
 		return nil
 	}
 
-	// 截取阻断数大于1
-	result := make([]IPCount, 0, len(ipCounts))
+	// 仅保留阻断次数 > 1 的 IP（过滤单次噪声）
+	result := make([]IPCount, 0)
 	for ip, count := range ipCounts {
 		if count > 1 {
 			result = append(result, IPCount{IP: ip, Count: count})

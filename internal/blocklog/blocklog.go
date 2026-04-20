@@ -287,7 +287,7 @@ func (m *Manager) SnapshotHourlyCounters(t time.Time) {
 		topIPs = m.jsonReader.AggregateTopIPs(hourKey)
 	}
 
-	if snap.TotalBlocked > 0 {
+	if snap.TotalBlocked > 0 || len(topIPs) > 0 {
 		m.statsStore.SnapshotHour(hourKey, snap, topIPs)
 	}
 	m.counters.reset()
