@@ -30,7 +30,7 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
         dts: 'src/components.d.ts',
       }),
       Icons({ autoInstall: true }),
-    ],
+    ].filter(Boolean), // 过滤掉 false 值
     server: {
       host: '0.0.0.0',
       port: 3000,
@@ -44,7 +44,22 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
     },
     build: {
       outDir: 'dist',
-      sourcemap: false,
+      sourcemap: false, // 生产环境建议关闭，减小体积
+      // 3. 核心优化：分包策略
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // 将 Vue 相关库单独打包
+            'vue-vendor': ['vue', 'vue-router', 'pinia'],
+            // 将 Element Plus 单独打包 (因为它比较大)
+            'element-plus': ['element-plus'],
+            // 其他大型工具库可以放这里
+            // 'lodash-lib': ['lodash-es'] 
+          },
+        },
+      },
+      // 4. 提高警告阈值 (如果确实需要大文件) 或 开启 Gzip 预压缩
+      chunkSizeWarningLimit: 1000, // 默认是 500kb，适当调大避免误报
     },
   }
 })
