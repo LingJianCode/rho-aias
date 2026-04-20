@@ -7,6 +7,7 @@ type BlocklogRecord struct {
 	Timestamp   int64  `gorm:"index" json:"timestamp"`             // Unix 纳秒
 	SrcIP       string `gorm:"size:45;index" json:"src_ip"`        // 源 IP 地址
 	DstIP       string `gorm:"size:45" json:"dst_ip"`              // 目标 IP 地址
+	DstPort     uint16 `json:"dst_port"`                           // 目标端口 (TCP/UDP)
 	MatchType   string `gorm:"size:20;index" json:"match_type"`    // 匹配类型
 	RuleSource  string `gorm:"size:20;index" json:"rule_source"`   // 规则来源
 	CountryCode string `gorm:"size:5" json:"country_code"`         // 国家代码

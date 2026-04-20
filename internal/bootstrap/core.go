@@ -47,8 +47,8 @@ func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 		logger.Info("[Main] Block log initialized with SQLite persistence enabled")
 	}
 
-	xdp.SetCallback(func(srcIP, dstIP, matchType, ruleSource, countryCode string, packetSize uint32) {
-		record := blocklog.CreateRecord(srcIP, dstIP, matchType, ruleSource, countryCode, packetSize)
+	xdp.SetCallback(func(srcIP, dstIP, matchType, ruleSource, countryCode string, dstPort uint16, packetSize uint32) {
+		record := blocklog.CreateRecord(srcIP, dstIP, matchType, ruleSource, countryCode, dstPort, packetSize)
 		blockLogMgr.AddRecord(record)
 	})
 

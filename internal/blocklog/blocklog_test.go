@@ -19,6 +19,7 @@ func TestAddRecord(t *testing.T) {
 		Timestamp:   1234567890,
 		SrcIP:       "192.168.1.1",
 		DstIP:       "10.0.0.1",
+		DstPort:     443,
 		MatchType:   "ip4_exact",
 		RuleSource:  "manual",
 		CountryCode: "CN",
@@ -58,13 +59,16 @@ func TestGetStats(t *testing.T) {
 }
 
 func TestCreateRecord(t *testing.T) {
-	record := CreateRecord("192.168.1.1", "10.0.0.1", "ip4_exact", "manual", "CN", 64)
+	record := CreateRecord("192.168.1.1", "10.0.0.1", "ip4_exact", "manual", "CN", 443, 64)
 
 	if record.SrcIP != "192.168.1.1" {
 		t.Errorf("Expected SrcIP 192.168.1.1, got %s", record.SrcIP)
 	}
 	if record.DstIP != "10.0.0.1" {
 		t.Errorf("Expected DstIP 10.0.0.1, got %s", record.DstIP)
+	}
+	if record.DstPort != 443 {
+		t.Errorf("Expected DstPort 443, got %d", record.DstPort)
 	}
 	if record.MatchType != "ip4_exact" {
 		t.Errorf("Expected MatchType ip4_exact, got %s", record.MatchType)

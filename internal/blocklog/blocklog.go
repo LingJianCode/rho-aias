@@ -18,6 +18,7 @@ type BlockRecord struct {
 	Timestamp   int64  `json:"timestamp"`    // 阻断时间戳 (Unix 纳秒)
 	SrcIP       string `json:"src_ip"`       // 源 IP 地址
 	DstIP       string `json:"dst_ip"`       // 目标 IP 地址
+	DstPort     uint16 `json:"dst_port"`     // 目标端口 (TCP/UDP)
 	MatchType   string `json:"match_type"`   // 匹配类型 (ip4_exact, ip4_cidr, geo_block, etc.)
 	RuleSource  string `json:"rule_source"`  // 规则来源 (manual, ipsum, spamhaus, geo)
 	CountryCode string `json:"country_code"` // 国家代码 (仅 geo_block 时有值)
@@ -258,11 +259,12 @@ func (m *Manager) Flush() error {
 }
 
 // CreateRecord 创建阻断记录的便捷方法
-func CreateRecord(srcIP, dstIP, matchType, ruleSource, countryCode string, packetSize uint32) BlockRecord {
+func CreateRecord(srcIP, dstIP, matchType, ruleSource, countryCode string, dstPort uint16, packetSize uint32) BlockRecord {
 	return BlockRecord{
 		Timestamp:   time.Now().UnixNano(),
 		SrcIP:       srcIP,
 		DstIP:       dstIP,
+		DstPort:     dstPort,
 		MatchType:   matchType,
 		RuleSource:  ruleSource,
 		CountryCode: countryCode,

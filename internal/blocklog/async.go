@@ -218,6 +218,7 @@ func (aw *AsyncWriter) writeBatch(records []BlockRecord) {
 					Timestamp:   r.Timestamp,
 					SrcIP:       r.SrcIP,
 					DstIP:       r.DstIP,
+					DstPort:     r.DstPort,
 					MatchType:   r.MatchType,
 					RuleSource:  r.RuleSource,
 					CountryCode: r.CountryCode,

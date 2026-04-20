@@ -279,6 +279,7 @@ func (ss *StatsStore) QueryRecords(filter RecordFilter) (*PageResult, error) {
 			Timestamp:   r.Timestamp,
 			SrcIP:       r.SrcIP,
 			DstIP:       r.DstIP,
+			DstPort:     r.DstPort,
 			MatchType:   r.MatchType,
 			RuleSource:  r.RuleSource,
 			CountryCode: r.CountryCode,

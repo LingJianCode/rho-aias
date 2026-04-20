@@ -31,6 +31,7 @@ func TestAsyncWriter_Write(t *testing.T) {
 		Timestamp:  time.Now().UnixNano(),
 		SrcIP:      "192.168.1.1",
 		MatchType:  "ip4_exact",
+		DstPort:    443,
 		PacketSize: 64,
 	}
 
@@ -72,6 +73,7 @@ func TestAsyncWriter_Stop(t *testing.T) {
 			Timestamp:  time.Now().UnixNano(),
 			SrcIP:      "192.168.1.1",
 			MatchType:  "ip4_exact",
+			DstPort:    80,
 			PacketSize: 64,
 		}
 		if err := aw.Write(record); err != nil {
@@ -118,6 +120,7 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 		Timestamp:  time.Now().UnixNano(),
 		SrcIP:      "192.168.1.1",
 		MatchType:  "ip4_exact",
+		DstPort:    443,
 		PacketSize: 64,
 		RuleSource: "test_source",
 	}

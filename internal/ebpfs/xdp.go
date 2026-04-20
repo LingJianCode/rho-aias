@@ -20,7 +20,7 @@ import (
 )
 
 // BlockLogCallback 阻断日志回调函数类型
-type BlockLogCallback func(srcIP, dstIP, matchType, ruleSource, countryCode string, packetSize uint32)
+type BlockLogCallback func(srcIP, dstIP, matchType, ruleSource, countryCode string, dstPort uint16, packetSize uint32)
 
 type Xdp struct {
 	InterfaceName string
@@ -225,7 +225,9 @@ func (x *Xdp) MonitorBlockLogEvents() {
 		if x.callback != nil {
 			ruleSource := x.getRuleSourceFromPacket(pi.SrcIP, uint16(pi.EthProto), pi.MatchType)
 			countryCode := ""
-			x.callback(srcIP, dstIP, matchTypeStr, ruleSource, countryCode, pi.PktSize)
+			// pi.DstPort 是网络字节序，经 binary.LittleEndian 读取后字节序反转，需交换回主机序
+			dstPort := pi.DstPort>>8 | pi.DstPort<<8
+			x.callback(srcIP, dstIP, matchTypeStr, ruleSource, countryCode, dstPort, pi.PktSize)
 		}
 	}
 }
