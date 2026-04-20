@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"rho-aias/internal/config"
 	"rho-aias/internal/logger"
 
 	"gorm.io/gorm"
@@ -26,7 +27,8 @@ type BlockRecord struct {
 // Manager 阻断日志管理器
 type Manager struct {
 	asyncWriter *AsyncWriter
-	statsStore  *StatsStore // 统计存储（可选）
+	statsStore  *StatsStore   // 统计存储（可选）
+	geoEnricher *GeoEnricher  // IP 归属地补全器（可选）
 }
 
 // NewManager 创建新的阻断日志管理器
@@ -150,6 +152,9 @@ func (m *Manager) RotateHourlyStats(t time.Time) {
 
 // Close 关闭阻断日志管理器（停止异步写入器）
 func (m *Manager) Close() error {
+	if m.geoEnricher != nil {
+		m.geoEnricher.Stop()
+	}
 	if m.asyncWriter != nil {
 		return m.asyncWriter.Stop()
 	}
@@ -178,6 +183,27 @@ func (m *Manager) Flush() error {
 		return m.asyncWriter.Flush()
 	}
 	return nil
+}
+
+// SetGeoLookup 注入 GeoLookup 并启动 IP 归属地补全定时任务（由 bootstrap 调用）
+func (m *Manager) SetGeoLookup(lookup GeoLookup, cfg config.GeoEnrichConfig) {
+	if m.statsStore == nil || lookup == nil {
+		logger.Info("[BlockLog] GeoLookup not available, skipping geo enrich setup")
+		return
+	}
+
+	m.geoEnricher = NewGeoEnricher(m.statsStore, lookup, cfg.Enabled, cfg.BatchSize)
+	if err := m.geoEnricher.Start(); err != nil {
+		logger.Errorf("[BlockLog] Failed to start geo enricher: %v", err)
+	}
+}
+
+// EnrichCountryCode 手动触发按天补全（异步，供 handle 调用）
+func (m *Manager) EnrichCountryCode(date string) error {
+	if m.geoEnricher == nil {
+		return fmt.Errorf("geo enricher not initialized")
+	}
+	return m.geoEnricher.EnrichDay(date)
 }
 
 // CreateRecord 创建阻断记录的便捷方法

@@ -70,6 +70,9 @@ func main() {
 	// Phase 3: 检测模块工厂 (Intel / Geo / WAF / RateLimit / FailGuard)
 	detectors := bootstrap.InitDetectors(cfg, core.XDP, ctx, dbConn, core.WhitelistManager.Checker())
 
+	// 注入 GeoLookup 到 BlockLog 模块（用于 IP 归属地补全）
+	core.BlockLogMgr.SetGeoLookup(detectors.GeoMgr, cfg.BlockLog.GeoEnrich)
+
 	// Phase 4: 异常检测
 	anomaly := bootstrap.InitAnomaly(cfg, core.XDP, dbConn, core.WhitelistManager.Checker())
 

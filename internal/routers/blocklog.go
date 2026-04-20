@@ -47,4 +47,11 @@ func RegisterBlockLogRoutes(group *gin.RouterGroup, blockLogHandle *handles.Bloc
 		middleware.CasbinMiddleware(enforcer, "blocklog", "read"),
 		blockLogHandle.GetEventStatus,
 	)
+
+	// 手动触发 IP 归属地补全 - 需要 blocklog:write 权限
+	blocklog.POST("/enrich-country",
+		middleware.AuthMiddleware(authService, apiKeyService),
+		middleware.CasbinMiddleware(enforcer, "blocklog", "write"),
+		blockLogHandle.EnrichCountryCode,
+	)
 }

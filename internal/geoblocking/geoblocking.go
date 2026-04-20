@@ -38,6 +38,9 @@ type Manager struct {
 	// 数据库支持和并发控制（使用公共组件）
 	db            *gorm.DB                  // 数据库连接
 	sourceMutexes *feed.MutexPool[SourceID] // 互斥锁池（公共）
+
+	// MMDB 查询器（用于 IP 归属地查询）
+	mmdbReader *MMDBReader
 }
 
 // NewManager 创建新的 GeoIP 管理器
@@ -53,6 +56,7 @@ func NewManager(cfg *config.GeoBlockingConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Man
 		sourceStatus:  make(map[SourceID]*SourceStatus),
 		db:            db,
 		sourceMutexes: feed.NewMutexPool[SourceID](),
+		mmdbReader:    NewMMDBReader(),
 		status: &Status{
 			Enabled:          cfg.Enabled,
 			Mode:             cfg.Mode,
@@ -212,6 +216,15 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 		logger.Warnf("[GeoBlocking] [%s] Failed to save raw file: %v", sourceID, err)
 	}
 
+	// 5.5 如果是 maxmind-db 格式，热更新 MMDBReader
+	if src.Format == "maxmind-db" {
+		if err := m.mmdbReader.Load(data); err != nil {
+			logger.Warnf("[GeoBlocking] [%s] Failed to reload MMDB reader: %v", sourceID, err)
+		} else {
+			logger.Infof("[GeoBlocking] [%s] MMDB reader reloaded with new data", sourceID)
+		}
+	}
+
 	// 6. 记录成功状态 + 清理旧记录
 	duration := time.Since(startTime).Milliseconds()
 	if err := feed.RecordStatus(m.db, feed.SourceTypeGeoBlocking, string(sourceID), string(sourceID), "success", parsed.TotalCount(), "", duration); err != nil {
@@ -266,6 +279,15 @@ func (m *Manager) loadFromRawFiles() error {
 
 		m.setSourceStatusInline(sourceID, true, parsed.TotalCount(), "")
 		loadedAny = true
+
+		// 如果是 maxmind-db 格式，加载到 MMDBReader 供 IP 归属地查询
+		if src.Format == "maxmind-db" {
+			if err := m.mmdbReader.Load(rawBytes); err != nil {
+				logger.Warnf("[GeoBlocking] [%s] Failed to load MMDB reader: %v", sourceID, err)
+			} else {
+				logger.Infof("[GeoBlocking] [%s] MMDB reader loaded from raw file", sourceID)
+			}
+		}
 	}
 
 	if !loadedAny {
@@ -550,12 +572,20 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, periodic boo
 	return nil
 }
 
+// LookupCountry 查询 IP 的国家代码（供其他模块调用）
+func (m *Manager) LookupCountry(ip string) (string, error) {
+	return m.mmdbReader.LookupCountry(ip)
+}
+
 // Stop 停止 GeoIP 管理器（幂等，多次调用安全）
 func (m *Manager) Stop() {
 	m.stopOnce.Do(func() {
 		logger.Info("[GeoBlocking] Stopping geo-blocking manager...")
 		if m.cron != nil {
 			m.cron.Stop()
+		}
+		if m.mmdbReader != nil {
+			_ = m.mmdbReader.Close()
 		}
 		close(m.done)
 		logger.Info("[GeoBlocking] Stopped")

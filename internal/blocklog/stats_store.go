@@ -446,3 +446,85 @@ func (ss *StatsStore) CleanupOldDayTables(retainDays int) error {
 	logger.Infof("[StatsStore] Cleaned up %d daily tables older than %d days", dropped, retainDays)
 	return nil
 }
+
+// TableExists 检查指定表是否存在
+func (ss *StatsStore) TableExists(tableName string) bool {
+	if ss.db == nil {
+		return false
+	}
+	return ss.db.Migrator().HasTable(tableName)
+}
+
+// QueryEmptyCountryRecords 查询指定分表中 country_code 为空的记录（按 src_ip 去重）
+// 返回 map[srcIP] => []recordID，限制去重后的 IP 数量不超过 batchSize
+func (ss *StatsStore) QueryEmptyCountryRecords(tableName string, batchSize int) (map[string][]uint, error) {
+	if ss.db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	// 查询 country_code 为空的记录，按 src_ip 分组，限制 IP 数量
+	type ipGroup struct {
+		SrcIP string `json:"src_ip"`
+	}
+	var groups []ipGroup
+	if err := ss.db.Table(tableName).
+		Select("DISTINCT src_ip").
+		Where("country_code = '' OR country_code IS NULL").
+		Limit(batchSize).
+		Find(&groups).Error; err != nil {
+		return nil, fmt.Errorf("query distinct src_ip failed: %w", err)
+	}
+
+	if len(groups) == 0 {
+		return nil, nil
+	}
+
+	// 收集所有 IP
+	ipSet := make(map[string]struct{}, len(groups))
+	for _, g := range groups {
+		ipSet[g.SrcIP] = struct{}{}
+	}
+
+	// 查询这些 IP 对应的记录 ID
+	type idIP struct {
+		ID    uint   `json:"id"`
+		SrcIP string `json:"src_ip"`
+	}
+	var idIPs []idIP
+	ips := make([]string, 0, len(ipSet))
+	for ip := range ipSet {
+		ips = append(ips, ip)
+	}
+	if err := ss.db.Table(tableName).
+		Select("id, src_ip").
+		Where("country_code = '' OR country_code IS NULL").
+		Where("src_ip IN ?", ips).
+		Find(&idIPs).Error; err != nil {
+		return nil, fmt.Errorf("query record ids failed: %w", err)
+	}
+
+	result := make(map[string][]uint)
+	for _, item := range idIPs {
+		result[item.SrcIP] = append(result[item.SrcIP], item.ID)
+	}
+
+	return result, nil
+}
+
+// BatchUpdateCountryCode 批量更新记录的 country_code
+func (ss *StatsStore) BatchUpdateCountryCode(tableName string, updates map[uint]string) error {
+	if ss.db == nil || len(updates) == 0 {
+		return nil
+	}
+
+	return ss.db.Transaction(func(tx *gorm.DB) error {
+		for id, countryCode := range updates {
+			if err := tx.Table(tableName).
+				Where("id = ?", id).
+				Update("country_code", countryCode).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}

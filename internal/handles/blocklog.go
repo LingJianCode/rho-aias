@@ -120,6 +120,35 @@ type EventStatusResponse struct {
 	SampleRate uint32 `json:"sample_rate"` // 采样率
 }
 
+// EnrichCountryCode 手动触发 IP 归属地补全（异步）
+// POST /api/blocklog/enrich-country
+// Body: {"date": "2026-04-20"}
+func (h *BlockLogHandle) EnrichCountryCode(c *gin.Context) {
+	var req struct {
+		Date string `json:"date" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "date is required (format: 2026-04-20)")
+		return
+	}
+
+	// 验证日期格式
+	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
+		response.BadRequest(c, "invalid date format, expected YYYY-MM-DD")
+		return
+	}
+
+	if err := h.blockLog.EnrichCountryCode(req.Date); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	response.OK(c, gin.H{
+		"message": "enrichment started",
+		"date":    req.Date,
+	})
+}
+
 // GetEventStatus 获取阻断事件上报状态
 // GET /api/blocklog/event-status
 func (h *BlockLogHandle) GetEventStatus(c *gin.Context) {

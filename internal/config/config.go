@@ -110,12 +110,19 @@ type APIKeyConfig struct {
 
 // BlockLogConfig 阻断日志配置（始终持久化）
 type BlockLogConfig struct {
-	BufferSize    int `yaml:"buffer_size"`       // 异步写入缓冲区大小
-	FlushInterval int `yaml:"flush_interval"`    // 刷盘间隔（秒）
+	BufferSize    int            `yaml:"buffer_size"`       // 异步写入缓冲区大小
+	FlushInterval int            `yaml:"flush_interval"`    // 刷盘间隔（秒）
+	GeoEnrich     GeoEnrichConfig `yaml:"geo_enrich"`       // IP 归属地补全配置
 
 	// 以下字段由动态配置恢复写入（非 YAML），供 LoadCachedRules 恢复 eBPF 事件上报配置
 	EventsEnabled    bool   `yaml:"-"`
 	EventsSampleRate uint32 `yaml:"-"`
+}
+
+// GeoEnrichConfig IP 归属地补全配置
+type GeoEnrichConfig struct {
+	Enabled   bool `yaml:"enabled"`    // 是否启用自动补全
+	BatchSize int  `yaml:"batch_size"` // 每批处理记录数
 }
 
 // FailGuardConfig SSH 防爆破配置
@@ -234,6 +241,7 @@ func applyDefaults(config *Config) {
 	// BlockLog 默认值
 	setIfZero(&config.BlockLog.BufferSize, 1000)
 	setIfZero(&config.BlockLog.FlushInterval, 5) // 默认 5 秒
+	setIfZero(&config.BlockLog.GeoEnrich.BatchSize, 500)
 
 	// Intel sources 默认值
 	for name, source := range config.Intel.Sources {
