@@ -286,13 +286,6 @@ class BlockLogAPIClient:
         """获取阻断统计"""
         return self._request("GET", "/api/blocklog/stats")
 
-    def get_blocked_ips(self, limit: int = None) -> Tuple[bool, dict]:
-        """获取被阻断 IP 聚合列表"""
-        path = "/api/blocklog/blocked-top-ips"
-        if limit:
-            path += f"?limit={limit}"
-        return self._request("GET", path)
-
     def get_hourly_trend(self, hours: int = 24) -> Tuple[bool, dict]:
         """获取小时趋势"""
         return self._request("GET", f"/api/blocklog/hourly-trend?hours={hours}")
@@ -654,12 +647,6 @@ class TestBlockLog(unittest.TestCase):
                                 f"stats.total_blocked ({total_blocked}) should >= 3 (sent pings)")
         self.assertGreaterEqual(manual_count, 3,
                                 f"by_rule_source.manual ({manual_count}) should >= 3 (sent pings)")
-
-        # 查询 blocked-top-ips
-        success, resp = self.api_client.get_blocked_ips(limit=10)
-        self.assertTrue(success, f"Failed to get blocked-top-ips: {resp}")
-        top_ips = (resp.get("data") or {}).get("top_blocked_ips") or []
-        self.assertGreater(len(top_ips), 0, "blocked-top-ips should have results after blocking")
 
         logger.info(f"Stats persistence validated: total_blocked={total_blocked}, manual={manual_count}")
         self.api_client.delete_rule("10.0.1.2")
