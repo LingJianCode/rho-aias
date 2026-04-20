@@ -20,9 +20,8 @@ const (
 
 // Config 持久化配置
 type Config struct {
-	MemoryCacheSize int           // 内存缓存大小
-	BufferSize      int           // 异步写入缓冲区大小
-	FlushInterval   time.Duration // 刷盘间隔
+	BufferSize    int           // 异步写入缓冲区大小
+	FlushInterval time.Duration // 刷盘间隔
 }
 
 // AsyncWriter 异步日志写入器（写入 SQLite 按天分表）

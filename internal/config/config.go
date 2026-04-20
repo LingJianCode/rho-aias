@@ -110,10 +110,8 @@ type APIKeyConfig struct {
 
 // BlockLogConfig 阻断日志配置（始终持久化）
 type BlockLogConfig struct {
-	LogDir          string `yaml:"log_dir"`           // 已废弃：日志目录（SQLite 替代 JSONL 后不再使用）
-	MemoryCacheSize int    `yaml:"memory_cache_size"` // 内存缓存大小（用于实时查询）
-	BufferSize      int    `yaml:"buffer_size"`       // 异步写入缓冲区大小
-	FlushInterval   int    `yaml:"flush_interval"`    // 刷盘间隔（秒）
+	BufferSize    int `yaml:"buffer_size"`       // 异步写入缓冲区大小
+	FlushInterval int `yaml:"flush_interval"`    // 刷盘间隔（秒）
 
 	// 以下字段由动态配置恢复写入（非 YAML），供 LoadCachedRules 恢复 eBPF 事件上报配置
 	EventsEnabled    bool   `yaml:"-"`
@@ -234,8 +232,6 @@ func applyDefaults(config *Config) {
 	setIfZero(&config.Log.RotationHours, 1)
 
 	// BlockLog 默认值
-	setIfEmpty(&config.BlockLog.LogDir, "./logs/blocklog")
-	setIfZero(&config.BlockLog.MemoryCacheSize, 10000)
 	setIfZero(&config.BlockLog.BufferSize, 1000)
 	setIfZero(&config.BlockLog.FlushInterval, 5) // 默认 5 秒
 

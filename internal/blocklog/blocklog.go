@@ -34,19 +34,14 @@ type blockLogCounters struct {
 
 // Manager 阻断日志管理器
 type Manager struct {
-	mu          sync.RWMutex
-	records     []BlockRecord
-	maxSize     int
 	asyncWriter *AsyncWriter
 	statsStore  *StatsStore // 统计存储（可选）
 	counters    *blockLogCounters
 }
 
 // NewManager 创建新的阻断日志管理器
-func NewManager(maxSize int) *Manager {
+func NewManager() *Manager {
 	return &Manager{
-		records:  make([]BlockRecord, 0, maxSize),
-		maxSize:  maxSize,
 		counters: newBlockLogCounters(),
 	}
 }
@@ -103,8 +98,8 @@ func (c *blockLogCounters) reset() {
 }
 
 // NewManagerWithPersistence 创建带持久化的阻断日志管理器
-func NewManagerWithPersistence(maxSize int, config Config, db *gorm.DB) (*Manager, error) {
-	m := NewManager(maxSize)
+func NewManagerWithPersistence(config Config, db *gorm.DB) (*Manager, error) {
+	m := NewManager()
 
 	// 创建异步写入器（注入 onRotate 回调 + db）
 	asyncWriter, err := NewAsyncWriter(config, db, func(t time.Time) {
@@ -127,25 +122,12 @@ func NewManagerWithPersistence(maxSize int, config Config, db *gorm.DB) (*Manage
 
 // AddRecord 添加阻断记录
 func (m *Manager) AddRecord(record BlockRecord) {
-	m.mu.Lock()
-
-	// 如果超过最大记录数，删除最旧的记录
-	// 使用 copy 而非 slice 重切，避免底层数组无限增长导致内存泄漏
-	if len(m.records) >= m.maxSize {
-		copy(m.records, m.records[1:])
-		m.records = m.records[:len(m.records)-1]
-	}
-
-	m.records = append(m.records, record)
-
-	// 异步写入 SQLite（Write 是非阻塞的，可以安全地在锁内调用）
+	// 异步写入 SQLite
 	if m.asyncWriter != nil {
 		if err := m.asyncWriter.Write(record); err != nil {
 			logger.Warnf("async write failed: %v", err)
 		}
 	}
-
-	m.mu.Unlock()
 
 	// 增量计数器更新（原子操作，无锁，仅用于整点轮转时的写缓冲）
 	if m.counters != nil {
@@ -153,60 +135,6 @@ func (m *Manager) AddRecord(record BlockRecord) {
 		atomic.AddInt64(&c.totalBlocked, 1)
 		c.increment(c.byRuleSource, record.RuleSource)
 	}
-}
-
-// GetRecords 获取阻断记录
-// limit: 返回记录数量限制，0 表示返回所有
-func (m *Manager) GetRecords(limit int) []BlockRecord {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if limit <= 0 || limit > len(m.records) {
-		limit = len(m.records)
-	}
-
-	// 返回最近的记录（从后往前）
-	result := make([]BlockRecord, limit)
-	for i := 0; i < limit; i++ {
-		result[i] = m.records[len(m.records)-1-i]
-	}
-
-	return result
-}
-
-// GetRecordsByFilter 按条件筛选阻断记录（内存查询）
-func (m *Manager) GetRecordsByFilter(filter RecordFilter) []BlockRecord {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	var result []BlockRecord
-
-	// 从后往前遍历（最新的记录优先）
-	for i := len(m.records) - 1; i >= 0; i-- {
-		record := m.records[i]
-
-		// 应用过滤条件
-		if filter.MatchType != "" && record.MatchType != filter.MatchType {
-			continue
-		}
-		if filter.RuleSource != "" && record.RuleSource != filter.RuleSource {
-			continue
-		}
-		if filter.SrcIP != "" && record.SrcIP != filter.SrcIP {
-			continue
-		}
-		if filter.CountryCode != "" && record.CountryCode != filter.CountryCode {
-			continue
-		}
-
-		result = append(result, record)
-
-		if filter.Limit > 0 && len(result) >= filter.Limit {
-			break
-		}
-	}
-
-	return result
 }
 
 // QueryRecords 从 SQLite 按天分表分页查询记录
@@ -228,7 +156,6 @@ type RecordFilter struct {
 	CountryCode string `form:"country_code"`            // 国家代码过滤
 	Page        int    `form:"page"`                    // 页码 (从1开始)
 	PageSize    int    `form:"page_size"`               // 每页数量
-	Limit       int    `form:"limit"`                   // 返回数量限制 (内存查询模式)
 }
 
 // Stats 统计信息
@@ -289,9 +216,8 @@ func (m *Manager) SnapshotHourlyCounters(t time.Time) {
 	hourKey := t.Format("2006-01-02T15")
 	snap := m.counters.snapshot()
 
-	// 从 SQLite 按天分表聚合 topIPs（替代从 JSONL 文件聚合）
-	var topIPs []IPCount
-	topIPs = m.statsStore.AggregateTopIPsFromTable(hourKey)
+	// 从 SQLite 按天分表聚合 topIPs
+	topIPs := m.statsStore.AggregateTopIPsFromTable(hourKey)
 
 	if snap.TotalBlocked > 0 || len(topIPs) > 0 {
 		m.statsStore.SnapshotHour(hourKey, snap, topIPs)
@@ -329,14 +255,6 @@ func (m *Manager) Flush() error {
 		return m.asyncWriter.Flush()
 	}
 	return nil
-}
-
-// Count 获取记录总数
-func (m *Manager) Count() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	return len(m.records)
 }
 
 // CreateRecord 创建阻断记录的便捷方法

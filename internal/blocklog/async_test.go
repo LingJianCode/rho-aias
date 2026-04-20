@@ -17,9 +17,8 @@ func TestAsyncWriter_Write(t *testing.T) {
 	}
 
 	config := Config{
-		MemoryCacheSize: 100,
-		BufferSize:      10,
-		FlushInterval:   100 * time.Millisecond,
+		BufferSize:    10,
+		FlushInterval: 100 * time.Millisecond,
 	}
 
 	aw, err := NewAsyncWriter(config, testDB, nil)
@@ -59,9 +58,8 @@ func TestAsyncWriter_Stop(t *testing.T) {
 	}
 
 	config := Config{
-		MemoryCacheSize: 100,
-		BufferSize:      100,
-		FlushInterval:   time.Second,
+		BufferSize:    100,
+		FlushInterval: time.Second,
 	}
 
 	aw, err := NewAsyncWriter(config, testDB, nil)
@@ -107,12 +105,11 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 	}
 
 	config := Config{
-		MemoryCacheSize: 100,
-		BufferSize:      10,
-		FlushInterval:   100 * time.Millisecond,
+		BufferSize:    10,
+		FlushInterval: 100 * time.Millisecond,
 	}
 
-	bl, err := NewManagerWithPersistence(100, config, testDB)
+	bl, err := NewManagerWithPersistence(config, testDB)
 	if err != nil {
 		t.Fatalf("Failed to create block log with persistence: %v", err)
 	}
@@ -125,10 +122,6 @@ func TestBlockLog_WithPersistence(t *testing.T) {
 		RuleSource: "test_source",
 	}
 	bl.AddRecord(record)
-
-	if bl.Count() != 1 {
-		t.Errorf("Expected 1 record in memory, got %d", bl.Count())
-	}
 
 	time.Sleep(200 * time.Millisecond)
 	bl.Flush()

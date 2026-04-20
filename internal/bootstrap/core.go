@@ -36,12 +36,11 @@ func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 	var blockLogMgr *blocklog.Manager
 	{
 		blConfig := blocklog.Config{
-			MemoryCacheSize: cfg.BlockLog.MemoryCacheSize,
-			BufferSize:      cfg.BlockLog.BufferSize,
-			FlushInterval:   time.Duration(cfg.BlockLog.FlushInterval) * time.Second,
+			BufferSize:    cfg.BlockLog.BufferSize,
+			FlushInterval: time.Duration(cfg.BlockLog.FlushInterval) * time.Second,
 		}
 		var err error
-		blockLogMgr, err = blocklog.NewManagerWithPersistence(cfg.BlockLog.MemoryCacheSize, blConfig, dbConn)
+		blockLogMgr, err = blocklog.NewManagerWithPersistence(blConfig, dbConn)
 		if err != nil {
 			logger.Fatalf("[BlockLog] Failed to initialize with persistence: %v", err)
 		}
