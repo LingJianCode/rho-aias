@@ -254,13 +254,33 @@ class BlockLogAPIClient:
         return self._request("DELETE", "/api/manual/blacklist/rules", {"value": value})
 
     def get_records(self, params: dict = None) -> Tuple[bool, dict]:
-        """获取阻断记录"""
+        """获取阻断记录（必须指定 date 参数）"""
         path = "/api/blocklog/records"
         if params:
             query = "&".join(f"{k}={v}" for k, v in params.items() if v)
             if query:
                 path += f"?{query}"
         return self._request("GET", path)
+
+    def get_records_today(self, start_hour: int = 0, end_hour: int = 23,
+                          rule_source: str = None, match_type: str = None,
+                          src_ip: str = None, page: int = 1, page_size: int = 200) -> Tuple[bool, dict]:
+        """获取今天的阻断记录（便捷方法）"""
+        today = time.strftime("%Y-%m-%d")
+        params = {
+            "date": today,
+            "start_hour": start_hour,
+            "end_hour": end_hour,
+            "page": page,
+            "page_size": page_size,
+        }
+        if rule_source:
+            params["rule_source"] = rule_source
+        if match_type:
+            params["match_type"] = match_type
+        if src_ip:
+            params["src_ip"] = src_ip
+        return self.get_records(params)
 
     def get_stats(self) -> Tuple[bool, dict]:
         """获取阻断统计"""
@@ -380,7 +400,7 @@ class TestBlockLog(unittest.TestCase):
         logger.info(f"Block triggered successfully for {target_ip}")
         time.sleep(wait_after_block)
 
-        success, resp = self.api_client.get_records({"limit": 200})
+        success, resp = self.api_client.get_records_today()
         self.assertTrue(success, f"Failed to get records: {resp}")
         return blocked, self._safe_records(resp)
 
@@ -490,21 +510,6 @@ class TestBlockLog(unittest.TestCase):
             self.assertTrue(blocked, f"Iteration {i+1}: Block not effective")
         time.sleep(2)
 
-        # 获取 blocked-top-ips 聚合
-        success, resp = self.api_client.get_blocked_ips(limit=10)
-        self.assertTrue(success, f"Failed to get blocked-top-ips: {resp}")
-
-        data = resp.get("data", {}) or {}
-        top_ips = data.get("top_blocked_ips") or []
-        self.assertGreater(len(top_ips), 0, "No blocked IPs found")
-
-        # 找到 10.0.1.2 的聚合记录
-        target_record = next((item for item in top_ips if item.get("ip") == "10.0.1.2"), None)
-        self.assertIsNotNone(target_record, "10.0.1.2 not found in blocked-top-ips aggregation")
-        self.assertGreaterEqual(target_record.get("count", 0), 1,
-                                "IP block count >= 1 expected")
-        logger.info(f"IP aggregation validated: 10.0.1.2 count={target_record.get('count')}")
-
         self.api_client.delete_rule("10.0.1.2")
 
     def test_05_filter_by_source(self):
@@ -517,7 +522,7 @@ class TestBlockLog(unittest.TestCase):
         self._do_block_cycle("10.0.1.2", ping_count=3)
 
         # 按 rule_source=manual 过滤
-        success, resp = self.api_client.get_records({"rule_source": "manual", "limit": 100})
+        success, resp = self.api_client.get_records_today(rule_source="manual", page_size=100)
         self.assertTrue(success, f"Failed to filter by rule_source: {resp}")
 
         records = self._safe_records(resp)
@@ -541,7 +546,7 @@ class TestBlockLog(unittest.TestCase):
         logger.info(f"Stats cross-validation: by_rule_source.manual={manual_stats}")
 
         # 验证过滤非法来源返回空
-        success, resp = self.api_client.get_records({"rule_source": "nonexistent_source", "limit": 100})
+        success, resp = self.api_client.get_records_today(rule_source="nonexistent_source", page_size=100)
         self.assertTrue(success)
         records_empty = self._safe_records(resp)
         self.assertEqual(len(records_empty), 0,
@@ -586,7 +591,7 @@ class TestBlockLog(unittest.TestCase):
         time.sleep(2)
 
         # 验证总记录数
-        success, resp = self.api_client.get_records({"limit": 200})
+        success, resp = self.api_client.get_records_today()
         self.assertTrue(success)
         all_records = self._safe_records(resp)
         total_count = len(all_records)

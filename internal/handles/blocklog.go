@@ -1,9 +1,7 @@
 package handles
 
 import (
-	"fmt"
 	"strconv"
-	"time"
 
 	"rho-aias/internal/blocklog"
 	"rho-aias/internal/ebpfs"
@@ -27,9 +25,8 @@ func NewBlockLogHandle(blockLog *blocklog.Manager, xdp *ebpfs.Xdp) *BlockLogHand
 }
 
 // GetRecords 获取阻断记录
-// GET /api/blocklog/records?hour=2026-04-17_14&page=1&page_size=20&match_type=&rule_source=&src_ip=&country_code=
-// - 指定 hour 参数 → 从 JSONL 文件查询（支持分页，数据完整）
-// - 无 hour 参数 → 从内存查询（实时最新 N 条，适合监控面板）
+// GET /api/blocklog/records?date=2026-04-17&start_hour=0&end_hour=23&page=1&page_size=20&match_type=&rule_source=&src_ip=&country_code=
+// 必须指定 date 参数；start_hour/end_hour 默认为 0/23（当天全部）；不支持跨天查询
 func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 	var filter blocklog.RecordFilter
 	if err := c.ShouldBindQuery(&filter); err != nil {
@@ -37,14 +34,25 @@ func (h *BlockLogHandle) GetRecords(c *gin.Context) {
 		return
 	}
 
-	// 无 hour 参数时默认查当前小时
-	if filter.Hour == "" {
-		now := time.Now()
-		filter.Hour = fmt.Sprintf("%s_%02d", now.Format("2006-01-02"), now.Hour())
+	// 验证 date 参数必填
+	if filter.Date == "" {
+		response.BadRequest(c, "date parameter is required (format: YYYY-MM-DD)")
+		return
 	}
 
-	// 统一从 JSONL 文件查询
-	result, err := h.blockLog.QueryJSONLRecords(filter)
+	// 验证 start_hour 和 end_hour
+	if filter.StartHour < 0 || filter.StartHour > 23 {
+		filter.StartHour = 0
+	}
+	if filter.EndHour < 0 || filter.EndHour > 23 {
+		filter.EndHour = 23
+	}
+	if filter.StartHour > filter.EndHour {
+		response.BadRequest(c, "start_hour must be <= end_hour")
+		return
+	}
+
+	result, err := h.blockLog.QueryRecords(filter)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return

@@ -1,6 +1,8 @@
 package blocklog
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"rho-aias/internal/logger"
@@ -65,7 +67,7 @@ func (ss *StatsStore) SnapshotHour(hour string, stats Stats, topIPs []IPCount) {
 		}
 	}
 
-	// 写入 TopIPs（带 hour 列，支持按时间范围查询）
+	// 写入 TopIPs
 	for _, ipCount := range topIPs {
 		err := ss.db.Exec(
 			`INSERT INTO blocklog_top_ips (hour, ip, count) VALUES (?, ?, ?)
@@ -79,7 +81,6 @@ func (ss *StatsStore) SnapshotHour(hour string, stats Stats, topIPs []IPCount) {
 }
 
 // GetAggregatedStats 从数据库聚合指定时间范围内的统计（DB 历史数据）
-// retentionDays: 查询最近 N 天的数据
 func (ss *StatsStore) GetAggregatedStats(retentionDays int) Stats {
 	if ss.db == nil {
 		return Stats{}
@@ -148,7 +149,6 @@ func (ss *StatsStore) GetHourlyTrend(hours int) []HourlyTrendItem {
 }
 
 // GetTopIPs 从 blocklog_top_ips 表查询时间范围内 Top N IP
-// retentionDays: 查询最近 N 天的数据
 func (ss *StatsStore) GetTopIPs(retentionDays int, limit int) []IPCount {
 	if ss.db == nil {
 		return nil
@@ -175,8 +175,8 @@ func (ss *StatsStore) GetTopIPs(retentionDays int, limit int) []IPCount {
 	return ips
 }
 
-// Cleanup 清理 N 天前的历史数据
-func (ss *StatsStore) Cleanup(retainDays int) error {
+// CleanupOldHourlyData 清理 N 天前的 blocklog_hourly_stats 和 blocklog_top_ips 数据
+func (ss *StatsStore) CleanupOldHourlyData(retainDays int) error {
 	if ss.db == nil {
 		return nil
 	}
@@ -194,6 +194,195 @@ func (ss *StatsStore) Cleanup(retainDays int) error {
 	}
 	deleted += result.RowsAffected
 
-	logger.Infof("[StatsStore] Cleaned up %d rows older than %d days", deleted, retainDays)
+	logger.Infof("[StatsStore] Cleaned up %d hourly stats rows older than %d days", deleted, retainDays)
+	return nil
+}
+
+// QueryRecords 从按天分表查询阻断记录（支持跨小时范围查询）
+func (ss *StatsStore) QueryRecords(filter RecordFilter) (*PageResult, error) {
+	if ss.db == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	// 验证 date 格式
+	parsedDate, err := time.Parse("2006-01-02", filter.Date)
+	if err != nil {
+		return nil, fmt.Errorf("invalid date format, expected YYYY-MM-DD, got: %s", filter.Date)
+	}
+
+	tableName := "blocklog_" + parsedDate.Format("20060102")
+
+	// 检查表是否存在
+	if !ss.db.Migrator().HasTable(tableName) {
+		return &PageResult{
+			Records:  []BlockRecord{},
+			Total:    0,
+			Page:     filter.Page,
+			PageSize: filter.PageSize,
+		}, nil
+	}
+
+	// 设置默认分页参数
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+
+	// 设置默认小时范围
+	startHour := filter.StartHour
+	if startHour < 0 || startHour > 23 {
+		startHour = 0
+	}
+	endHour := filter.EndHour
+	if endHour < 0 || endHour > 23 {
+		endHour = 23
+	}
+
+	// 构建查询
+	query := ss.db.Table(tableName).Where("hour BETWEEN ? AND ?", startHour, endHour)
+
+	if filter.MatchType != "" {
+		query = query.Where("match_type = ?", filter.MatchType)
+	}
+	if filter.RuleSource != "" {
+		query = query.Where("rule_source = ?", filter.RuleSource)
+	}
+	if filter.SrcIP != "" {
+		query = query.Where("src_ip = ?", filter.SrcIP)
+	}
+	if filter.CountryCode != "" {
+		query = query.Where("country_code = ?", filter.CountryCode)
+	}
+
+	// COUNT
+	var total int64
+	query.Count(&total)
+
+	// 分页查询（按 id ASC）
+	var rows []models.BlocklogRecord
+	offset := (page - 1) * pageSize
+	if err := query.Order("id ASC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("query records failed: %w", err)
+	}
+
+	// 转换为 BlockRecord
+	records := make([]BlockRecord, len(rows))
+	for i, r := range rows {
+		records[i] = BlockRecord{
+			Timestamp:   r.Timestamp,
+			SrcIP:       r.SrcIP,
+			DstIP:       r.DstIP,
+			MatchType:   r.MatchType,
+			RuleSource:  r.RuleSource,
+			CountryCode: r.CountryCode,
+			PacketSize:  r.PacketSize,
+		}
+	}
+
+	return &PageResult{
+		Records:  records,
+		Total:    int(total),
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
+}
+
+// AggregateTopIPsFromTable 从按天分表聚合 Top IP（替代从 JSONL 文件聚合）
+func (ss *StatsStore) AggregateTopIPsFromTable(hourKey string) []IPCount {
+	if ss.db == nil {
+		return nil
+	}
+
+	// hourKey 格式: "2026-04-17T14"
+	parts := strings.SplitN(hourKey, "T", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+
+	dateStr := parts[0] // "2026-04-17"
+	hourStr := parts[1] // "14"
+
+	parsedDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return nil
+	}
+
+	tableName := "blocklog_" + parsedDate.Format("20060102")
+	if !ss.db.Migrator().HasTable(tableName) {
+		return nil
+	}
+
+	var hour int
+	fmt.Sscanf(hourStr, "%d", &hour)
+
+	var results []struct {
+		SrcIP string `json:"src_ip"`
+		Count int64  `json:"count"`
+	}
+
+	ss.db.Table(tableName).
+		Select("src_ip, COUNT(*) as count").
+		Where("hour = ?", hour).
+		Group("src_ip").
+		Having("COUNT(*) > 1").
+		Order("count DESC").
+		Find(&results)
+
+	if len(results) == 0 {
+		return nil
+	}
+
+	ips := make([]IPCount, len(results))
+	for i, r := range results {
+		ips[i] = IPCount{IP: r.SrcIP, Count: int(r.Count)}
+	}
+	return ips
+}
+
+// CleanupOldDayTables 清理 N 天前的按天分表（DROP TABLE）
+func (ss *StatsStore) CleanupOldDayTables(retainDays int) error {
+	if ss.db == nil {
+		return nil
+	}
+
+	cutoffDate := time.Now().AddDate(0, 0, -retainDays)
+
+	// 查询所有 blocklog_ 开头的表
+	var tableNames []string
+	if err := ss.db.Raw("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'blocklog_2%'").Scan(&tableNames).Error; err != nil {
+		return fmt.Errorf("query sqlite_master failed: %w", err)
+	}
+
+	dropped := 0
+	for _, name := range tableNames {
+		// 提取日期部分：blocklog_20260417 -> 20260417
+		dateStr := strings.TrimPrefix(name, "blocklog_")
+		if len(dateStr) != 8 {
+			continue
+		}
+
+		parsed, err := time.Parse("20060102", dateStr)
+		if err != nil {
+			continue
+		}
+
+		if parsed.Before(cutoffDate) {
+			if err := ss.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", name)).Error; err != nil {
+				logger.Warnf("[StatsStore] Failed to drop table %s: %v", name, err)
+			} else {
+				dropped++
+				logger.Infof("[StatsStore] Dropped old daily table: %s", name)
+			}
+		}
+	}
+
+	logger.Infof("[StatsStore] Cleaned up %d daily tables older than %d days", dropped, retainDays)
 	return nil
 }

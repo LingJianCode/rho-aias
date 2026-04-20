@@ -2,7 +2,9 @@ import request from './request'
 import type { ApiResponse, BlockLogListResponse, BlockLogStats, BlockLogEventStatus } from '@/types/api'
 
 export interface BlockLogFilter {
-  hour?: string
+  date: string
+  start_hour?: number
+  end_hour?: number
   page?: number
   page_size?: number
   match_type?: string

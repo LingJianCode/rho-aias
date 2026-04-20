@@ -16,18 +16,24 @@
     </el-row>
     <el-card class="filter-card">
       <el-form :inline="true" :model="filters" class="filter-form">
-        <el-form-item label="查询时间">
+        <el-form-item label="查询日期">
           <el-date-picker
-            v-model="selectedHour"
-            type="datetime"
-            placeholder="选择小时"
-            format="YYYY-MM-DD HH:00"
-            value-format="YYYY-MM-DD_HH"
-            :disabled-hours="() => []"
-            :disabled-minutes="() => Array.from({ length: 60 }, (_, i) => i)"
-            :disabled-seconds="() => Array.from({ length: 60 }, (_, i) => i)"
-            style="width: 200px"
+            v-model="selectedDate"
+            type="date"
+            placeholder="选择日期"
+            format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD"
+            style="width: 160px"
           />
+        </el-form-item>
+        <el-form-item label="小时范围">
+          <el-select v-model="filters.start_hour" placeholder="起始" style="width: 80px">
+            <el-option v-for="h in 24" :key="h - 1" :label="String(h - 1).padStart(2, '0')" :value="h - 1" />
+          </el-select>
+          <span style="margin: 0 4px">-</span>
+          <el-select v-model="filters.end_hour" placeholder="结束" style="width: 80px">
+            <el-option v-for="h in 24" :key="h - 1" :label="String(h - 1).padStart(2, '0')" :value="h - 1" />
+          </el-select>
         </el-form-item>
         <el-form-item label="搜索 IP">
           <el-input
@@ -129,11 +135,13 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 
-// 默认当前小时
+// 默认今天
 const now = new Date()
-const defaultHour = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}`
-const selectedHour = ref<string>(defaultHour)
+const defaultDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+const selectedDate = ref<string>(defaultDate)
 const filters = reactive({
+  start_hour: 0,
+  end_hour: 23,
   src_ip: '',
   match_type: '',
   rule_source: '',
@@ -155,7 +163,7 @@ async function fetchStats() {
 }
 
 async function fetchLogs() {
-  if (!selectedHour.value) {
+  if (!selectedDate.value) {
     logs.value = []
     total.value = 0
     return
@@ -163,7 +171,9 @@ async function fetchLogs() {
   loading.value = true
   try {
     const res = await getBlockLogs({
-      hour: selectedHour.value,
+      date: selectedDate.value,
+      start_hour: filters.start_hour,
+      end_hour: filters.end_hour,
       page: page.value,
       page_size: pageSize.value,
       src_ip: filters.src_ip || undefined,
@@ -191,7 +201,9 @@ function handleSearch() {
 
 function handleReset() {
   const now = new Date()
-  selectedHour.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}`
+  selectedDate.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  filters.start_hour = 0
+  filters.end_hour = 23
   filters.src_ip = ''
   filters.match_type = ''
   filters.rule_source = ''

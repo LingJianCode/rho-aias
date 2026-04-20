@@ -36,7 +36,6 @@ func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 	var blockLogMgr *blocklog.Manager
 	{
 		blConfig := blocklog.Config{
-			LogDir:          cfg.BlockLog.LogDir,
 			MemoryCacheSize: cfg.BlockLog.MemoryCacheSize,
 			BufferSize:      cfg.BlockLog.BufferSize,
 			FlushInterval:   time.Duration(cfg.BlockLog.FlushInterval) * time.Second,
@@ -46,7 +45,7 @@ func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 		if err != nil {
 			logger.Fatalf("[BlockLog] Failed to initialize with persistence: %v", err)
 		}
-		logger.Infof("[Main] Block log initialized with persistence enabled, log dir: %s", cfg.BlockLog.LogDir)
+		logger.Info("[Main] Block log initialized with SQLite persistence enabled")
 	}
 
 	xdp.SetCallback(func(srcIP, dstIP, matchType, ruleSource, countryCode string, packetSize uint32) {

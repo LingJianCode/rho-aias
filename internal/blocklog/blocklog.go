@@ -38,8 +38,7 @@ type Manager struct {
 	records     []BlockRecord
 	maxSize     int
 	asyncWriter *AsyncWriter
-	statsStore  *StatsStore    // 统计存储（可选）
-	jsonReader  *JsonLogReader // JSONL 文件查询器
+	statsStore  *StatsStore // 统计存储（可选）
 	counters    *blockLogCounters
 }
 
@@ -107,8 +106,8 @@ func (c *blockLogCounters) reset() {
 func NewManagerWithPersistence(maxSize int, config Config, db *gorm.DB) (*Manager, error) {
 	m := NewManager(maxSize)
 
-	// 创建异步写入器（注入 onRotate 回调）
-	asyncWriter, err := NewAsyncWriter(config, func(t time.Time) {
+	// 创建异步写入器（注入 onRotate 回调 + db）
+	asyncWriter, err := NewAsyncWriter(config, db, func(t time.Time) {
 		m.SnapshotHourlyCounters(t)
 	})
 	if err != nil {
@@ -116,12 +115,11 @@ func NewManagerWithPersistence(maxSize int, config Config, db *gorm.DB) (*Manage
 	}
 	m.asyncWriter = asyncWriter
 
-	// 创建 JSONL 查询器（复用同一个 logDir）
-	m.jsonReader = NewJsonLogReader(config.LogDir)
-
 	// 注入统计存储
 	if db != nil {
 		m.statsStore = NewStatsStore(db)
+		// 注入 statsStore 到 AsyncWriter 用于定时清理
+		m.asyncWriter.statsStore = m.statsStore
 	}
 
 	return m, nil
@@ -140,7 +138,7 @@ func (m *Manager) AddRecord(record BlockRecord) {
 
 	m.records = append(m.records, record)
 
-	// 异步写入文件（Write 是非阻塞的，可以安全地在锁内调用）
+	// 异步写入 SQLite（Write 是非阻塞的，可以安全地在锁内调用）
 	if m.asyncWriter != nil {
 		if err := m.asyncWriter.Write(record); err != nil {
 			logger.Warnf("async write failed: %v", err)
@@ -211,24 +209,26 @@ func (m *Manager) GetRecordsByFilter(filter RecordFilter) []BlockRecord {
 	return result
 }
 
-// QueryJSONLRecords 从 JSONL 文件分页查询记录
-func (m *Manager) QueryJSONLRecords(filter RecordFilter) (*PageResult, error) {
-	if m.jsonReader == nil {
-		return nil, fmt.Errorf("json reader not initialized")
+// QueryRecords 从 SQLite 按天分表分页查询记录
+func (m *Manager) QueryRecords(filter RecordFilter) (*PageResult, error) {
+	if m.statsStore == nil {
+		return nil, fmt.Errorf("stats store not initialized")
 	}
-	return m.jsonReader.QueryPage(filter.Hour, filter)
+	return m.statsStore.QueryRecords(filter)
 }
 
 // RecordFilter 记录过滤条件
 type RecordFilter struct {
-	Hour        string `form:"hour"`         // 小时查询 (格式: 2026-04-17_14)
-	MatchType   string `form:"match_type"`   // 匹配类型过滤
-	RuleSource  string `form:"rule_source"`  // 规则来源过滤
-	SrcIP       string `form:"src_ip"`       // 源 IP 过滤
-	CountryCode string `form:"country_code"` // 国家代码过滤
-	Page        int    `form:"page"`         // 页码 (从1开始)
-	PageSize    int    `form:"page_size"`    // 每页数量
-	Limit       int    `form:"limit"`        // 返回数量限制 (内存查询模式)
+	Date        string `form:"date" binding:"required"` // 日期查询 (格式: 2026-04-17)
+	StartHour   int    `form:"start_hour"`              // 起始小时 (0-23, 默认 0)
+	EndHour     int    `form:"end_hour"`                // 结束小时 (0-23, 默认 23)
+	MatchType   string `form:"match_type"`              // 匹配类型过滤
+	RuleSource  string `form:"rule_source"`             // 规则来源过滤
+	SrcIP       string `form:"src_ip"`                  // 源 IP 过滤
+	CountryCode string `form:"country_code"`            // 国家代码过滤
+	Page        int    `form:"page"`                    // 页码 (从1开始)
+	PageSize    int    `form:"page_size"`               // 每页数量
+	Limit       int    `form:"limit"`                   // 返回数量限制 (内存查询模式)
 }
 
 // Stats 统计信息
@@ -241,6 +241,14 @@ type Stats struct {
 type IPCount struct {
 	IP    string `json:"ip"`
 	Count int    `json:"count"`
+}
+
+// PageResult 分页查询结果
+type PageResult struct {
+	Records  []BlockRecord `json:"records"`
+	Total    int           `json:"total"`
+	Page     int           `json:"page"`
+	PageSize int           `json:"page_size"`
 }
 
 // defaultRetentionDays 默认查询最近天数
@@ -281,11 +289,9 @@ func (m *Manager) SnapshotHourlyCounters(t time.Time) {
 	hourKey := t.Format("2006-01-02T15")
 	snap := m.counters.snapshot()
 
-	// 从 JSONL 文件批量聚合 topIPs（替代内存实时计数，数据最多落后 1 小时）
+	// 从 SQLite 按天分表聚合 topIPs（替代从 JSONL 文件聚合）
 	var topIPs []IPCount
-	if m.jsonReader != nil {
-		topIPs = m.jsonReader.AggregateTopIPs(hourKey)
-	}
+	topIPs = m.statsStore.AggregateTopIPsFromTable(hourKey)
 
 	if snap.TotalBlocked > 0 || len(topIPs) > 0 {
 		m.statsStore.SnapshotHour(hourKey, snap, topIPs)

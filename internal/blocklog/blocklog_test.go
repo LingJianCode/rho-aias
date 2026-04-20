@@ -75,35 +75,35 @@ func TestGetRecordsByFilter(t *testing.T) {
 	bl.AddRecord(BlockRecord{SrcIP: "192.168.1.1", MatchType: "ip4_exact", RuleSource: "manual"})
 
 	// 按 MatchType 筛选
-	filter := RecordFilter{MatchType: "ip4_exact"}
+	filter := RecordFilter{Date: "2026-01-01", MatchType: "ip4_exact"}
 	records := bl.GetRecordsByFilter(filter)
 	if len(records) != 2 {
 		t.Errorf("Expected 2 ip4_exact records, got %d", len(records))
 	}
 
 	// 按 RuleSource 筛选
-	filter = RecordFilter{RuleSource: "ipsum"}
+	filter = RecordFilter{Date: "2026-01-01", RuleSource: "ipsum"}
 	records = bl.GetRecordsByFilter(filter)
 	if len(records) != 1 {
 		t.Errorf("Expected 1 ipsum record, got %d", len(records))
 	}
 
 	// 按 SrcIP 筛选
-	filter = RecordFilter{SrcIP: "192.168.1.1"}
+	filter = RecordFilter{Date: "2026-01-01", SrcIP: "192.168.1.1"}
 	records = bl.GetRecordsByFilter(filter)
 	if len(records) != 2 {
 		t.Errorf("Expected 2 records from 192.168.1.1, got %d", len(records))
 	}
 
 	// 按 CountryCode 筛选
-	filter = RecordFilter{CountryCode: "US"}
+	filter = RecordFilter{Date: "2026-01-01", CountryCode: "US"}
 	records = bl.GetRecordsByFilter(filter)
 	if len(records) != 1 {
 		t.Errorf("Expected 1 US country record, got %d", len(records))
 	}
 
 	// 带 Limit 筛选
-	filter = RecordFilter{MatchType: "ip4_exact", Limit: 1}
+	filter = RecordFilter{Date: "2026-01-01", MatchType: "ip4_exact", Limit: 1}
 	records = bl.GetRecordsByFilter(filter)
 	if len(records) != 1 {
 		t.Errorf("Expected 1 record with limit, got %d", len(records))

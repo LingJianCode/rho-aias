@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"rho-aias/internal/logger"
+	"rho-aias/internal/models"
 
 	"github.com/robfig/cron/v3"
+	"gorm.io/gorm"
 )
 
 const (
@@ -16,18 +18,18 @@ const (
 	defaultBatchSize = 100
 )
 
-// Config 持久化配置（始终启用持久化）
+// Config 持久化配置
 type Config struct {
-	LogDir          string        // 日志目录
 	MemoryCacheSize int           // 内存缓存大小
 	BufferSize      int           // 异步写入缓冲区大小
 	FlushInterval   time.Duration // 刷盘间隔
 }
 
-// AsyncWriter 异步日志写入器
+// AsyncWriter 异步日志写入器（写入 SQLite 按天分表）
 type AsyncWriter struct {
 	config     Config
-	fileWriter *FileWriter
+	db         *gorm.DB
+	statsStore *StatsStore // 用于定时清理
 	recordCh   chan BlockRecord
 	stopCh     chan struct{}
 	flushCh    chan chan struct{}
@@ -38,22 +40,13 @@ type AsyncWriter struct {
 }
 
 // NewAsyncWriter 创建异步写入器
-func NewAsyncWriter(config Config, onRotate func(time.Time)) (*AsyncWriter, error) {
-	// 创建文件写入器
-	fileWriter, err := NewFileWriter(config.LogDir)
-	if err != nil {
-		return nil, err
-	}
-
-	// 注入轮转回调
-	fileWriter.OnRotate = onRotate
-
+func NewAsyncWriter(config Config, db *gorm.DB, onRotate func(time.Time)) (*AsyncWriter, error) {
 	aw := &AsyncWriter{
-		config:     config,
-		fileWriter: fileWriter,
-		recordCh:   make(chan BlockRecord, config.BufferSize),
-		stopCh:     make(chan struct{}),
-		flushCh:    make(chan chan struct{}, 1),
+		config:   config,
+		db:       db,
+		recordCh: make(chan BlockRecord, config.BufferSize),
+		stopCh:   make(chan struct{}),
+		flushCh:  make(chan chan struct{}, 1),
 	}
 
 	// 初始化 Cron 定时任务
@@ -65,6 +58,29 @@ func NewAsyncWriter(config Config, onRotate func(time.Time)) (*AsyncWriter, erro
 		aw.Flush()
 	}); err != nil {
 		return nil, fmt.Errorf("failed to add flush cron job: %w", err)
+	}
+
+	// 整点轮转回调（触发统计快照）
+	if onRotate != nil {
+		if _, err := aw.cron.AddFunc("0 0 * * * *", func() {
+			onRotate(time.Now())
+		}); err != nil {
+			return nil, fmt.Errorf("failed to add rotate cron job: %w", err)
+		}
+	}
+
+	// 每天凌晨 3:00 清理过期数据（按天分表 + 小时统计表）
+	if aw.statsStore != nil {
+		if _, err := aw.cron.AddFunc("0 0 3 * * *", func() {
+			if err := aw.statsStore.CleanupOldDayTables(defaultRetentionDays); err != nil {
+				logger.Warnf("[BlockLog] Daily cleanup of old tables failed: %v", err)
+			}
+			if err := aw.statsStore.CleanupOldHourlyData(defaultRetentionDays); err != nil {
+				logger.Warnf("[BlockLog] Daily cleanup of old hourly stats failed: %v", err)
+			}
+		}); err != nil {
+			return nil, fmt.Errorf("failed to add cleanup cron job: %w", err)
+		}
 	}
 
 	// 启动定时任务
@@ -91,7 +107,6 @@ func (aw *AsyncWriter) Write(record BlockRecord) error {
 	select {
 	case aw.recordCh <- record:
 	default:
-		// 通道满了，丢弃记录（避免阻塞）
 		logger.Warnf("[BlockLog] Channel full (size=%d), dropping record: srcIP=%s, matchType=%s, timestamp=%d",
 			cap(aw.recordCh), record.SrcIP, record.MatchType, record.Timestamp)
 	}
@@ -120,15 +135,10 @@ func (aw *AsyncWriter) Stop() error {
 	// 等待写入协程结束
 	aw.wg.Wait()
 
-	// 关闭文件写入器
-	if aw.fileWriter != nil {
-		return aw.fileWriter.Close()
-	}
-
 	return nil
 }
 
-// Flush 手动刷新缓冲区，将待写入记录刷入文件
+// Flush 手动刷新缓冲区
 func (aw *AsyncWriter) Flush() error {
 	aw.stopMu.RLock()
 	stopped := aw.stopped
@@ -138,17 +148,12 @@ func (aw *AsyncWriter) Flush() error {
 		return nil
 	}
 
-	// 通知 run 协程将 pendingRecords 写入文件
 	done := make(chan struct{})
 	select {
 	case aw.flushCh <- done:
-		<-done // 等待写入完成
+		<-done
 	default:
 		// 已有一个 flush 请求在处理
-	}
-
-	if aw.fileWriter != nil {
-		return aw.fileWriter.Flush()
 	}
 	return nil
 }
@@ -163,14 +168,12 @@ func (aw *AsyncWriter) run() {
 		select {
 		case record := <-aw.recordCh:
 			pendingRecords = append(pendingRecords, record)
-			// 达到批量大小时立即写入
 			if len(pendingRecords) >= defaultBatchSize {
 				aw.writeBatch(pendingRecords)
 				pendingRecords = pendingRecords[:0]
 			}
 
 		case done := <-aw.flushCh:
-			// 收到 flush 请求，将待写入记录立即写入文件
 			if len(pendingRecords) > 0 {
 				aw.writeBatch(pendingRecords)
 				pendingRecords = pendingRecords[:0]
@@ -178,25 +181,100 @@ func (aw *AsyncWriter) run() {
 			close(done)
 
 		case <-aw.stopCh:
-			// 停止信号，写入剩余记录
 			if len(pendingRecords) > 0 {
 				aw.writeBatch(pendingRecords)
 			}
-			aw.fileWriter.Flush()
 			return
 		}
 	}
 }
 
-// writeBatch 批量写入记录
+// writeBatch 批量写入记录到 SQLite 按天分表
 func (aw *AsyncWriter) writeBatch(records []BlockRecord) {
-	if aw.fileWriter == nil {
+	if aw.db == nil || len(records) == 0 {
 		return
 	}
 
-	for _, record := range records {
-		if err := aw.fileWriter.Write(record); err != nil {
-			logger.Errorf("[BlockLog] Error writing record: %v", err)
+	// 按天分组
+	groups := make(map[string][]BlockRecord)
+	for _, r := range records {
+		dayKey := dayKeyFromTimestamp(r.Timestamp)
+		groups[dayKey] = append(groups[dayKey], r)
+	}
+
+	for dayKey, recs := range groups {
+		tableName := "blocklog_" + dayKey
+
+		// 确保表存在
+		if err := ensureDayTable(aw.db, tableName); err != nil {
+			logger.Errorf("[BlockLog] Failed to ensure table %s: %v", tableName, err)
+			continue
+		}
+
+		// 批量 INSERT（单事务）
+		err := aw.db.Transaction(func(tx *gorm.DB) error {
+			for _, r := range recs {
+				row := models.BlocklogRecord{
+					Hour:        hourFromTimestamp(r.Timestamp),
+					Timestamp:   r.Timestamp,
+					SrcIP:       r.SrcIP,
+					DstIP:       r.DstIP,
+					MatchType:   r.MatchType,
+					RuleSource:  r.RuleSource,
+					CountryCode: r.CountryCode,
+					PacketSize:  r.PacketSize,
+				}
+				if err := tx.Table(tableName).Create(&row).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			logger.Errorf("[BlockLog] Batch insert to %s failed (%d records): %v", tableName, len(recs), err)
 		}
 	}
+}
+
+// dayKeyFromTimestamp 从 Unix 纳秒时间戳提取日期键 "20060102"
+func dayKeyFromTimestamp(ns int64) string {
+	return time.Unix(0, ns).Format("20060102")
+}
+
+// hourFromTimestamp 从 Unix 纳秒时间戳提取小时 (0-23)
+func hourFromTimestamp(ns int64) int {
+	return time.Unix(0, ns).Hour()
+}
+
+// ensureDayTable 确保按天分表存在并创建索引
+func ensureDayTable(db *gorm.DB, tableName string) error {
+	// 检查表是否已存在
+	if db.Migrator().HasTable(tableName) {
+		return nil
+	}
+
+	// 创建表
+	if err := db.Table(tableName).AutoMigrate(&models.BlocklogRecord{}); err != nil {
+		return fmt.Errorf("auto migrate table %s: %w", tableName, err)
+	}
+
+	// 创建额外索引（GORM AutoMigrate 仅创建 tag 中声明的索引，这里补充复合索引用于查询优化）
+	indexes := []struct {
+		name string
+		sql  string
+	}{
+		{"idx_hour", fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_%s_hour ON %s (hour)", tableName, tableName)},
+		{"idx_src_ip", fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_%s_src_ip ON %s (src_ip)", tableName, tableName)},
+		{"idx_match_type", fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_%s_match_type ON %s (match_type)", tableName, tableName)},
+		{"idx_rule_source", fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_%s_rule_source ON %s (rule_source)", tableName, tableName)},
+		{"idx_timestamp", fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_%s_timestamp ON %s (timestamp)", tableName, tableName)},
+	}
+	for _, idx := range indexes {
+		if err := db.Exec(idx.sql).Error; err != nil {
+			logger.Warnf("[BlockLog] Failed to create index %s on %s: %v", idx.name, tableName, err)
+		}
+	}
+
+	logger.Infof("[BlockLog] Created daily table: %s", tableName)
+	return nil
 }

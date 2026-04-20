@@ -110,7 +110,7 @@ type APIKeyConfig struct {
 
 // BlockLogConfig 阻断日志配置（始终持久化）
 type BlockLogConfig struct {
-	LogDir          string `yaml:"log_dir"`           // 日志目录（按小时分割，格式：YYYY-MM-DD_HH.jsonl）
+	LogDir          string `yaml:"log_dir"`           // 已废弃：日志目录（SQLite 替代 JSONL 后不再使用）
 	MemoryCacheSize int    `yaml:"memory_cache_size"` // 内存缓存大小（用于实时查询）
 	BufferSize      int    `yaml:"buffer_size"`       // 异步写入缓冲区大小
 	FlushInterval   int    `yaml:"flush_interval"`    // 刷盘间隔（秒）
