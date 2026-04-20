@@ -84,7 +84,7 @@ business:
 
 # 阻断日志配置（始终持久化）
 blocklog:
-  buffer_size: 10                # 异步写入缓冲区大小
+  buffer_size: 1000                # 异步写入缓冲区大小
   flush_interval: 5                # 刷盘间隔（秒）
 
 # WAF 日志监控配置
