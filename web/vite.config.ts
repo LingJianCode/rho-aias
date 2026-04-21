@@ -6,7 +6,6 @@ import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import IconsResolver from 'unplugin-icons/resolver'
 import Icons from 'unplugin-icons/vite'
-import viteCompression from 'vite-plugin-compression'
 
 const pathSrc = resolve(__dirname, 'src')
 
@@ -31,10 +30,6 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
         dts: 'src/components.d.ts',
       }),
       Icons({ autoInstall: true }),
-      viteCompression({
-        algorithm: 'gzip',
-        threshold: 10240,
-      }),
     ].filter(Boolean), // 过滤掉 false 值
     server: {
       host: '0.0.0.0',
@@ -53,15 +48,13 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
       // 3. 核心优化：分包策略
       rollupOptions: {
         output: {
-          manualChunks(id) {
-            if (id.includes('node_modules')) {
-              if (id.includes('echarts')) return 'echarts'
-              if (id.includes('element-plus/icons-vue')) return 'ep-icons'
-              if (id.includes('element-plus')) return 'element-plus'
-              if (id.includes('axios')) return 'axios'
-              if (id.includes('vue') || id.includes('pinia')) return 'vue-vendor'
-              return 'vendor'
-            }
+          manualChunks: {
+            // 将 Vue 相关库单独打包
+            'vue-vendor': ['vue', 'vue-router', 'pinia'],
+            // 将 Element Plus 单独打包 (因为它比较大)
+            'element-plus': ['element-plus'],
+            // 其他大型工具库可以放这里
+            // 'lodash-lib': ['lodash-es'] 
           },
         },
       },
