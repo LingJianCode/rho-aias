@@ -305,10 +305,10 @@ func (ss *StatsStore) QueryRecords(filter RecordFilter) (*PageResult, error) {
 	var total int64
 	query.Count(&total)
 
-	// 分页查询（按 id DASC）
+	// 分页查询（按 id DESC
 	var rows []models.BlocklogRecord
 	offset := (page - 1) * pageSize
-	if err := query.Order("id DASC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
+	if err := query.Order("id DESC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("query records failed: %w", err)
 	}
 
