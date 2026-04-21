@@ -1,5 +1,4 @@
 import axios, { type AxiosInstance, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
-import { ElMessage, ElNotification } from 'element-plus'
 import { getToken, setToken, clearAuth } from '@/utils/auth'
 import type { ApiResponse } from '@/types/api'
 import router from '@/router'

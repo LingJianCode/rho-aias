@@ -74,7 +74,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+
 import { Monitor } from '@element-plus/icons-vue'
 import { getIntelStatus, triggerIntelUpdate } from '@/api/intel'
 import { getBlockLogEventStatus } from '@/api/blocklog'

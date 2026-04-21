@@ -251,7 +251,7 @@
 
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+
 import { getModuleConfig, updateModuleConfig } from '@/api/config'
 import type { ConfigModuleName } from '@/types/api'
 

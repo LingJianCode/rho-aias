@@ -1,4 +1,3 @@
-import { ElMessageBox } from 'element-plus'
 
 interface UseConfirmOptions {
   title?: string

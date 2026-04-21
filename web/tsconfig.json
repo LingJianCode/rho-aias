@@ -3,5 +3,21 @@
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }
-  ]
+  ],
+    "compilerOptions": {
+    "types": [
+      "node",
+      "vue"
+    ],
+    "include": [
+      "src/**/*.ts", 
+      "src/**/*.d.ts", 
+      "src/**/*.tsx", 
+      "src/**/*.vue",
+      
+      // 加上这两行 ↓
+      "auto-imports.d.ts", 
+      "components.d.ts"
+    ]
+  }
 }

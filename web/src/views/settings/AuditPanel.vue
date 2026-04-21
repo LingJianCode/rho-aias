@@ -137,7 +137,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+
 import { listAuditLogs, cleanAuditLogs } from '@/api/audit'
 import { formatDateTime } from '@/utils/format'
 import type { AuditLog } from '@/types/api'
