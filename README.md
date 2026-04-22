@@ -2,8 +2,17 @@
 
 基于 eBPF/XDP 的高性能网络防火墙系统，在网络驱动层（L3）拦截和过滤数据包。
 
+![config](./img/dashboard.png)
+
+![config](./img/blocklog.png)
+
+![config](./img/ban_record.png)
+
 ![blcklist](./img/blacklist.png)
+
 ![config](./img/config.png)
+
+
 
 ## 功能特性
 
