@@ -2,20 +2,10 @@ package handles
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 
 	"rho-aias/internal/config"
 )
-
-// isNilInterface 安全的 nil 接口检查
-func isNilInterface(i any) bool {
-	if i == nil {
-		return true
-	}
-	defer func() { _ = recover() }()
-	return reflect.ValueOf(i).IsNil()
-}
 
 // validateAnomalyRuntimeFields 校验 anomaly runtime 嵌套结构体中的数值字段
 func validateAnomalyRuntimeFields(baseline *config.BaselineRuntime, attacks *config.AttacksRuntime) error {

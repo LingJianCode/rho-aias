@@ -162,7 +162,7 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 // ========== Geo / Intel / BlocklogEvents 模块应用逻辑 ==========
 
 func (h *ConfigHandle) applyGeoBlockingConfig(raw json.RawMessage) error {
-	if h.geoBlockingMgr == nil || isNilInterface(h.geoBlockingMgr) {
+	if h.geoBlockingMgr == nil {
 		return fmt.Errorf("geo_blocking module is not initialized")
 	}
 	var req config.GeoBlockingRuntime
@@ -182,7 +182,7 @@ func (h *ConfigHandle) applyGeoBlockingConfig(raw json.RawMessage) error {
 }
 
 func (h *ConfigHandle) applyIntelConfig(raw json.RawMessage) error {
-	if h.intelMgr == nil || isNilInterface(h.intelMgr) {
+	if h.intelMgr == nil {
 		return fmt.Errorf("intel module is not initialized")
 	}
 	var req config.IntelRuntime

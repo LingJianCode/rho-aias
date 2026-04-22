@@ -75,8 +75,25 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		cfg.GeoBlocking.Enabled = geo.Enabled
 		cfg.GeoBlocking.Mode = geo.Mode
 		cfg.GeoBlocking.AllowedCountries = geo.AllowedCountries
-		loaded["geo_blocking"] = fmt.Sprintf("enabled=%v, mode=%s, countries=%v",
-			geo.Enabled, geo.Mode, geo.AllowedCountries)
+		if len(geo.Sources) > 0 {
+			converted := make(map[string]config.GeoIPSource, len(geo.Sources))
+			for sid, src := range geo.Sources {
+				existingFormat := ""
+				if existing, exists := cfg.GeoBlocking.Sources[sid]; exists {
+					existingFormat = existing.Format
+				}
+				converted[sid] = config.GeoIPSource{
+					Enabled:  src.Enabled,
+					Periodic: src.Periodic,
+					Schedule: src.Schedule,
+					URL:      src.URL,
+					Format:   existingFormat,
+				}
+			}
+			cfg.GeoBlocking.Sources = converted
+		}
+		loaded["geo_blocking"] = fmt.Sprintf("enabled=%v, mode=%s, countries=%v, sources=%d",
+			geo.Enabled, geo.Mode, geo.AllowedCountries, len(geo.Sources))
 	}
 
 	var intel config.IntelRuntime
@@ -84,7 +101,21 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		logger.Warnf("[Main] Failed to load intel dynamic config from DB: %v", err)
 	} else if ok {
 		cfg.Intel.Enabled = intel.Enabled
-		loaded["intel"] = fmt.Sprintf("enabled=%v", intel.Enabled)
+		if len(intel.Sources) > 0 {
+			converted := make(map[string]config.IntelSource, len(intel.Sources))
+			for sid, src := range intel.Sources {
+				existing := cfg.Intel.Sources[sid]
+				converted[sid] = config.IntelSource{
+					Enabled:  src.Enabled,
+					Periodic: existing.Periodic,
+					Schedule: src.Schedule,
+					URL:      src.URL,
+					Format:   existing.Format,
+				}
+			}
+			cfg.Intel.Sources = converted
+		}
+		loaded["intel"] = fmt.Sprintf("enabled=%v, sources=%d", intel.Enabled, len(intel.Sources))
 	}
 
 	var blocklogEvents config.BlocklogEventsRuntime

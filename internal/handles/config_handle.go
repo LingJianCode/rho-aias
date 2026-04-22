@@ -10,11 +10,13 @@ import (
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/failguard"
+	"rho-aias/internal/geoblocking"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/models"
 	"rho-aias/internal/ratelimit"
 	"rho-aias/internal/response"
 	"rho-aias/internal/services"
+	"rho-aias/internal/threatintel"
 	"rho-aias/internal/waf"
 
 	"github.com/gin-gonic/gin"
@@ -31,24 +33,6 @@ var supportedModules = []string{
 // IsValidModule 导出给外部调用
 var IsValidModule = models.IsValidModule
 
-// AnomalyController eBPF 异常检测操作接口
-type AnomalyController interface {
-	SetAnomalyConfig(enabled bool, sampleRate uint32) error
-	SetAnomalyPortFilter(enabled bool, ports []uint32) error
-	MonitorAnomalyEvents(callback ebpfs.AnomalyEventCallback, extraDone <-chan struct{})
-}
-
-type GeoBlockingConfigUpdater interface {
-	UpdateConfig(enabled bool, mode string, countries []string) error
-	UpdateSourceConfig(sourceID string, enabled bool, periodic bool, schedule string, url string) error
-	GetConfig() map[string]interface{}
-}
-type IntelConfigUpdater interface {
-	UpdateConfig(enabled bool)
-	UpdateSourceConfig(sourceID string, enabled bool, schedule string, url string) error
-	GetConfig() map[string]interface{}
-}
-
 // ConfigHandle 统一配置 API 处理器
 type ConfigHandle struct {
 	configService         *services.DynamicConfigService
@@ -57,10 +41,10 @@ type ConfigHandle struct {
 	wafMgr          *waf.Manager
 	rateLimitMgr    *ratelimit.Manager
 	anomalyDetector       *anomaly.Manager
-	geoBlockingMgr        GeoBlockingConfigUpdater
-	intelMgr              IntelConfigUpdater
+	geoBlockingMgr        *geoblocking.Manager
+	intelMgr              *threatintel.Manager
 	xdp                   *ebpfs.Xdp
-	anomalyController     AnomalyController
+	anomalyController     *ebpfs.Xdp
 	anomalyRecordPacketFn ebpfs.AnomalyEventCallback
 	anomalyMonitorCancel  context.CancelFunc
 	mu                    sync.Mutex
@@ -72,10 +56,10 @@ func NewConfigHandle(
 	wafMgr *waf.Manager,
 	rateLimitMgr *ratelimit.Manager,
 	anomalyDetector *anomaly.Manager,
-	geoBlockingMgr GeoBlockingConfigUpdater,
-	intelMgr IntelConfigUpdater,
+	geoBlockingMgr *geoblocking.Manager,
+	intelMgr *threatintel.Manager,
 	xdp *ebpfs.Xdp,
-	anomalyController AnomalyController,
+	anomalyController *ebpfs.Xdp,
 	anomalyRecordPacketFn ebpfs.AnomalyEventCallback,
 ) *ConfigHandle {
 	h := &ConfigHandle{
@@ -200,11 +184,11 @@ func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 	case models.ModuleAnomalyDetection:
 		return h.anomalyDetector.GetConfig()
 	case models.ModuleGeoBlocking:
-		if h.geoBlockingMgr != nil && !isNilInterface(h.geoBlockingMgr) {
+		if h.geoBlockingMgr != nil {
 			return h.geoBlockingMgr.GetConfig()
 		}
 	case models.ModuleIntel:
-		if h.intelMgr != nil && !isNilInterface(h.intelMgr) {
+		if h.intelMgr != nil {
 			return h.intelMgr.GetConfig()
 		}
 	case models.ModuleBlocklogEvents:
