@@ -151,10 +151,10 @@ func (e *GeoEnricher) enrichDay(date string) error {
 			countryCode, err := e.geoLookup.LookupCountry(ip)
 			if err != nil {
 				logger.Debugf("[GeoEnricher] Lookup failed for %s: %v", ip, err)
-				continue
+				countryCode = "XX"
 			}
 			if countryCode == "" {
-				continue
+				countryCode = "XX"
 			}
 			for _, id := range recordIDs {
 				updates[id] = countryCode
