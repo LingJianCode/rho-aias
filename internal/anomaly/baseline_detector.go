@@ -1,12 +1,12 @@
 package anomaly
 
 import (
-	"math"
+	"sort"
 	"time"
 )
 
-// BaselineDetector 3σ 基线检测器
-// 使用 Welford 算法进行在线学习
+// BaselineDetector IQR 基线检测器
+// 基于 PPS 历史数据计算四分位数（Q1/Q3/IQR），阈值 = Q3 + k × IQR
 type BaselineDetector struct {
 	config BaselineConfig
 }
@@ -22,8 +22,8 @@ func NewBaselineDetector(config BaselineConfig) *BaselineDetector {
 	if config.MinSampleCount == 0 {
 		config.MinSampleCount = 10
 	}
-	if config.SigmaMultiplier == 0 {
-		config.SigmaMultiplier = 3.0
+	if config.IQRMultiplier == 0 {
+		config.IQRMultiplier = 2.5
 	}
 	if config.MinThreshold == 0 {
 		config.MinThreshold = 100
@@ -40,28 +40,34 @@ func NewBaselineDetector(config BaselineConfig) *BaselineDetector {
 	}
 }
 
-// UpdateBaseline 使用 Welford 算法更新基线
-// Welford 算法是一种在线算法，可以逐步更新均值和方差，避免二次遍历
-// 公式：
-//   - μ_new = μ_old + (x - μ_old) / n
-//   - M2_new = M2_old + (x - μ_old) * (x - μ_new)
-//   - σ² = M2 / (n - 1)  (当 n > 1)
-func (d *BaselineDetector) UpdateBaseline(baseline *Baseline, value float64) {
+// UpdateBaseline 基于 PPS 历史数据更新 IQR 基线
+// 从 collector 传入的 ppsHistory 中计算 Q1/Q3/IQR
+func (d *BaselineDetector) UpdateBaseline(baseline *Baseline, ppsHistory []uint64, windowSize int) {
 	// 检查基线是否过期，如果过期则重置
 	if d.ShouldReset(baseline) {
 		d.ResetBaseline(baseline)
 	}
 
-	baseline.Count++
-	n := float64(baseline.Count)
+	// 从 PPS 历史中提取有效数据点（排除零值，零值代表窗口中未使用的槽位）
+	validSamples := make([]float64, 0, windowSize)
+	for _, pps := range ppsHistory {
+		if pps > 0 {
+			validSamples = append(validSamples, float64(pps))
+		}
+	}
 
-	// Welford 算法更新均值和 M2
-	delta := value - baseline.Mean
-	baseline.Mean += delta / n
-	delta2 := value - baseline.Mean
-	baseline.M2 += delta * delta2
+	// 需要至少 minSampleCount 个有效样本才能更新基线
+	if len(validSamples) < d.config.MinSampleCount {
+		return
+	}
 
-	// 更新最后修改时间
+	// 排序后计算四分位数
+	sort.Float64s(validSamples)
+
+	baseline.Q1 = percentile(validSamples, 25)
+	baseline.Q3 = percentile(validSamples, 75)
+	baseline.IQR = baseline.Q3 - baseline.Q1
+	baseline.Count = uint64(len(validSamples))
 	baseline.LastUpdated = time.Now()
 }
 
@@ -78,15 +84,8 @@ func (d *BaselineDetector) CheckAnomaly(baseline *Baseline, value float64) (isAn
 		return false, 0
 	}
 
-	// 计算标准差
-	var stdDev float64
-	if baseline.Count > 1 {
-		variance := baseline.M2 / float64(baseline.Count-1)
-		stdDev = math.Sqrt(variance)
-	}
-
-	// 计算阈值：μ + kσ
-	threshold = baseline.Mean + d.config.SigmaMultiplier*stdDev
+	// 计算阈值：Q3 + k × IQR
+	threshold = baseline.Q3 + d.config.IQRMultiplier*baseline.IQR
 
 	// 如果当前值超过阈值，判定为异常
 	isAnomaly = value > threshold
@@ -95,13 +94,8 @@ func (d *BaselineDetector) CheckAnomaly(baseline *Baseline, value float64) (isAn
 }
 
 // GetStats 获取基线统计信息
-func (d *BaselineDetector) GetStats(baseline *Baseline) (mean, stdDev float64) {
-	mean = baseline.Mean
-	if baseline.Count > 1 {
-		variance := baseline.M2 / float64(baseline.Count-1)
-		stdDev = math.Sqrt(variance)
-	}
-	return mean, stdDev
+func (d *BaselineDetector) GetStats(baseline *Baseline) (q1, q3, iqr float64) {
+	return baseline.Q1, baseline.Q3, baseline.IQR
 }
 
 // ShouldReset 检查是否应该重置基线
@@ -116,8 +110,9 @@ func (d *BaselineDetector) ShouldReset(baseline *Baseline) bool {
 
 // ResetBaseline 重置基线数据
 func (d *BaselineDetector) ResetBaseline(baseline *Baseline) {
-	baseline.Mean = 0
-	baseline.M2 = 0
+	baseline.Q1 = 0
+	baseline.Q3 = 0
+	baseline.IQR = 0
 	baseline.Count = 0
 	baseline.LastUpdated = time.Time{}
 }
@@ -125,4 +120,30 @@ func (d *BaselineDetector) ResetBaseline(baseline *Baseline) {
 // IsBaselineReady 检查基线是否准备好
 func (d *BaselineDetector) IsBaselineReady(baseline *Baseline) bool {
 	return baseline.Count >= uint64(d.config.MinSampleCount)
+}
+
+// percentile 计算排序后数据的指定百分位数
+// 使用线性插值法（与 numpy.percentile(method='linear') 一致）
+func percentile(sortedData []float64, p float64) float64 {
+	n := len(sortedData)
+	if n == 0 {
+		return 0
+	}
+	if n == 1 {
+		return sortedData[0]
+	}
+
+	// 计算秩（rank）
+	// 对于 p 百分位，rank = (p/100) * (n-1)
+	rank := (p / 100.0) * float64(n-1)
+
+	lower := int(rank)
+	upper := lower + 1
+	if upper >= n {
+		return sortedData[n-1]
+	}
+
+	// 线性插值
+	fraction := rank - float64(lower)
+	return sortedData[lower] + fraction*(sortedData[upper]-sortedData[lower])
 }

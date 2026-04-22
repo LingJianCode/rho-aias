@@ -129,7 +129,7 @@ failguard:
 # 异常流量检测系统配置
 # 检测流程：每个 check_interval 对每个 IP 依次执行：
 #   1. 攻击类型检测（协议比例分析）→ 未命中则进入
-#   2. 3σ 基线检测（PPS 异常检测，兜底捕获 HTTP Flood 等）
+#   2. IQR 基线检测（PPS 异常检测，兜底捕获 HTTP Flood 等）
 # 每个攻击类型有两道门：全局 min_packets + 类型专属 min_packets，全过才进入比例判断
 anomaly_detection:
   enabled: true                    # 总开关
@@ -151,11 +151,11 @@ anomaly_detection:
     - 53
     - 22
 
-  # 3σ 基线配置（兜底检测：协议比例正常但流量异常大的场景，如 HTTP Flood）
-  # 使用 Welford 在线算法更新均值/方差，阈值 = μ + k × σ
+  # IQR 基线配置（兜底检测：协议比例正常但流量异常大的场景，如 HTTP Flood）
+  # 基于 PPS 历史数据计算四分位距，阈值 = Q3 + k × IQR
   baseline:
     min_sample_count: 60            # 最小学习样本数（60 秒），不足时仅学习不检测
-    sigma_multiplier: 4.0           # σ 倍数，4σ 覆盖 99.993%，平衡灵敏度与误报
+    iqr_multiplier: 2.5             # IQR 倍数，Q3 + 2.5×IQR，对偏态分布更鲁棒
     min_threshold: 1000             # 最小 PPS 阈值，PPS <1000 的 IP 豁免基线检测
     max_age: 3600                   # 基线最大有效期（秒），过期自动重置以适应流量变化
     block_duration: 60              # 基线异常封禁时长（秒）
@@ -191,6 +191,6 @@ anomaly_detection:
     # 正常 HTTP 下载 ACK 占比可达 70-85%，需提高门槛避免误封
     ack_flood:
       enabled: true
-      ratio_threshold: 0.9          # ACK/TCP > 90% 才触发（正常下载通常 <85%）
+      ratio_threshold: 0.95          # ACK/TCP > 90% 才触发（正常下载通常 <85%）
       min_packets: 500              # TCP 包 ≥500 才检测（主要误触来源，必须抬高）
       block_duration: 60

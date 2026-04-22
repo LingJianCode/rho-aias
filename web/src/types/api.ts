@@ -285,14 +285,18 @@ export interface RateLimitConfig {
 }
 
 export interface BaselineConfig {
-  packets_per_sec?: number
-  bytes_per_sec?: number
+  min_sample_count?: number
+  iqr_multiplier?: number
+  min_threshold?: number
+  max_age?: number
+  block_duration?: number
 }
 
 export interface AttackConfig {
   enabled?: boolean
-  threshold?: number
-  time_window?: number
+  ratio_threshold?: number
+  block_duration?: number
+  min_packets?: number
 }
 
 export interface AnomalyDetectionConfig {
@@ -300,7 +304,12 @@ export interface AnomalyDetectionConfig {
   min_packets?: number
   ports?: number[]
   baseline?: BaselineConfig
-  attacks?: Record<string, AttackConfig>
+  attacks?: {
+    syn_flood?: AttackConfig
+    udp_flood?: AttackConfig
+    icmp_flood?: AttackConfig
+    ack_flood?: AttackConfig
+  }
 }
 
 export interface GeoBlockingRuntimeConfig {

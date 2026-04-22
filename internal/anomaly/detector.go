@@ -186,7 +186,7 @@ func (d *Manager) runDetection() {
 			d.handleDetection(result)
 		}
 
-		// 2. 3σ 基线检测（使用当前 PPS）
+		// 2. IQR 基线检测（使用当前 PPS）
 		if len(attackResults) == 0 && stats.Window.CurrentPPS > 0 {
 			// 获取原始基线数据进行检测（非深拷贝，通过 collector 直接访问）
 			baseline, exists := d.collector.GetBaseline(ip)
@@ -208,7 +208,7 @@ func (d *Manager) runDetection() {
 			} else {
 				// 更新基线（通过 collector 直接操作原始数据，避免写入深拷贝丢失）
 				d.collector.UpdateBaseline(ip, func(bl *Baseline) {
-					d.baselineDetector.UpdateBaseline(bl, float64(stats.Window.CurrentPPS))
+					d.baselineDetector.UpdateBaseline(bl, stats.Window.PPSHistory, stats.Window.WindowSize)
 				})
 			}
 		}

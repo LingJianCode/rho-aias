@@ -131,7 +131,7 @@ class RhoAiasProcess:
 
         # 固定基线配置（与 config.yml 保持一致）
         config['anomaly_detection']['baseline']['min_sample_count'] = 10
-        config['anomaly_detection']['baseline']['sigma_multiplier'] = 3.0
+        config['anomaly_detection']['baseline']['iqr_multiplier'] = 2.5
         config['anomaly_detection']['baseline']['min_threshold'] = 100
         config['anomaly_detection']['baseline']['max_age'] = 1800
         config['anomaly_detection']['baseline']['block_duration'] = 60  # 60秒封禁

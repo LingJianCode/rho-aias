@@ -104,15 +104,46 @@
                 <el-option v-for="p in anomaly.ports" :key="p" :label="String(p)" :value="p" />
               </el-select>
             </el-form-item>
-            <el-divider content-position="left">基线参数</el-divider>
-            <el-form-item label="每秒包数阈值">
-              <el-input-number v-model="baseline.packets_per_sec" :min="0" />
+            <el-divider content-position="left">IQR 基线参数</el-divider>
+            <el-form-item label="最小样本数">
+              <el-input-number v-model="baseline.min_sample_count" :min="1" :max="1000000" />
+              <div class="form-hint">不足时仅学习不检测</div>
             </el-form-item>
-            <el-form-item label="每秒字节数阈值">
-              <el-input-number v-model="baseline.bytes_per_sec" :min="0" />
+            <el-form-item label="IQR 倍数">
+              <el-input-number v-model="baseline.iqr_multiplier" :min="1" :max="10" :step="0.5" :precision="1" />
+              <div class="form-hint">阈值 = Q3 + k×IQR，默认 2.5</div>
             </el-form-item>
+            <el-form-item label="最小PPS阈值">
+              <el-input-number v-model="baseline.min_threshold" :min="0" :max="10000000" />
+              <div class="form-hint">PPS 低于此值的 IP 豁免基线检测</div>
+            </el-form-item>
+            <el-form-item label="基线有效期(秒)">
+              <el-input-number v-model="baseline.max_age" :min="60" :max="604800" />
+              <div class="form-hint">过期自动重置以适应流量变化</div>
+            </el-form-item>
+            <el-form-item label="封禁时长(秒)">
+              <el-input-number v-model="baseline.block_duration" :min="1" :max="31536000" />
+            </el-form-item>
+            <el-divider content-position="left">攻击类型检测</el-divider>
+            <div v-for="(atk, key) in attacks" :key="key" style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 4px;">
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px">
+                <el-switch v-model="atk.enabled" />
+                <strong>{{ attackLabels[key as string] }}</strong>
+              </div>
+              <el-form :model="atk" label-width="120px" v-if="atk.enabled">
+                <el-form-item label="比例阈值">
+                  <el-input-number v-model="atk.ratio_threshold" :min="0" :max="1" :step="0.05" :precision="2" />
+                </el-form-item>
+                <el-form-item label="最小包数">
+                  <el-input-number v-model="atk.min_packets" :min="0" :max="1000000" />
+                </el-form-item>
+                <el-form-item label="封禁时长(秒)">
+                  <el-input-number v-model="atk.block_duration" :min="1" :max="31536000" />
+                </el-form-item>
+              </el-form>
+            </div>
             <el-form-item>
-              <el-button type="primary" @click="prepareSave('anomaly_detection', { ...anomaly, baseline })" :loading="saving">保存</el-button>
+              <el-button type="primary" @click="prepareSave('anomaly_detection', { ...anomaly, baseline, attacks })" :loading="saving">保存</el-button>
             </el-form-item>
           </el-form>
         </template>
@@ -293,8 +324,11 @@ const fieldLabels: Record<string, Record<string, string>> = {
     enabled: '启用状态',
     min_packets: '最小包阈值',
     ports: '监控端口列表',
-    'baseline.packets_per_sec': '每秒包数阈值',
-    'baseline.bytes_per_sec': '每秒字节数阈值',
+    'baseline.min_sample_count': '最小样本数',
+    'baseline.iqr_multiplier': 'IQR 倍数',
+    'baseline.min_threshold': '最小PPS阈值',
+    'baseline.max_age': '基线有效期(秒)',
+    'baseline.block_duration': '基线封禁时长(秒)',
   },
   geo_blocking: {
     enabled: '启用状态',
@@ -440,7 +474,7 @@ function takeSnapshot(module: ConfigModuleName) {
       originalSnapshot.value[module] = JSON.parse(JSON.stringify(rate_limit))
       break
     case 'anomaly_detection':
-      originalSnapshot.value[module] = JSON.parse(JSON.stringify({ ...anomaly, baseline }))
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify({ ...anomaly, baseline, attacks }))
       break
     case 'geo_blocking':
       originalSnapshot.value[module] = JSON.parse(JSON.stringify(geo))
@@ -467,8 +501,20 @@ const modules: { key: ConfigModuleName; label: string }[] = [
 const failguard = reactive({ enabled: false, max_retry: 5, find_time: 600, ban_duration: 3600, mode: 'normal' as string })
 const waf = reactive({ enabled: false, ban_duration: 3600 })
 const rate_limit = reactive({ enabled: false, ban_duration: 3600 })
-const baseline = reactive({ packets_per_sec: 0, bytes_per_sec: 0 })
-const anomaly = reactive({ enabled: false, min_packets: 10, ports: [80, 443] })
+const baseline = reactive({ min_sample_count: 60, iqr_multiplier: 2.5, min_threshold: 1000, max_age: 3600, block_duration: 60 })
+const anomaly = reactive({ enabled: false, min_packets: 200, ports: [80, 443, 8080, 8443, 53, 22] })
+const attacks = reactive({
+  syn_flood: { enabled: true, ratio_threshold: 0.5, min_packets: 200, block_duration: 60 },
+  udp_flood: { enabled: true, ratio_threshold: 0.8, min_packets: 200, block_duration: 60 },
+  icmp_flood: { enabled: true, ratio_threshold: 0.5, min_packets: 50, block_duration: 60 },
+  ack_flood: { enabled: true, ratio_threshold: 0.95, min_packets: 500, block_duration: 60 },
+})
+const attackLabels: Record<string, string> = {
+  syn_flood: 'SYN Flood',
+  udp_flood: 'UDP Flood',
+  icmp_flood: 'ICMP Flood',
+  ack_flood: 'ACK Flood',
+}
 const geo = reactive({ enabled: false, mode: 'whitelist' as string, allowed_countries: [] as string[], sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
 const intel = reactive({ enabled: false, sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
 const blocklogEvents = reactive({ enabled: false, sample_rate: 100 })
@@ -500,6 +546,7 @@ async function loadModuleConfig(module: ConfigModuleName) {
     else if (module === 'anomaly_detection') {
       Object.assign(anomaly, { enabled: data.enabled, min_packets: data.min_packets, ports: data.ports })
       if (data.baseline) Object.assign(baseline, data.baseline)
+      if (data.attacks) Object.assign(attacks, data.attacks)
     }
     else if (module === 'geo_blocking') Object.assign(geo, { enabled: data.enabled, mode: data.mode || 'whitelist', allowed_countries: data.allowed_countries || [], sources: data.sources || {} })
     else if (module === 'intel') Object.assign(intel, { enabled: data.enabled, sources: data.sources || {} })
