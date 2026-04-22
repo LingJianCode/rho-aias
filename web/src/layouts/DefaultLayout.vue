@@ -61,9 +61,9 @@
           </el-breadcrumb>
         </div>
         <div class="header-right">
-          <el-icon class="theme-btn" @click="toggleDarkMode">
+          <!-- <el-icon class="theme-btn" @click="toggleDarkMode">
             <component :is="darkMode ? 'Sunny' : 'Moon'" />
-          </el-icon>
+          </el-icon> -->
           <el-dropdown @command="handleCommand">
             <span class="user-dropdown">
               <el-avatar :size="32" icon="User" />
