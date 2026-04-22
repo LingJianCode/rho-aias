@@ -154,7 +154,7 @@ anomaly_detection:
   # IQR 基线配置（兜底检测：协议比例正常但流量异常大的场景，如 HTTP Flood）
   # 基于 PPS 历史数据计算四分位距，阈值 = Q3 + k × IQR
   baseline:
-    min_sample_count: 60            # 最小学习样本数（60 秒），不足时仅学习不检测
+    min_sample_count: 60            # 最小学习样本数（60 秒），不足时仅学习不检测，已观察的真实秒级观测数，其中可以包含零 PPS
     iqr_multiplier: 2.5             # IQR 倍数，Q3 + 2.5×IQR，对偏态分布更鲁棒
     min_threshold: 1000             # 最小 PPS 阈值，PPS <1000 的 IP 豁免基线检测
     max_age: 3600                   # 基线最大有效期（秒），过期自动重置以适应流量变化

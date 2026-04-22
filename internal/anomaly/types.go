@@ -88,7 +88,8 @@ type IPStats struct {
 // SlidingWindow 滑动窗口统计
 type SlidingWindow struct {
 	PPSHistory       []uint64 // 历史 PPS 数据（环形数组）
-	PPSIndex         int      // 当前索引
+	PPSIndex         int      // 当前写位置索引（下一个写入点）
+	FilledCount      int      // 已写入的槽位数（用于区分冷启动零与真实零 PPS）
 	WindowSize       int      // 窗口大小（秒）
 	CurrentPPS       uint64   // 当前 PPS
 	AvgPPS           float64  // 平均 PPS

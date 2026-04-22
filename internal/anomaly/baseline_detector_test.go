@@ -23,7 +23,7 @@ func TestBaselineDetector_UpdateBaseline(t *testing.T) {
 		ppsHistory[i] = v
 	}
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize)
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 10, 10)
 
 	if baseline.Count != 10 {
 		t.Errorf("Expected Count=10, got %d", baseline.Count)
@@ -59,7 +59,7 @@ func TestBaselineDetector_UpdateBaseline_InsufficientSamples(t *testing.T) {
 	ppsHistory[1] = 200
 	ppsHistory[2] = 300
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize)
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 3, 3)
 
 	// 样本不足，不应更新基线
 	if baseline.Count != 0 {
@@ -67,7 +67,8 @@ func TestBaselineDetector_UpdateBaseline_InsufficientSamples(t *testing.T) {
 	}
 }
 
-func TestBaselineDetector_UpdateBaseline_ZeroValuesSkipped(t *testing.T) {
+// TestBaselineDetector_UpdateBaseline_IdleSecondsIncluded 验证空闲秒（零 PPS）被纳入统计
+func TestBaselineDetector_UpdateBaseline_IdleSecondsIncluded(t *testing.T) {
 	detector := NewBaselineDetector(BaselineConfig{
 		MinSampleCount: 5,
 		IQRMultiplier:  2.5,
@@ -76,7 +77,8 @@ func TestBaselineDetector_UpdateBaseline_ZeroValuesSkipped(t *testing.T) {
 
 	baseline := &Baseline{}
 
-	// 60 秒窗口，只有 5 个非零值（其余为 0，代表未使用的槽位）
+	// 60 秒窗口，只有 5 个非零值，filledCount=5，满足 minSampleCount=5
+	// 在新语义下，即使有空闲秒，基线仍应就绪（不再要求所有槽位非零）
 	windowSize := 60
 	ppsHistory := make([]uint64, windowSize)
 	ppsHistory[0] = 100
@@ -85,9 +87,8 @@ func TestBaselineDetector_UpdateBaseline_ZeroValuesSkipped(t *testing.T) {
 	ppsHistory[30] = 180
 	ppsHistory[40] = 120
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize)
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 5, 5)
 
-	// 只有 5 个非零值，恰好满足 minSampleCount=5
 	if baseline.Count != 5 {
 		t.Errorf("Expected Count=5, got %d", baseline.Count)
 	}
@@ -181,7 +182,7 @@ func TestBaselineDetector_IQRAlgorithm(t *testing.T) {
 		ppsHistory[i] = v
 	}
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize)
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 8, 8)
 
 	// 验证 Q1 和 Q3
 	// 8 个元素，Q1 在 rank = 0.25 * 7 = 1.75 → interpolate(4, 4) = 4.0
@@ -300,7 +301,7 @@ func TestBaselineDetector_ZeroIQR(t *testing.T) {
 		ppsHistory[i] = 100
 	}
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize)
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 10, 10)
 
 	// Q1 = Q3 = 100, IQR = 0
 	if math.Abs(baseline.Q1-100.0) > 0.001 {
@@ -350,7 +351,7 @@ func TestBaselineDetector_ShouldReset(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		ppsHistory[i] = 100
 	}
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize)
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 10, 10)
 
 	// 刚更新，不应重置
 	if detector.ShouldReset(baseline) {
@@ -379,7 +380,7 @@ func TestBaselineDetector_ResetBaseline(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		ppsHistory[i] = uint64(100 + i)
 	}
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize)
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 20, 20)
 
 	// 确认有数据
 	if baseline.Count != 20 {
@@ -426,7 +427,7 @@ func TestBaselineDetector_UpdateResetOnExpired(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		ppsHistory[i] = 100
 	}
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize)
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 10, 10)
 
 	if baseline.Count != 10 {
 		t.Fatalf("Expected Count=10, got %d", baseline.Count)
@@ -439,7 +440,7 @@ func TestBaselineDetector_UpdateResetOnExpired(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		ppsHistory[i] = 200
 	}
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize)
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 10, 10)
 
 	// Count 应为 10（重置后重新计算）
 	if baseline.Count != 10 {
@@ -505,7 +506,7 @@ func TestBaselineDetector_SkewedDistribution(t *testing.T) {
 		ppsHistory[i] = v
 	}
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize)
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 20, 20)
 
 	// Q1 应该在低值区域，Q3 在中等值区域
 	// IQR 不会受极端值（500）太大影响
@@ -524,5 +525,63 @@ func TestBaselineDetector_SkewedDistribution(t *testing.T) {
 	isAnomaly, _ = detector.CheckAnomaly(baseline, 2000)
 	if !isAnomaly {
 		t.Error("Expected 2000 PPS to be detected as anomaly")
+	}
+}
+
+// TestBaselineDetector_IdleSecondsInWindow 预热完成后，窗口内包含空闲秒（零 PPS），基线仍应就绪
+func TestBaselineDetector_IdleSecondsInWindow(t *testing.T) {
+	detector := NewBaselineDetector(BaselineConfig{
+		MinSampleCount: 10,
+		IQRMultiplier:  2.5,
+		MinThreshold:   100,
+	})
+
+	baseline := &Baseline{}
+	windowSize := 20
+	ppsHistory := make([]uint64, windowSize)
+
+	// 模拟 20 秒窗口已满（filledCount=20），其中 8 个空闲秒（PPS=0）+ 12 个活跃秒
+	activeValues := []uint64{100, 120, 0, 0, 150, 110, 0, 0, 0, 130,
+		0, 0, 0, 140, 115, 0, 125, 105, 0, 135}
+	for i, v := range activeValues {
+		ppsHistory[i] = v
+	}
+	// 写了 20 个，ppsIndex 回到 0
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 20, 0)
+
+	// 应有 20 个样本（含零值），基线就绪
+	if baseline.Count != 20 {
+		t.Errorf("Expected Count=20 (including idle seconds), got %d", baseline.Count)
+	}
+	// Q1 应该为 0（因为 8/20=40% 的值是零，25th percentile 必然为 0）
+	if baseline.Q1 != 0 {
+		t.Errorf("Expected Q1=0 (idle seconds pull Q1 to zero), got Q1=%f", baseline.Q1)
+	}
+}
+
+// TestBaselineDetector_ColdStartZerosExcluded 未预热时，初始化零不会提前建立基线
+func TestBaselineDetector_ColdStartZerosExcluded(t *testing.T) {
+	detector := NewBaselineDetector(BaselineConfig{
+		MinSampleCount: 10,
+		IQRMultiplier:  2.5,
+		MinThreshold:   100,
+	})
+
+	baseline := &Baseline{}
+	windowSize := 60
+	ppsHistory := make([]uint64, windowSize)
+
+	// 冷启动：只写了 3 个槽位（2 个有值 + 1 个真实空闲秒），其余 57 个是初始化零
+	ppsHistory[0] = 100
+	ppsHistory[1] = 0   // 真实的空闲秒
+	ppsHistory[2] = 200
+	filledCount := 3
+	ppsIndex := 3
+
+	detector.UpdateBaseline(baseline, ppsHistory, windowSize, filledCount, ppsIndex)
+
+	// 只有 3 个已写入样本，不足 minSampleCount=10，基线不应建立
+	if baseline.Count != 0 {
+		t.Errorf("Expected Count=0 (insufficient filled samples during cold start), got %d", baseline.Count)
 	}
 }

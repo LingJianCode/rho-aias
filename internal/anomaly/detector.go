@@ -208,7 +208,7 @@ func (d *Manager) runDetection() {
 			} else {
 				// 更新基线（通过 collector 直接操作原始数据，避免写入深拷贝丢失）
 				d.collector.UpdateBaseline(ip, func(bl *Baseline) {
-					d.baselineDetector.UpdateBaseline(bl, stats.Window.PPSHistory, stats.Window.WindowSize)
+					d.baselineDetector.UpdateBaseline(bl, stats.Window.PPSHistory, stats.Window.WindowSize, stats.Window.FilledCount, stats.Window.PPSIndex)
 				})
 			}
 		}

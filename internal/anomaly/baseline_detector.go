@@ -41,33 +41,37 @@ func NewBaselineDetector(config BaselineConfig) *BaselineDetector {
 }
 
 // UpdateBaseline 基于 PPS 历史数据更新 IQR 基线
-// 从 collector 传入的 ppsHistory 中计算 Q1/Q3/IQR
-func (d *BaselineDetector) UpdateBaseline(baseline *Baseline, ppsHistory []uint64, windowSize int) {
+// 只从已写入的槽位中取样本；已写入槽位中的零值是真实的空闲秒观测，必须参与统计
+func (d *BaselineDetector) UpdateBaseline(baseline *Baseline, ppsHistory []uint64, windowSize int, filledCount int, ppsIndex int) {
 	// 检查基线是否过期，如果过期则重置
 	if d.ShouldReset(baseline) {
 		d.ResetBaseline(baseline)
 	}
 
-	// 从 PPS 历史中提取有效数据点（排除零值，零值代表窗口中未使用的槽位）
-	validSamples := make([]float64, 0, windowSize)
-	for _, pps := range ppsHistory {
-		if pps > 0 {
-			validSamples = append(validSamples, float64(pps))
-		}
+	// 已写入槽位不足，基线未就绪
+	n := filledCount
+	if n > windowSize {
+		n = windowSize
 	}
-
-	// 需要至少 minSampleCount 个有效样本才能更新基线
-	if len(validSamples) < d.config.MinSampleCount {
+	if n < d.config.MinSampleCount {
 		return
 	}
 
-	// 排序后计算四分位数
-	sort.Float64s(validSamples)
+	// 从环形缓冲区中提取最近 n 个已写入的样本
+	// ppsIndex 指向下一个写入点，所以最近写入的槽位是 ppsIndex-1
+	samples := make([]float64, 0, n)
+	for i := 0; i < n; i++ {
+		idx := (ppsIndex - 1 - i + windowSize) % windowSize
+		samples = append(samples, float64(ppsHistory[idx]))
+	}
 
-	baseline.Q1 = percentile(validSamples, 25)
-	baseline.Q3 = percentile(validSamples, 75)
+	// 排序后计算四分位数
+	sort.Float64s(samples)
+
+	baseline.Q1 = percentile(samples, 25)
+	baseline.Q3 = percentile(samples, 75)
 	baseline.IQR = baseline.Q3 - baseline.Q1
-	baseline.Count = uint64(len(validSamples))
+	baseline.Count = uint64(n)
 	baseline.LastUpdated = time.Now()
 }
 

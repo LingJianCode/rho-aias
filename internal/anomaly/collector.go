@@ -155,12 +155,22 @@ func (c *Collector) UpdatePPS() {
 		stats.Window.PPSHistory[stats.Window.PPSIndex] = stats.Window.CurrentPPS
 		stats.Window.PPSIndex = (stats.Window.PPSIndex + 1) % stats.Window.WindowSize
 
-		// 计算平均 PPS
-		var sum uint64
-		for _, pps := range stats.Window.PPSHistory {
-			sum += pps
+		// 追踪已写入的槽位数，直到填满整个窗口
+		if stats.Window.FilledCount < stats.Window.WindowSize {
+			stats.Window.FilledCount++
 		}
-		stats.Window.AvgPPS = float64(sum) / float64(stats.Window.WindowSize)
+
+		// 计算平均 PPS（仅基于已填充的槽位）
+		var sum uint64
+		n := stats.Window.FilledCount
+		if n == 0 {
+			n = 1 // 防止除零
+		}
+		for i := 0; i < n; i++ {
+			idx := (stats.Window.PPSIndex - 1 - i + stats.Window.WindowSize) % stats.Window.WindowSize
+			sum += stats.Window.PPSHistory[idx]
+		}
+		stats.Window.AvgPPS = float64(sum) / float64(n)
 
 		// 重置每秒计数和当前秒窗口的协议统计（为下一秒做准备）
 		stats.Window.PerSecondPackets = 0
