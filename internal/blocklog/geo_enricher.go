@@ -53,9 +53,17 @@ func (e *GeoEnricher) Start() error {
 
 	// 每小时第 5 分钟执行当天分表的补全
 	if _, err := e.cron.AddFunc("0 5 * * * *", func() {
-		today := time.Now().Format("2006-01-02")
+		now := time.Now()
+		today := now.Format("2006-01-02")
 		if err := e.enrichDay(today); err != nil {
 			logger.Errorf("[GeoEnricher] Scheduled enrichment for %s failed: %v", today, err)
+		}
+		// 仅在凌晨 0:05 补全前一天，覆盖第23小时遗漏
+		if now.Hour() == 0 {
+			yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+			if err := e.enrichDay(yesterday); err != nil {
+				logger.Errorf("[GeoEnricher] Scheduled enrichment for %s failed: %v", yesterday, err)
+			}
 		}
 	}); err != nil {
 		return fmt.Errorf("failed to add geo enrich cron job: %w", err)
