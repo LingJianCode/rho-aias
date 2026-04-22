@@ -42,27 +42,29 @@ func NewBaselineDetector(config BaselineConfig) *BaselineDetector {
 
 // UpdateBaseline 基于 PPS 历史数据更新 IQR 基线
 // 只从已写入的槽位中取样本；已写入槽位中的零值是真实的空闲秒观测，必须参与统计
-func (d *BaselineDetector) UpdateBaseline(baseline *Baseline, ppsHistory []uint64, windowSize int, filledCount int, ppsIndex int) {
-	// 检查基线是否过期，如果过期则重置
+func (d *BaselineDetector) UpdateBaseline(baseline *Baseline, window *SlidingWindow) {
+	// 检查基线是否过期，如果过期则重置窗口和基线，丢弃过期历史
 	if d.ShouldReset(baseline) {
 		d.ResetBaseline(baseline)
+		resetWindow(window)
+		return // 重置后本轮不重建，等新样本积累到 MinSampleCount
 	}
 
 	// 已写入槽位不足，基线未就绪
-	n := filledCount
-	if n > windowSize {
-		n = windowSize
+	n := window.FilledCount
+	if n > window.WindowSize {
+		n = window.WindowSize
 	}
 	if n < d.config.MinSampleCount {
 		return
 	}
 
 	// 从环形缓冲区中提取最近 n 个已写入的样本
-	// ppsIndex 指向下一个写入点，所以最近写入的槽位是 ppsIndex-1
+	// PPSIndex 指向下一个写入点，所以最近写入的槽位是 PPSIndex-1
 	samples := make([]float64, 0, n)
 	for i := 0; i < n; i++ {
-		idx := (ppsIndex - 1 - i + windowSize) % windowSize
-		samples = append(samples, float64(ppsHistory[idx]))
+		idx := (window.PPSIndex - 1 - i + window.WindowSize) % window.WindowSize
+		samples = append(samples, float64(window.PPSHistory[idx]))
 	}
 
 	// 排序后计算四分位数
@@ -73,6 +75,17 @@ func (d *BaselineDetector) UpdateBaseline(baseline *Baseline, ppsHistory []uint6
 	baseline.IQR = baseline.Q3 - baseline.Q1
 	baseline.Count = uint64(n)
 	baseline.LastUpdated = time.Now()
+}
+
+// resetWindow 重置滑动窗口，丢弃所有过期历史
+func resetWindow(window *SlidingWindow) {
+	window.FilledCount = 0
+	window.PPSIndex = 0
+	window.CurrentPPS = 0
+	window.AvgPPS = 0
+	for i := range window.PPSHistory {
+		window.PPSHistory[i] = 0
+	}
 }
 
 // CheckAnomaly 检查是否为异常

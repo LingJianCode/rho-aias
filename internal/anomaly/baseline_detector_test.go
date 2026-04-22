@@ -6,6 +6,16 @@ import (
 	"time"
 )
 
+// helper: 从独立参数构造 SlidingWindow，方便测试
+func makeWindow(ppsHistory []uint64, windowSize, filledCount, ppsIndex int) *SlidingWindow {
+	return &SlidingWindow{
+		PPSHistory:  ppsHistory,
+		WindowSize:  windowSize,
+		FilledCount: filledCount,
+		PPSIndex:    ppsIndex,
+	}
+}
+
 func TestBaselineDetector_UpdateBaseline(t *testing.T) {
 	detector := NewBaselineDetector(BaselineConfig{
 		MinSampleCount: 5,
@@ -23,7 +33,7 @@ func TestBaselineDetector_UpdateBaseline(t *testing.T) {
 		ppsHistory[i] = v
 	}
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 10, 10)
+	detector.UpdateBaseline(baseline, makeWindow(ppsHistory, windowSize, 10, 10))
 
 	if baseline.Count != 10 {
 		t.Errorf("Expected Count=10, got %d", baseline.Count)
@@ -59,7 +69,7 @@ func TestBaselineDetector_UpdateBaseline_InsufficientSamples(t *testing.T) {
 	ppsHistory[1] = 200
 	ppsHistory[2] = 300
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 3, 3)
+	detector.UpdateBaseline(baseline, makeWindow(ppsHistory, windowSize, 3, 3))
 
 	// 样本不足，不应更新基线
 	if baseline.Count != 0 {
@@ -87,7 +97,7 @@ func TestBaselineDetector_UpdateBaseline_IdleSecondsIncluded(t *testing.T) {
 	ppsHistory[30] = 180
 	ppsHistory[40] = 120
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 5, 5)
+	detector.UpdateBaseline(baseline, makeWindow(ppsHistory, windowSize, 5, 5))
 
 	if baseline.Count != 5 {
 		t.Errorf("Expected Count=5, got %d", baseline.Count)
@@ -182,7 +192,7 @@ func TestBaselineDetector_IQRAlgorithm(t *testing.T) {
 		ppsHistory[i] = v
 	}
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 8, 8)
+	detector.UpdateBaseline(baseline, makeWindow(ppsHistory, windowSize, 8, 8))
 
 	// 验证 Q1 和 Q3
 	// 8 个元素，Q1 在 rank = 0.25 * 7 = 1.75 → interpolate(4, 4) = 4.0
@@ -301,7 +311,7 @@ func TestBaselineDetector_ZeroIQR(t *testing.T) {
 		ppsHistory[i] = 100
 	}
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 10, 10)
+	detector.UpdateBaseline(baseline, makeWindow(ppsHistory, windowSize, 10, 10))
 
 	// Q1 = Q3 = 100, IQR = 0
 	if math.Abs(baseline.Q1-100.0) > 0.001 {
@@ -351,7 +361,7 @@ func TestBaselineDetector_ShouldReset(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		ppsHistory[i] = 100
 	}
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 10, 10)
+	detector.UpdateBaseline(baseline, makeWindow(ppsHistory, windowSize, 10, 10))
 
 	// 刚更新，不应重置
 	if detector.ShouldReset(baseline) {
@@ -380,7 +390,7 @@ func TestBaselineDetector_ResetBaseline(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		ppsHistory[i] = uint64(100 + i)
 	}
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 20, 20)
+	detector.UpdateBaseline(baseline, makeWindow(ppsHistory, windowSize, 20, 20))
 
 	// 确认有数据
 	if baseline.Count != 20 {
@@ -413,6 +423,7 @@ func TestBaselineDetector_ResetBaseline(t *testing.T) {
 	}
 }
 
+// TestBaselineDetector_UpdateResetOnExpired 验证过期重置后，旧窗口历史被丢弃，不参与重建
 func TestBaselineDetector_UpdateResetOnExpired(t *testing.T) {
 	detector := NewBaselineDetector(BaselineConfig{
 		MinSampleCount: 5,
@@ -427,7 +438,9 @@ func TestBaselineDetector_UpdateResetOnExpired(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		ppsHistory[i] = 100
 	}
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 10, 10)
+
+	window := makeWindow(ppsHistory, windowSize, 10, 10)
+	detector.UpdateBaseline(baseline, window)
 
 	if baseline.Count != 10 {
 		t.Fatalf("Expected Count=10, got %d", baseline.Count)
@@ -436,19 +449,20 @@ func TestBaselineDetector_UpdateResetOnExpired(t *testing.T) {
 	// 等待过期
 	time.Sleep(1500 * time.Millisecond)
 
-	// 再次更新（应自动重置后重新计算）
+	// 用新数据再次更新（应自动重置基线和窗口，重置后本轮不重建）
 	for i := 0; i < 10; i++ {
 		ppsHistory[i] = 200
 	}
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 10, 10)
+	window = makeWindow(ppsHistory, windowSize, 10, 10)
+	detector.UpdateBaseline(baseline, window)
 
-	// Count 应为 10（重置后重新计算）
-	if baseline.Count != 10 {
-		t.Errorf("Expected Count=10 after auto-reset, got %d", baseline.Count)
+	// 重置后本轮不重建，等新样本积累
+	if baseline.Count != 0 {
+		t.Errorf("Expected Count=0 after auto-reset (window was cleared, waiting for new samples), got %d", baseline.Count)
 	}
-	// 所有值为 200，Q1=Q3=200
-	if math.Abs(baseline.Q3-200.0) > 0.001 {
-		t.Errorf("Expected Q3=200.0 after auto-reset, got %f", baseline.Q3)
+	// 窗口也被重置
+	if window.FilledCount != 0 {
+		t.Errorf("Expected FilledCount=0 after auto-reset, got %d", window.FilledCount)
 	}
 }
 
@@ -506,7 +520,7 @@ func TestBaselineDetector_SkewedDistribution(t *testing.T) {
 		ppsHistory[i] = v
 	}
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 20, 20)
+	detector.UpdateBaseline(baseline, makeWindow(ppsHistory, windowSize, 20, 20))
 
 	// Q1 应该在低值区域，Q3 在中等值区域
 	// IQR 不会受极端值（500）太大影响
@@ -547,7 +561,7 @@ func TestBaselineDetector_IdleSecondsInWindow(t *testing.T) {
 		ppsHistory[i] = v
 	}
 	// 写了 20 个，ppsIndex 回到 0
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, 20, 0)
+	detector.UpdateBaseline(baseline, makeWindow(ppsHistory, windowSize, 20, 0))
 
 	// 应有 20 个样本（含零值），基线就绪
 	if baseline.Count != 20 {
@@ -578,10 +592,57 @@ func TestBaselineDetector_ColdStartZerosExcluded(t *testing.T) {
 	filledCount := 3
 	ppsIndex := 3
 
-	detector.UpdateBaseline(baseline, ppsHistory, windowSize, filledCount, ppsIndex)
+	detector.UpdateBaseline(baseline, makeWindow(ppsHistory, windowSize, filledCount, ppsIndex))
 
 	// 只有 3 个已写入样本，不足 minSampleCount=10，基线不应建立
 	if baseline.Count != 0 {
 		t.Errorf("Expected Count=0 (insufficient filled samples during cold start), got %d", baseline.Count)
+	}
+}
+
+// TestBaselineDetector_ResetClearsWindow 验证重置时窗口也被清空
+func TestBaselineDetector_ResetClearsWindow(t *testing.T) {
+	detector := NewBaselineDetector(BaselineConfig{
+		MinSampleCount: 5,
+		IQRMultiplier:  2.5,
+		MinThreshold:   0,
+		MaxAge:         1,
+	})
+
+	baseline := &Baseline{}
+	windowSize := 60
+	ppsHistory := make([]uint64, windowSize)
+	for i := 0; i < 10; i++ {
+		ppsHistory[i] = 100
+	}
+
+	window := makeWindow(ppsHistory, windowSize, 10, 10)
+	detector.UpdateBaseline(baseline, window)
+	if baseline.Count != 10 {
+		t.Fatalf("Expected Count=10, got %d", baseline.Count)
+	}
+
+	// 等待过期
+	time.Sleep(1500 * time.Millisecond)
+
+	// 再次调用 UpdateBaseline，应触发重置并清空窗口
+	detector.UpdateBaseline(baseline, window)
+
+	// 基线被重置
+	if baseline.Count != 0 {
+		t.Errorf("Expected Count=0 after reset, got %d", baseline.Count)
+	}
+	// 窗口被清空
+	if window.FilledCount != 0 {
+		t.Errorf("Expected FilledCount=0 after reset, got %d", window.FilledCount)
+	}
+	if window.PPSIndex != 0 {
+		t.Errorf("Expected PPSIndex=0 after reset, got %d", window.PPSIndex)
+	}
+	for i, v := range window.PPSHistory {
+		if v != 0 {
+			t.Errorf("Expected PPSHistory[%d]=0 after reset, got %d", i, v)
+			break
+		}
 	}
 }

@@ -210,6 +210,16 @@ func (c *Collector) UpdateBaseline(ip string, updateFn func(*Baseline)) {
 	}
 }
 
+// UpdateBaselineAndWindow 更新指定 IP 的基线和滑动窗口数据（直接操作原始数据，非深拷贝）
+func (c *Collector) UpdateBaselineAndWindow(ip string, updateFn func(*Baseline, *SlidingWindow)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	stats, exists := c.statsMap[ip]
+	if exists {
+		updateFn(&stats.Baseline, &stats.Window)
+	}
+}
+
 // GetBaseline 获取指定 IP 的基线数据深拷贝
 func (c *Collector) GetBaseline(ip string) (*Baseline, bool) {
 	c.mu.RLock()

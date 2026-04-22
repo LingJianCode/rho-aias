@@ -187,7 +187,9 @@ func (d *Manager) runDetection() {
 		}
 
 		// 2. IQR 基线检测（使用当前 PPS）
-		if len(attackResults) == 0 && stats.Window.CurrentPPS > 0 {
+		// 注意：不再排除 CurrentPPS == 0 的情况，零 PPS 是真实的空闲秒观测，
+		// 必须参与基线学习，否则间歇性空闲的 IP 基线会偏高。
+		if len(attackResults) == 0 {
 			// 获取原始基线数据进行检测（非深拷贝，通过 collector 直接访问）
 			baseline, exists := d.collector.GetBaseline(ip)
 			if !exists {
@@ -207,8 +209,8 @@ func (d *Manager) runDetection() {
 				d.handleDetection(result)
 			} else {
 				// 更新基线（通过 collector 直接操作原始数据，避免写入深拷贝丢失）
-				d.collector.UpdateBaseline(ip, func(bl *Baseline) {
-					d.baselineDetector.UpdateBaseline(bl, stats.Window.PPSHistory, stats.Window.WindowSize, stats.Window.FilledCount, stats.Window.PPSIndex)
+				d.collector.UpdateBaselineAndWindow(ip, func(bl *Baseline, win *SlidingWindow) {
+					d.baselineDetector.UpdateBaseline(bl, win)
 				})
 			}
 		}
