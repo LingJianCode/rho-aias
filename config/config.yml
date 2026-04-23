@@ -129,8 +129,8 @@ failguard:
 # Egress 限速配置（TC eBPF）
 # 在网卡 egress 方向进行令牌桶限速，基于目标 IP 进行 per-flow 限速
 egress_limit:
-  enabled: false                     # 总开关，默认关闭
-  rate_mbps: 100.0                  # 限速速率 (Mbps)，默认 100Mbps
+  enabled: true                     # 总开关，默认关闭
+  rate_mbps: 1.0                  # 限速速率 (Mbps)，默认 100Mbps
   # burst_bytes: 令牌桶突发上限 (Bytes)
   # 1,000,000 是 Mbps 到 bps (bits per second) 的换算系数，网络带宽领域惯例使用十进制 Mbps，这与存储容量（如内存、磁盘常用 MiB/GiB）的惯例不同
   # 公式: burst_bytes = rate_mbps × 1,000,000 / 8 × burst_time_seconds
