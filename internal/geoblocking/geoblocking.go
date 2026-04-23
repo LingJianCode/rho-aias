@@ -20,16 +20,16 @@ import (
 // Manager GeoIP 管理器
 type Manager struct {
 	config     *config.GeoBlockingConfig // GeoBlocking 配置
-	xdp        *ebpfs.Xdp               // XDP eBPF 程序接口
-	fetcher    *feed.Fetcher            // 数据获取器（公共）
-	parser     *Parser                  // 数据解析器
-	rawFileDir string                   // 原始文件持久化目录
-	syncer     *Syncer                  // 内核同步器
-	cron       *cron.Cron               // Cron 调度器
+	xdp        *ebpfs.Xdp                // XDP eBPF 程序接口
+	fetcher    *feed.Fetcher             // 数据获取器（公共）
+	parser     *Parser                   // 数据解析器
+	rawFileDir string                    // 原始文件持久化目录
+	syncer     *Syncer                   // 内核同步器
+	cron       *cron.Cron                // Cron 调度器
 	jobIDs     map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
-	done       chan struct{}            // 停止信号
-	stopOnce   sync.Once                // 确保 Stop 只执行一次
-	mu         sync.RWMutex             // 读写锁
+	done       chan struct{}             // 停止信号
+	stopOnce   sync.Once                 // 确保 Stop 只执行一次
+	mu         sync.RWMutex              // 读写锁
 
 	// 状态管理
 	status       *Status                    // 模块状态
@@ -48,7 +48,7 @@ func NewManager(cfg *config.GeoBlockingConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Man
 	return &Manager{
 		config:        cfg,
 		xdp:           xdp,
-		fetcher:       feed.NewFetcher(30 * time.Second),
+		fetcher:       feed.NewFetcher(600 * time.Second),
 		parser:        NewParser(),
 		rawFileDir:    cfg.PersistenceDir,
 		syncer:        NewSyncer(xdp, cfg.BatchSize),

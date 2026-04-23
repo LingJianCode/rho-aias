@@ -10,8 +10,8 @@ import (
 
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
-	"rho-aias/internal/logger"
 	"rho-aias/internal/feed"
+	"rho-aias/internal/logger"
 
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
@@ -22,14 +22,14 @@ import (
 type Manager struct {
 	config     *config.IntelConfig       // 威胁情报配置
 	xdp        *ebpfs.Xdp                // XDP eBPF 程序接口
-	fetcher    *feed.Fetcher           // 数据获取器（公共）
+	fetcher    *feed.Fetcher             // 数据获取器（公共）
 	parser     *Parser                   // 数据解析器
 	rawFileDir string                    // 原始文件持久化目录
 	syncer     *Syncer                   // 内核同步器
 	cron       *cron.Cron                // Cron 调度器
 	jobIDs     map[SourceID]cron.EntryID // 各源的 Cron 任务 ID
 	done       chan struct{}             // 停止信号
-	stopOnce   sync.Once               // 确保 Stop 只执行一次
+	stopOnce   sync.Once                 // 确保 Stop 只执行一次
 	mu         sync.RWMutex              // 读写锁
 
 	// 状态管理
@@ -38,8 +38,8 @@ type Manager struct {
 	sourceStatus map[SourceID]*SourceStatus // 各情报源状态
 
 	// 数据库支持和并发控制（使用公共组件）
-	db            *gorm.DB                          // 数据库连接
-	sourceMutexes *feed.MutexPool[SourceID]       // 互斥锁池（公共）
+	db            *gorm.DB                  // 数据库连接
+	sourceMutexes *feed.MutexPool[SourceID] // 互斥锁池（公共）
 }
 
 // NewManager 创建新的威胁情报管理器
@@ -47,7 +47,7 @@ func NewManager(cfg *config.IntelConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Manager {
 	return &Manager{
 		config:        cfg,
 		xdp:           xdp,
-		fetcher:       feed.NewFetcher(30 * time.Second),
+		fetcher:       feed.NewFetcher(600 * time.Second),
 		parser:        NewParser(),
 		rawFileDir:    cfg.PersistenceDir,
 		syncer:        NewSyncer(xdp, cfg.BatchSize),
