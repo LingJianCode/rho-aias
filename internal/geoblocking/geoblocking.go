@@ -364,7 +364,9 @@ func (m *Manager) updateSourceStatus(sourceID SourceID, success bool, ruleCount 
 
 	status.LastUpdate = now
 	status.Success = success
-	status.RuleCount = ruleCount
+	if ruleCount != 0 {
+		status.RuleCount = ruleCount
+	}
 	status.Error = errMsg
 
 	m.status.LastUpdate = now
