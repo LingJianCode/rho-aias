@@ -121,7 +121,6 @@ int egress_limit(struct __sk_buff *skb)
         return TC_ACT_OK;
     }
 
-    struct ethhdr *eth = data;
     struct iphdr *iph = data + sizeof(struct ethhdr);
 
     // 仅限制 TCP 流量 (可根据需要扩展到 UDP 等)
@@ -141,7 +140,7 @@ int egress_limit(struct __sk_buff *skb)
         new_state.last_update_ns = bpf_ktime_get_ns();
 
         // 尝试插入 (BPF_NOEXIST 防止覆盖正在使用的条目，处理多核竞争)
-        long ret = bpf_map_update_elem(&egress_limits, &daddr, &new_state, BPF_NOEXIST);
+        bpf_map_update_elem(&egress_limits, &daddr, &new_state, BPF_NOEXIST);
 
         // 重新获取指针以进入临界区
         // 无论插入是否成功，都必须重新 lookup 获取有效指针
