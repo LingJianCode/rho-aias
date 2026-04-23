@@ -43,12 +43,18 @@ const (
 	flowCleanupInterval = "@every 1m"
 )
 
+// tcLinkCloser 是 TC 链接的统一关闭接口
+// link.Link（TCX）和 netlinkTCLink（传统 netlink TC）都满足此接口
+type tcLinkCloser interface {
+	Close() error
+}
+
 // TcEgress TC Egress 限速管理器
 // 管理 TC eBPF egress 程序的生命周期和配置操作
 type TcEgress struct {
 	InterfaceName string
 	objects       *tcEgressObjects
-	tcLink        link.Link        // TCX link 引用
+	tcLink        tcLinkCloser     // TCX link 或 netlink TC link 引用
 	cron          *cron.Cron       // 定时清理过期流条目
 	done          chan struct{}
 	doneOnce      sync.Once
@@ -98,19 +104,27 @@ func (t *TcEgress) startInternal() error {
 	// 尝试挂载 TC 程序
 	t.done = make(chan struct{})
 
-	// 使用 TCX (内核 6.6+) 挂载 egress 程序
+	// 优先使用 TCX (内核 6.6+) 挂载 egress 程序
 	l, err := link.AttachTCX(link.TCXOptions{
 		Interface: iface.Index,
 		Program:   t.objects.EgressLimit,
 		Attach:    ebpf.AttachTCXEgress,
 	})
 	if err != nil {
-		t.closeResources()
-		return fmt.Errorf("failed to attach TCX program: %w", err)
-	}
-	t.tcLink = l
+		// TCX 失败（内核 < 6.6），fallback 到传统 netlink TC
+		logger.Warnf("[TcEgress] TCX attach failed (kernel < 6.6?): %v, falling back to netlink TC", err)
 
-	logger.Infof("[TcEgress] TCX program attached successfully on interface %s (index %d)", t.InterfaceName, iface.Index)
+		nlLink, nlErr := attachTCViaNetlink(iface.Index, t.InterfaceName, t.objects.EgressLimit)
+		if nlErr != nil {
+			t.closeResources()
+			return fmt.Errorf("failed to attach TC program (both TCX and netlink failed: TCX=%v, netlink=%v)", err, nlErr)
+		}
+		t.tcLink = nlLink
+		logger.Infof("[TcEgress] Netlink TC program attached on interface %s (index %d)", t.InterfaceName, iface.Index)
+	} else {
+		t.tcLink = l
+		logger.Infof("[TcEgress] TCX program attached successfully on interface %s (index %d)", t.InterfaceName, iface.Index)
+	}
 
 	// 启动定时清理过期流（替代 LRU 自动淘汰）
 	t.cron = cron.New(cron.WithSeconds())
