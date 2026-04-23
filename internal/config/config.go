@@ -22,6 +22,7 @@ type Config struct {
 	RateLimit        RateLimitConfig        `yaml:"rate_limit"`
 	FailGuard        FailGuardConfig        `yaml:"failguard"`
 	AnomalyDetection AnomalyDetectionConfig `yaml:"anomaly_detection"`
+	EgressLimit      EgressLimitConfig      `yaml:"egress_limit"`
 }
 
 // LogConfig 日志配置
@@ -194,6 +195,13 @@ type AttackConfig struct {
 	MinPackets     int     `yaml:"min_packets" json:"min_packets"`         // 触发检测的最小包数（0 表示使用默认值）
 }
 
+// EgressLimitConfig Egress 限速配置
+type EgressLimitConfig struct {
+	Enabled    bool    `yaml:"enabled" json:"enabled"`       // 总开关
+	RateMbps   float64 `yaml:"rate_mbps" json:"rate_mbps"`  // 限速速率 (Mbps)
+	BurstBytes uint64  `yaml:"burst_bytes" json:"burst_bytes"` // 突发上限 (Bytes)
+}
+
 func NewConfig(fileName string) (*Config, error) {
 	// 打开 YAML 文件
 	file, err := os.Open(fileName)
@@ -291,6 +299,10 @@ func applyDefaults(config *Config) {
 	applyAttackDefaults(&config.AnomalyDetection.Attacks.UdpFlood, 0.8, 60, 1000)
 	applyAttackDefaults(&config.AnomalyDetection.Attacks.IcmpFlood, 0.5, 60, 100)
 	applyAttackDefaults(&config.AnomalyDetection.Attacks.AckFlood, 0.8, 60, 1000)
+
+	// EgressLimit 默认值
+	setIfZeroFloat(&config.EgressLimit.RateMbps, 100.0)   // 默认 100Mbps
+	setIfZero(&config.EgressLimit.BurstBytes, 125000)      // 默认 125KB (约 10ms 缓冲)
 }
 
 // setIfZero 当 *v 为零值时设为 def

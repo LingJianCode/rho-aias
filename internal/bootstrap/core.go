@@ -15,6 +15,7 @@ import (
 // CoreDependencies 核心基础设施初始化结果
 type CoreDependencies struct {
 	XDP              *ebpfs.Xdp
+	TcEgress         *ebpfs.TcEgress
 	BlacklistManager *manual.BlacklistManager
 	WhitelistManager *manual.WhitelistManager
 	BlockLogMgr      *blocklog.Manager
@@ -23,6 +24,7 @@ type CoreDependencies struct {
 // InitCore 初始化核心 eBPF 基础设施（不加载缓存规则，缓存需在 Start 后通过 LoadCachedRules 加载）
 func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 	xdp := ebpfs.NewXdp(cfg.Ebpf.InterfaceName)
+	tcEgress := ebpfs.NewTcEgress(cfg.Ebpf.InterfaceName)
 
 	manual.InitProtectedNets(logger.Infof)
 	whitelistChecker := manual.NewWhitelistChecker()
@@ -54,6 +56,7 @@ func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 
 	return &CoreDependencies{
 		XDP:              xdp,
+		TcEgress:         tcEgress,
 		BlacklistManager: blacklistManager,
 		WhitelistManager: whitelistManager,
 		BlockLogMgr:      blockLogMgr,
@@ -126,6 +129,26 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 		} else {
 			logger.Infof("[BlockLog] Restored blocklog_events config: enabled=%v, sample_rate=%d",
 				cfg.BlockLog.EventsEnabled, sampleRate)
+		}
+	}
+
+	// 恢复 egress_limit 动态配置（由 loadDynamicConfigFromDB 写入 cfg.EgressLimit 扩展字段）
+	if c.TcEgress != nil {
+		if cfg.EgressLimit.Enabled || cfg.EgressLimit.RateMbps > 0 {
+			egressCfg := ebpfs.EgressLimitConfig{
+				Enabled:    0,
+				BurstBytes: cfg.EgressLimit.BurstBytes,
+			}
+			if cfg.EgressLimit.Enabled {
+				egressCfg.Enabled = 1
+				egressCfg.RateBytes = uint64(cfg.EgressLimit.RateMbps * 1000000 / 8)
+			}
+			if err := c.TcEgress.SetEgressLimitConfig(egressCfg); err != nil {
+				logger.Warnf("[EgressLimit] Failed to restore config: %v", err)
+			} else {
+				logger.Infof("[EgressLimit] Restored config: enabled=%v, rate=%.1f Mbps, burst=%d bytes",
+					cfg.EgressLimit.Enabled, cfg.EgressLimit.RateMbps, cfg.EgressLimit.BurstBytes)
+			}
 		}
 	}
 }

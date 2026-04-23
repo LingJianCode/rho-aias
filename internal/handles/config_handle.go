@@ -27,7 +27,7 @@ import (
 var supportedModules = []string{
 	models.ModuleFailGuard, models.ModuleWAF, models.ModuleRateLimit,
 	models.ModuleAnomalyDetection, models.ModuleGeoBlocking, models.ModuleIntel,
-	models.ModuleBlocklogEvents,
+	models.ModuleBlocklogEvents, models.ModuleEgressLimit,
 }
 
 // IsValidModule 导出给外部调用
@@ -44,6 +44,7 @@ type ConfigHandle struct {
 	geoBlockingMgr        *geoblocking.Manager
 	intelMgr              *threatintel.Manager
 	xdp                   *ebpfs.Xdp
+	tcEgress              *ebpfs.TcEgress
 	anomalyController     *ebpfs.Xdp
 	anomalyRecordPacketFn ebpfs.AnomalyEventCallback
 	anomalyMonitorCancel  context.CancelFunc
@@ -59,6 +60,7 @@ func NewConfigHandle(
 	geoBlockingMgr *geoblocking.Manager,
 	intelMgr *threatintel.Manager,
 	xdp *ebpfs.Xdp,
+	tcEgress *ebpfs.TcEgress,
 	anomalyController *ebpfs.Xdp,
 	anomalyRecordPacketFn ebpfs.AnomalyEventCallback,
 ) *ConfigHandle {
@@ -66,7 +68,7 @@ func NewConfigHandle(
 		configService, validator.New(),
 		failguardMgr, wafMgr, rateLimitMgr,
 		anomalyDetector, geoBlockingMgr, intelMgr, xdp,
-		anomalyController, anomalyRecordPacketFn, nil, sync.Mutex{},
+		tcEgress, anomalyController, anomalyRecordPacketFn, nil, sync.Mutex{},
 	}
 	return h
 }
@@ -87,7 +89,7 @@ func (h *ConfigHandle) GetAllConfig(c *gin.Context) {
 		dbConfigs[r.Module] = json.RawMessage(r.Value)
 	}
 
-	modules := []string{models.ModuleFailGuard, models.ModuleWAF, models.ModuleRateLimit, models.ModuleAnomalyDetection, models.ModuleGeoBlocking, models.ModuleIntel, models.ModuleBlocklogEvents}
+	modules := []string{models.ModuleFailGuard, models.ModuleWAF, models.ModuleRateLimit, models.ModuleAnomalyDetection, models.ModuleGeoBlocking, models.ModuleIntel, models.ModuleBlocklogEvents, models.ModuleEgressLimit}
 	for _, module := range modules {
 		runtimeConfig := h.getRuntimeConfig(module)
 		if runtimeConfig != nil {
@@ -193,6 +195,8 @@ func (h *ConfigHandle) getRuntimeConfig(module string) interface{} {
 		}
 	case models.ModuleBlocklogEvents:
 		return h.getXDPEventsRuntimeConfig()
+	case models.ModuleEgressLimit:
+		return h.getEgressLimitRuntimeConfig()
 	}
 	return nil
 }
@@ -214,6 +218,8 @@ func (h *ConfigHandle) applyConfig(module string, raw json.RawMessage) error {
 		return h.applyIntelConfig(raw)
 	case models.ModuleBlocklogEvents:
 		return h.applyBlocklogEventsConfig(raw)
+	case models.ModuleEgressLimit:
+		return h.applyEgressLimitConfig(raw)
 	default:
 		return fmt.Errorf("unsupported module: %s", module)
 	}
@@ -283,6 +289,12 @@ func (h *ConfigHandle) validateConfig(module string, raw json.RawMessage) error 
 			return fmt.Errorf("invalid format: %w", err)
 		}
 		return h.validate.Struct(req)
+	case models.ModuleEgressLimit:
+		var req config.EgressLimitRuntime
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fmt.Errorf("invalid format: %w", err)
+		}
+		return h.validate.Struct(req)
 	default:
 		return fmt.Errorf("unsupported module: %s", module)
 	}
@@ -314,7 +326,30 @@ func (h *ConfigHandle) getMergedConfig(module string) (interface{}, error) {
 			return nil, fmt.Errorf("blocklog_events module is not initialized (XDP not available)")
 		}
 		return h.getXDPEventsRuntimeConfig(), nil
+	case models.ModuleEgressLimit:
+		return h.getEgressLimitRuntimeConfig(), nil
 	default:
 		return nil, fmt.Errorf("unsupported module: %s", module)
+	}
+}
+
+// getEgressLimitRuntimeConfig 获取 egress_limit 运行时配置
+func (h *ConfigHandle) getEgressLimitRuntimeConfig() map[string]interface{} {
+	if h.tcEgress == nil {
+		return nil
+	}
+	cfg, err := h.tcEgress.GetEgressLimitConfig()
+	if err != nil {
+		return map[string]interface{}{
+			"enabled":     false,
+			"rate_mbps":   100.0,
+			"burst_bytes": 125000,
+		}
+	}
+	rateMbps := float64(cfg.RateBytes) * 8 / 1000000
+	return map[string]interface{}{
+		"enabled":     cfg.Enabled == 1,
+		"rate_mbps":   rateMbps,
+		"burst_bytes": cfg.BurstBytes,
 	}
 }

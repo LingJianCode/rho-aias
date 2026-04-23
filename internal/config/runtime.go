@@ -97,3 +97,11 @@ type BlocklogEventsRuntime struct {
 	Enabled    bool   `json:"enabled" yaml:"enabled" validate:"required"`
 	SampleRate uint32 `json:"sample_rate" yaml:"sample_rate" validate:"gte=1"`
 }
+
+// --- EgressLimit ---
+
+type EgressLimitRuntime struct {
+	Enabled    bool    `json:"enabled" yaml:"enabled" validate:"required"`
+	RateMbps   float64 `json:"rate_mbps" yaml:"rate_mbps" validate:"gt=0"`
+	BurstBytes uint64  `json:"burst_bytes" yaml:"burst_bytes" validate:"gte=1"`
+}

@@ -126,6 +126,13 @@ failguard:
   find_time: 600                    # 滑动窗口时长（秒，默认10分钟）
   ban_duration: 60                # 封禁时长（秒，默认1小时）
 
+# Egress 限速配置（TC eBPF）
+# 在网卡 egress 方向进行令牌桶限速，基于目标 IP 进行 per-flow 限速
+egress_limit:
+  enabled: false                     # 总开关，默认关闭
+  rate_mbps: 100.0                  # 限速速率 (Mbps)，默认 100Mbps
+  burst_bytes: 125000               # 突发上限 (Bytes)，约 10ms 缓冲
+
 # 异常流量检测系统配置
 # 检测流程：每个 check_interval 对每个 IP 依次执行：
 #   1. 攻击类型检测（协议比例分析）→ 未命中则进入

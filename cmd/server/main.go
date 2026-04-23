@@ -58,11 +58,21 @@ func main() {
 	// 核心基础设施 (XDP / Manual / Whitelist / BlockLog)
 	core := bootstrap.InitCore(cfg, dbConn)
 	defer core.XDP.Close()
+	defer func() {
+		if core.TcEgress != nil {
+			core.TcEgress.Close()
+		}
+	}()
 
 	if err := core.XDP.Start(); err != nil {
 		logger.Fatalf("[XDP] Failed to start: %v", err)
 	}
 	go core.XDP.MonitorBlockLogEvents()
+
+	// 启动 TC Egress 限速程序（可选，不影响主流程）
+	if err := core.TcEgress.Start(); err != nil {
+		logger.Warnf("[TcEgress] Failed to start: %v (continuing without egress rate limiting)", err)
+	}
 
 	// 加载持久化的缓存规则到 eBPF map（必须在 Start 之后）
 	core.LoadCachedRules(cfg)

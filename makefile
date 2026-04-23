@@ -36,6 +36,7 @@ run: all
 clean:
 	@echo "==> Cleaning"
 	rm -vf $(APP) $(BPF_GEN_DIR)/*_bpfeb.go $(BPF_GEN_DIR)/*_bpfel.go $(BPF_GEN_DIR)/*.o
+	rm -vf $(BPF_GEN_DIR)/tcEgress_bpfeb.go $(BPF_GEN_DIR)/tcEgress_bpfel.go $(BPF_GEN_DIR)/tcEgress.o
 	cd $(WEB_DIR) && rm -rf dist node_modules
 	rm -rf frontend/web/dist
 

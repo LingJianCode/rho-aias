@@ -48,7 +48,7 @@ func RegisterAllRoutes(
 		enforcer, authSvc, apiKeySvc)
 
 	// ConfigHandle
-	configHandle := newConfigHandle(dbs.DynamicConfigSvc, detectorDeps, anomalyDeps, core.XDP)
+	configHandle := newConfigHandle(dbs.DynamicConfigSvc, detectorDeps, anomalyDeps, core.XDP, core.TcEgress)
 	routers.RegisterConfigRoutes(api, configHandle, enforcer, authSvc, apiKeySvc)
 }
 
@@ -80,6 +80,7 @@ func newConfigHandle(
 	detectors *DetectorDeps,
 	anomaly *AnomalyDeps,
 	xdp *ebpfs.Xdp,
+	tcEgress *ebpfs.TcEgress,
 ) *handles.ConfigHandle {
 	configHandle := handles.NewConfigHandle(
 		dynamicConfigSvc,
@@ -90,6 +91,7 @@ func newConfigHandle(
 		detectors.GeoMgr,
 		detectors.IntelMgr,
 		xdp,
+		tcEgress,
 		xdp,
 		anomaly.RecordPacketFn,
 	)
