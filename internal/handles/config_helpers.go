@@ -13,8 +13,8 @@ func validateAnomalyRuntimeFields(baseline *config.BaselineRuntime, attacks *con
 		if baseline.MinSampleCount < 1 || baseline.MinSampleCount > 1000000 {
 			return fmt.Errorf("baseline.min_sample_count: must be between 1 and 1000000, got %d", baseline.MinSampleCount)
 		}
-		if baseline.SigmaMultiplier < 1 || baseline.SigmaMultiplier > 10 {
-			return fmt.Errorf("baseline.sigma_multiplier: must be between 1 and 10, got %.1f", baseline.SigmaMultiplier)
+		if baseline.IQRMultiplier < 1 || baseline.IQRMultiplier > 10 {
+			return fmt.Errorf("baseline.iqr_multiplier: must be between 1 and 10, got %.1f", baseline.IQRMultiplier)
 		}
 		if baseline.MinThreshold < 1 || baseline.MinThreshold > 10000000 {
 			return fmt.Errorf("baseline.min_threshold: must be between 1 and 10000000, got %d", baseline.MinThreshold)

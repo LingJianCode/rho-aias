@@ -100,11 +100,11 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 		CleanupInterval: h.anomalyDetector.GetRawConfig().CleanupInterval,
 		Ports:           req.Ports,
 		Baseline: anomaly.BaselineConfig{
-			MinSampleCount:  req.Baseline.MinSampleCount,
-			SigmaMultiplier: req.Baseline.SigmaMultiplier,
-			MinThreshold:    req.Baseline.MinThreshold,
-			MaxAge:          req.Baseline.MaxAge,
-			BlockDuration:   req.Baseline.BlockDuration,
+			MinSampleCount: req.Baseline.MinSampleCount,
+			IQRMultiplier:  req.Baseline.IQRMultiplier,
+			MinThreshold:   req.Baseline.MinThreshold,
+			MaxAge:         req.Baseline.MaxAge,
+			BlockDuration:  req.Baseline.BlockDuration,
 		},
 		Attacks: anomaly.AttacksConfig{
 			SynFlood: anomaly.AttackConfig{Enabled: req.Attacks.SynFlood.Enabled, RatioThreshold: req.Attacks.SynFlood.RatioThreshold, BlockDuration: req.Attacks.SynFlood.BlockDuration, MinPackets: req.Attacks.SynFlood.MinPackets},

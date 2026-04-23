@@ -34,11 +34,11 @@ func InitAnomaly(
 		CleanupInterval: cfg.AnomalyDetection.CleanupInterval,
 		Ports:           cfg.AnomalyDetection.Ports,
 		Baseline: anomaly.BaselineConfig{
-			MinSampleCount:  cfg.AnomalyDetection.Baseline.MinSampleCount,
-			SigmaMultiplier: cfg.AnomalyDetection.Baseline.SigmaMultiplier,
-			MinThreshold:    cfg.AnomalyDetection.Baseline.MinThreshold,
-			MaxAge:          cfg.AnomalyDetection.Baseline.MaxAge,
-			BlockDuration:   cfg.AnomalyDetection.Baseline.BlockDuration,
+			MinSampleCount: cfg.AnomalyDetection.Baseline.MinSampleCount,
+			IQRMultiplier:  cfg.AnomalyDetection.Baseline.IQRMultiplier,
+			MinThreshold:   cfg.AnomalyDetection.Baseline.MinThreshold,
+			MaxAge:         cfg.AnomalyDetection.Baseline.MaxAge,
+			BlockDuration:  cfg.AnomalyDetection.Baseline.BlockDuration,
 		},
 		Attacks: anomaly.AttacksConfig{
 			SynFlood: anomaly.AttackConfig{

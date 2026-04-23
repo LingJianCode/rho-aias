@@ -41,11 +41,11 @@ type AnomalyDetectionRuntime struct {
 }
 
 type BaselineRuntime struct {
-	MinSampleCount  int     `json:"min_sample_count" yaml:"min_sample_count" validate:"gte=1,lte=1000000"`
-	SigmaMultiplier float64 `json:"sigma_multiplier" yaml:"sigma_multiplier" validate:"gte=1,lte=10"`
-	MinThreshold    int     `json:"min_threshold" yaml:"min_threshold" validate:"gte=1,lte=10000000"`
-	MaxAge          int     `json:"max_age" yaml:"max_age" validate:"gte=60,lte=604800"`
-	BlockDuration   int     `json:"block_duration" yaml:"block_duration" validate:"gte=1,lte=31536000"`
+	MinSampleCount int     `json:"min_sample_count" yaml:"min_sample_count" validate:"gte=1,lte=1000000"`
+	IQRMultiplier  float64 `json:"iqr_multiplier" yaml:"iqr_multiplier" validate:"gte=1,lte=10"`
+	MinThreshold   int     `json:"min_threshold" yaml:"min_threshold" validate:"gte=1,lte=10000000"`
+	MaxAge         int     `json:"max_age" yaml:"max_age" validate:"gte=60,lte=604800"`
+	BlockDuration  int     `json:"block_duration" yaml:"block_duration" validate:"gte=1,lte=31536000"`
 }
 
 type AttacksRuntime struct {

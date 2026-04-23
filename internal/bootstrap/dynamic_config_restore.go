@@ -52,11 +52,11 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		cfg.AnomalyDetection.MinPackets = ad.MinPackets
 		cfg.AnomalyDetection.Ports = ad.Ports
 		cfg.AnomalyDetection.Baseline = config.BaselineConfig{
-			MinSampleCount:  ad.Baseline.MinSampleCount,
-			SigmaMultiplier: ad.Baseline.SigmaMultiplier,
-			MinThreshold:    ad.Baseline.MinThreshold,
-			MaxAge:          ad.Baseline.MaxAge,
-			BlockDuration:   ad.Baseline.BlockDuration,
+			MinSampleCount: ad.Baseline.MinSampleCount,
+			IQRMultiplier:  ad.Baseline.IQRMultiplier,
+			MinThreshold:   ad.Baseline.MinThreshold,
+			MaxAge:         ad.Baseline.MaxAge,
+			BlockDuration:  ad.Baseline.BlockDuration,
 		}
 		cfg.AnomalyDetection.Attacks = config.AttacksConfig{
 			SynFlood:  config.AttackConfig{Enabled: ad.Attacks.SynFlood.Enabled, RatioThreshold: ad.Attacks.SynFlood.RatioThreshold, BlockDuration: ad.Attacks.SynFlood.BlockDuration, MinPackets: ad.Attacks.SynFlood.MinPackets},

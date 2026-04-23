@@ -165,17 +165,17 @@ type AnomalyDetectionConfig struct {
 	MinPackets      int            `yaml:"min_packets" json:"min_packets"`           // 最小包数（少于此值不检测）
 	CleanupInterval int            `yaml:"cleanup_interval" json:"cleanup_interval"` // 清理过期数据间隔（秒）
 	Ports           []int          `yaml:"ports" json:"ports"`                       // 需要检测的端口列表（同时应用于 TCP/UDP，为空则检测所有端口）
-	Baseline        BaselineConfig `yaml:"baseline" json:"baseline"`                 // 3σ 基线配置
+	Baseline        BaselineConfig `yaml:"baseline" json:"baseline"`                 // IQR 基线配置
 	Attacks         AttacksConfig  `yaml:"attacks" json:"attacks"`                   // 攻击类型配置
 }
 
-// BaselineConfig 3σ 基线检测配置
+// BaselineConfig IQR 基线检测配置
 type BaselineConfig struct {
-	MinSampleCount  int     `yaml:"min_sample_count" json:"min_sample_count"` // 最小样本数
-	SigmaMultiplier float64 `yaml:"sigma_multiplier" json:"sigma_multiplier"` // σ 倍数
-	MinThreshold    int     `yaml:"min_threshold" json:"min_threshold"`       // 最小 PPS 阈值
-	MaxAge          int     `yaml:"max_age" json:"max_age"`                   // 基线最大年龄（秒）
-	BlockDuration   int     `yaml:"block_duration" json:"block_duration"`     // 封禁时长（秒）
+	MinSampleCount int     `yaml:"min_sample_count" json:"min_sample_count"` // 最小样本数
+	IQRMultiplier  float64 `yaml:"iqr_multiplier" json:"iqr_multiplier"`    // IQR 倍数
+	MinThreshold   int     `yaml:"min_threshold" json:"min_threshold"`       // 最小 PPS 阈值
+	MaxAge         int     `yaml:"max_age" json:"max_age"`                   // 基线最大年龄（秒）
+	BlockDuration  int     `yaml:"block_duration" json:"block_duration"`     // 封禁时长（秒）
 }
 
 // AttacksConfig 攻击类型配置
@@ -281,7 +281,7 @@ func applyDefaults(config *Config) {
 
 	// Baseline 默认值
 	setIfZero(&config.AnomalyDetection.Baseline.MinSampleCount, 10)
-	setIfZeroFloat(&config.AnomalyDetection.Baseline.SigmaMultiplier, 3.0)
+	setIfZeroFloat(&config.AnomalyDetection.Baseline.IQRMultiplier, 2.5)
 	setIfZero(&config.AnomalyDetection.Baseline.MinThreshold, 100)
 	setIfZero(&config.AnomalyDetection.Baseline.MaxAge, 1800)
 	setIfZero(&config.AnomalyDetection.Baseline.BlockDuration, 60)

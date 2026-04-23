@@ -237,8 +237,9 @@ func TestCollector_UpdateAndGetBaseline(t *testing.T) {
 
 	// 通过 UpdateBaseline 更新基线
 	collector.UpdateBaseline("10.0.0.1", func(bl *Baseline) {
-		bl.Mean = 100.0
-		bl.M2 = 50.0
+		bl.Q1 = 80.0
+		bl.Q3 = 120.0
+		bl.IQR = 40.0
 		bl.Count = 10
 	})
 
@@ -247,20 +248,23 @@ func TestCollector_UpdateAndGetBaseline(t *testing.T) {
 	if !exists {
 		t.Fatal("Expected baseline to exist")
 	}
-	if bl.Mean != 100.0 {
-		t.Errorf("Expected Mean=100.0, got %f", bl.Mean)
+	if bl.Q1 != 80.0 {
+		t.Errorf("Expected Q1=80.0, got %f", bl.Q1)
 	}
-	if bl.M2 != 50.0 {
-		t.Errorf("Expected M2=50.0, got %f", bl.M2)
+	if bl.Q3 != 120.0 {
+		t.Errorf("Expected Q3=120.0, got %f", bl.Q3)
+	}
+	if bl.IQR != 40.0 {
+		t.Errorf("Expected IQR=40.0, got %f", bl.IQR)
 	}
 	if bl.Count != 10 {
 		t.Errorf("Expected Count=10, got %d", bl.Count)
 	}
 
 	// 验证深拷贝：修改返回值不影响原始数据
-	bl.Mean = 999.0
+	bl.Q1 = 999.0
 	bl2, _ := collector.GetBaseline("10.0.0.1")
-	if bl2.Mean == 999.0 {
+	if bl2.Q1 == 999.0 {
 		t.Error("GetBaseline should return a deep copy, but original data was modified")
 	}
 }
