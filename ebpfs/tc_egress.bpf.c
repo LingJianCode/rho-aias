@@ -33,6 +33,16 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
+/* TC 返回值常量 (linux/pkt_cls.h 中的宏不在 BTF 中，需手动定义)
+ * 参考: https://docs.kernel.org/bpf/bpf_devel_QA.html
+ */
+#ifndef TC_ACT_OK
+#define TC_ACT_OK         0
+#endif
+#ifndef TC_ACT_SHOT
+#define TC_ACT_SHOT        2
+#endif
+
 char __license[] SEC("license") = "GPL";
 
 // ==========================================
