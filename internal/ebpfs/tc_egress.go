@@ -4,15 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
 	"rho-aias/internal/logger"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/robfig/cron/v3"
 )
@@ -49,6 +48,7 @@ const (
 type TcEgress struct {
 	InterfaceName string
 	objects       *tcEgressObjects
+	tcLink        link.Link        // TCX link 引用
 	cron          *cron.Cron       // 定时清理过期流条目
 	done          chan struct{}
 	doneOnce      sync.Once
@@ -98,13 +98,19 @@ func (t *TcEgress) startInternal() error {
 	// 尝试挂载 TC 程序
 	t.done = make(chan struct{})
 
-	// 使用 tc 命令挂载程序
-	if err := t.attachWithTC(*iface); err != nil {
+	// 使用 TCX (内核 6.6+) 挂载 egress 程序
+	l, err := link.AttachTCX(link.TCXOptions{
+		Interface: iface.Index,
+		Program:   t.objects.EgressLimit,
+		Attach:    ebpf.AttachTCXEgress,
+	})
+	if err != nil {
 		t.closeResources()
-		return fmt.Errorf("failed to attach TC program: %w", err)
+		return fmt.Errorf("failed to attach TCX program: %w", err)
 	}
+	t.tcLink = l
 
-	logger.Infof("[TcEgress] Program attached successfully on interface %s", t.InterfaceName)
+	logger.Infof("[TcEgress] TCX program attached successfully on interface %s (index %d)", t.InterfaceName, iface.Index)
 
 	// 启动定时清理过期流（替代 LRU 自动淘汰）
 	t.cron = cron.New(cron.WithSeconds())
@@ -115,79 +121,6 @@ func (t *TcEgress) startInternal() error {
 	}
 	t.cron.Start()
 
-	return nil
-}
-
-// getObjectFilePath 返回 bpf2go 生成的对象文件路径
-func getObjectFilePath() (string, error) {
-	// bpf2go 生成的文件在 ebpfs 目录下
-	// 尝试常见的路径
-	possiblePaths := []string{
-		"ebpfs/tcEgress_bpfel.o",
-		"ebpfs/tcEgress_bpfeb.o",
-		"./ebpfs/tcEgress_bpfel.o",
-		"./ebpfs/tcEgress_bpfeb.o",
-	}
-
-	for _, path := range possiblePaths {
-		// 尝试绝对路径
-		absPath, err := filepath.Abs(path)
-		if err != nil {
-			continue
-		}
-		if _, err := exec.LookPath(absPath); err == nil {
-			return absPath, nil
-		}
-	}
-
-	return "", errors.New("TC egress object file not found, run 'go generate' first")
-}
-
-// attachWithTC 使用 tc 命令挂载 TC egress 程序
-// 使用 clsact qdisc + bpf filter 方式
-func (t *TcEgress) attachWithTC(iface net.Interface) error {
-	ifaceName := iface.Name
-
-	// 1. 添加 clsact qdisc (如果不存在则创建)
-	cmd := exec.Command("tc", "qdisc", "show", "dev", ifaceName)
-	output, _ := cmd.Output()
-	if !strings.Contains(string(output), "clsact") {
-		addQdisc := exec.Command("tc", "qdisc", "add", "dev", ifaceName, "clsact")
-		if err := addQdisc.Run(); err != nil {
-			logger.Warnf("[TcEgress] Failed to add clsact qdisc (may already exist): %v", err)
-		}
-	}
-
-	// 2. 删除可能存在的旧 filter
-	delCmd := exec.Command("tc", "filter", "del", "dev", ifaceName, "egress")
-	delCmd.Run() // ignore error if no filter exists
-
-	// 3. 获取对象文件路径
-	oFile, err := getObjectFilePath()
-	if err != nil {
-		return err
-	}
-
-	// 4. 添加新的 bpf filter
-	// 使用 prio 1 和 handle 1 作为标识
-	addCmd := exec.Command("tc", "filter", "add", "dev", ifaceName, "egress",
-		"prio", "1", "handle", "1",
-		"bpf", "da", "obj", oFile, "sec", "tc")
-	if err := addCmd.Run(); err != nil {
-		return fmt.Errorf("failed to add tc filter: %w", err)
-	}
-
-	logger.Infof("[TcEgress] TC filter added: obj=%s", filepath.Base(oFile))
-	return nil
-}
-
-// Detach 分离 TC egress 程序（清理 tc qdisc filter）
-func (t *TcEgress) Detach() error {
-	// 删除 bpf filter
-	delCmd := exec.Command("tc", "filter", "del", "dev", t.InterfaceName, "egress")
-	delCmd.Run() // ignore error
-
-	logger.Infof("[TcEgress] TC filter detached from interface %s", t.InterfaceName)
 	return nil
 }
 
@@ -210,8 +143,10 @@ func (t *TcEgress) closeResources() {
 		t.done = nil
 	}
 	if t.objects != nil {
-		// 先分离 tc filter
-		t.Detach()
+		if t.tcLink != nil {
+			t.tcLink.Close()
+			t.tcLink = nil
+		}
 		t.objects.Close()
 		t.objects = nil
 	}
