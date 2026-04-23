@@ -131,6 +131,13 @@ failguard:
 egress_limit:
   enabled: false                     # 总开关，默认关闭
   rate_mbps: 100.0                  # 限速速率 (Mbps)，默认 100Mbps
+  # burst_bytes: 令牌桶突发上限 (Bytes)
+  # 1,000,000 是 Mbps 到 bps (bits per second) 的换算系数，网络带宽领域惯例使用十进制 Mbps，这与存储容量（如内存、磁盘常用 MiB/GiB）的惯例不同
+  # 公式: burst_bytes = rate_mbps × 1,000,000 / 8 × burst_time_seconds
+  #   其中 burst_time_seconds 为期望的突发缓冲时长 (推荐 10ms~100ms)
+  # 下限: >= 1500 (至少容纳一个 MTU 包，否则所有包都会被丢弃)
+  # 上限: <= rate_mbps × 12,500 (eBPF 侧补票窗口上限 100ms，超过则令牌自然补满，无实际意义)
+  #   例: 100Mbps → 上限 1,250,000 bytes; 1Mbps → 上限 12,500 bytes
   burst_bytes: 125000               # 突发上限 (Bytes)，约 10ms 缓冲
 
 # 异常流量检测系统配置

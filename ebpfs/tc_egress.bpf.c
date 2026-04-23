@@ -30,7 +30,6 @@
 
 #include "vmlinux.h"
 #include "common.h"
-#include <linux/pkt_cls.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
