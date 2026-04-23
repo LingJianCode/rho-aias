@@ -45,16 +45,14 @@
 
 char __license[] SEC("license") = "GPL";
 
-// ==========================================
-// 1. 运行时状态结构体 (已瘦身)
-// 仅保留随时间变化的动态数据
-// 单条目大小: 8 + 8 + 4 = 20 字节, 验证器可能 padding 到 24 字节
-// ==========================================
+// 单条目大小: 8 + 8 + 4(lock) + 4(padding) = 24 字节
+// 注意: 不使用 __attribute__((packed))，因为 bpf_spin_lock 要求 4 字节对齐，
+// packed 会导致 lock 地址可能未对齐，触发 -Waddress-of-packed-member 警告
 struct flow_limit_state {
     __u64 tokens;              // 当前剩余令牌数 (Bytes)
     __u64 last_update_ns;      // 上次更新时间戳 (ns)
     struct bpf_spin_lock lock; // 自旋锁，保护多核并发读写
-} __attribute__((packed));
+};
 
 // ==========================================
 // 2. 全局配置结构体 (通过 ARRAY Map 传递)
