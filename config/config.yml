@@ -138,7 +138,7 @@ egress_limit:
   # 下限: >= 1500 (至少容纳一个 MTU 包，否则所有包都会被丢弃)
   # 上限: <= rate_mbps × 12,500 (eBPF 侧补票窗口上限 100ms，超过则令牌自然补满，无实际意义)
   #   例: 100Mbps → 上限 1,250,000 bytes; 1Mbps → 上限 12,500 bytes
-  burst_bytes: 125000               # 突发上限 (Bytes)，约 10ms 缓冲
+  burst_bytes: 1250               # 突发上限 (Bytes)，约 10ms 缓冲
 
 # 异常流量检测系统配置
 # 检测流程：每个 check_interval 对每个 IP 依次执行：
