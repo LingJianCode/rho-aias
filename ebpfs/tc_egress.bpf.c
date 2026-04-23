@@ -151,10 +151,17 @@ int egress_limit(struct __sk_buff *skb)
             return TC_ACT_OK;
     }
 
-    // --- 4. 限流计算 (临界区) ---
+    // --- 4. 限流计算 ---
+    // BPF 验证器要求: 持有 bpf_spin_lock 期间不能调用任何 helper 函数
+    // 因此 bpf_ktime_get_ns() 必须在获取锁之前调用
+    // 同时预读 cfg 和 skb 值到局部变量，确保临界区内无外部访问
+    __u64 now = bpf_ktime_get_ns();
+    __u64 rate = cfg->rate_bytes;
+    __u64 burst = cfg->burst_bytes;
+    __u32 pkt_len = skb->len;
+
     bpf_spin_lock(&val->lock);
 
-    __u64 now = bpf_ktime_get_ns();
     __u64 delta_ns = now - val->last_update_ns;
 
     // [防溢出补丁] 限制最大补票窗口为 100ms
@@ -163,22 +170,21 @@ int egress_limit(struct __sk_buff *skb)
         delta_ns = 100000000ULL;
     }
 
-    // 从全局配置读取速率进行计算
-    // rate_bytes 是 Bytes/s, 需要转换为 ns 级别
-    // 公式: add_tokens = delta_ns * rate_bytes / 1_000_000_000
-    __u64 add_tokens = delta_ns * cfg->rate_bytes / 1000000000ULL;
+    // 令牌补充: rate 是 Bytes/s, 需要转换为 ns 级别
+    // 公式: add_tokens = delta_ns * rate / 1_000_000_000
+    __u64 add_tokens = delta_ns * rate / 1000000000ULL;
     val->tokens += add_tokens;
 
-    // 钳位 (直接使用全局 Burst 上限)
-    if (val->tokens > cfg->burst_bytes) {
-        val->tokens = cfg->burst_bytes;
+    // 钳位 (令牌数不超过 burst 上限)
+    if (val->tokens > burst) {
+        val->tokens = burst;
     }
 
     int action = TC_ACT_SHOT; // 默认丢包
 
     // 判定是否放行
-    if (val->tokens >= (__u64)skb->len) {
-        val->tokens -= (__u64)skb->len;
+    if (val->tokens >= (__u64)pkt_len) {
+        val->tokens -= (__u64)pkt_len;
         action = TC_ACT_OK;
     }
 
