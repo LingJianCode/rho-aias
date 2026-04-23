@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"rho-aias/internal/logger"
 
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/robfig/cron/v3"
 )
 
 // EgressLimitConfig 限速配置结构体 (与 eBPF 侧 egress_limit_config 对齐)
@@ -32,11 +34,22 @@ func DefaultEgressLimitConfig() EgressLimitConfig {
 	}
 }
 
+// 清理配置常量
+const (
+	// flowExpireThreshold 流过期阈值
+	// 超过此时间未更新的流将被清理，等同于 LRU 的淘汰效果
+	flowExpireThreshold = 5 * time.Minute
+
+	// flowCleanupInterval 清理间隔
+	flowCleanupInterval = "@every 1m"
+)
+
 // TcEgress TC Egress 限速管理器
 // 管理 TC eBPF egress 程序的生命周期和配置操作
 type TcEgress struct {
 	InterfaceName string
 	objects       *tcEgressObjects
+	cron          *cron.Cron       // 定时清理过期流条目
 	done          chan struct{}
 	doneOnce      sync.Once
 	closeMu       sync.Mutex
@@ -92,6 +105,16 @@ func (t *TcEgress) startInternal() error {
 	}
 
 	logger.Infof("[TcEgress] Program attached successfully on interface %s", t.InterfaceName)
+
+	// 启动定时清理过期流（替代 LRU 自动淘汰）
+	t.cron = cron.New(cron.WithSeconds())
+	if _, err := t.cron.AddFunc(flowCleanupInterval, func() {
+		t.doCleanup()
+	}); err != nil {
+		logger.Warnf("[TcEgress] Failed to add cleanup cron job: %v", err)
+	}
+	t.cron.Start()
+
 	return nil
 }
 
@@ -178,6 +201,10 @@ func (t *TcEgress) Close() {
 
 // closeResources 释放所有资源（不含锁保护）
 func (t *TcEgress) closeResources() {
+	if t.cron != nil {
+		t.cron.Stop()
+		t.cron = nil
+	}
 	if t.done != nil {
 		close(t.done)
 		t.done = nil
@@ -276,8 +303,8 @@ func (t *TcEgress) SetBurst(burstBytes uint64) error {
 	return t.SetEgressLimitConfig(cfg)
 }
 
-// GetFlowCount 获取当前 LRU Hash 中的流数量（近似值）
-// 注意：LRU hash 不支持准确计数，此方法通过遍历估算
+// GetFlowCount 获取当前 Hash Map 中的流数量
+// 通过遍历计数，适用于 HASH 类型 Map
 func (t *TcEgress) GetFlowCount() (int, error) {
 	t.mapMu.RLock()
 	defer t.mapMu.RUnlock()
@@ -323,15 +350,56 @@ func (t *TcEgress) ClearAllFlows() error {
 	return nil
 }
 
-// FlowLimitState 对齐 eBPF 侧结构体
-// 确保 unsafe.Sizeof() == 24
+// FlowLimitState 对齐 eBPF 侧 struct flow_limit_state
+// 确保 unsafe.Sizeof() == 24 (8+8+4(lock)+4(padding))
 type FlowLimitState struct {
 	Tokens       uint64
 	LastUpdateNs uint64
-	_            [4]byte // padding for spin_lock (实际是 4 字节)
+	Lock         uint32   // bpf_spin_lock (4 bytes)
+	_            [4]byte  // padding to 24 bytes
 }
 
 // Ensure FlowLimitState size matches eBPF side
 var _ [24]byte = [24]byte{}
 
 var _ = unsafe.Sizeof(FlowLimitState{})
+
+// doCleanup 执行一次过期条目清理
+// 替代 LRU_HASH 的自动淘汰机制
+func (t *TcEgress) doCleanup() {
+	t.mapMu.RLock()
+	defer t.mapMu.RUnlock()
+
+	if t.objects == nil || t.objects.EgressLimits == nil {
+		return
+	}
+
+	now := uint64(time.Now().UnixNano())
+	expireThreshold := uint64(flowExpireThreshold.Nanoseconds())
+
+	var expiredKeys []uint32
+	iter := t.objects.EgressLimits.Iterate()
+	var key uint32
+	var val FlowLimitState
+	for iter.Next(&key, &val) {
+		if now > val.LastUpdateNs && (now-val.LastUpdateNs) > expireThreshold {
+			expiredKeys = append(expiredKeys, key)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		logger.Warnf("[TcEgress] Cleanup iteration error: %v", err)
+		return
+	}
+
+	// 删除过期条目
+	deleted := 0
+	for _, k := range expiredKeys {
+		if err := t.objects.EgressLimits.Delete(&k); err == nil {
+			deleted++
+		}
+	}
+
+	if deleted > 0 {
+		logger.Debugf("[TcEgress] Cleaned up %d expired flow entries", deleted)
+	}
+}

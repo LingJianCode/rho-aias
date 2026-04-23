@@ -25,7 +25,7 @@
  *
  * 依赖:
  * - 内核 5.1+ (bpf_spin_lock)
- * - BPF_MAP_TYPE_LRU_HASH (4.10+)
+ * - BPF_MAP_TYPE_HASH (3.19+)
  */
 
 #include "vmlinux.h"
@@ -78,14 +78,16 @@ struct {
     __uint(max_entries, 1);
 } egress_limit_config SEC(".maps");
 
-// per-flow 限速状态 Map (LRU_HASH)
+// per-flow 限速状态 Map (HASH)
 // Key: 目标 IP (网络字节序)
 // Value: struct flow_limit_state
+// 注意: 不能使用 LRU_HASH，因为 LRU 隐式淘汰与 bpf_spin_lock 互斥
+// 过期条目由 Go 控制面通过 cron 定时清理
 struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __type(key, __u32);                    // Key: dst_ip (网络字节序)
+    __uint(type, BPF_MAP_TYPE_HASH);          // 不能用 LRU_HASH + bpf_spin_lock
+    __type(key, __u32);                        // Key: dst_ip (网络字节序)
     __type(value, struct flow_limit_state);
-    __uint(max_entries, 262144);           // 256k 条目，减少 LRU 淘汰概率 (~6MB)
+    __uint(max_entries, 262144);               // 256k 条目 (~6MB)
 } egress_limits SEC(".maps");
 
 // ==========================================
