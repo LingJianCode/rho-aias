@@ -6,6 +6,7 @@ import (
 	"rho-aias/internal/blocklog"
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/egresslog"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
 
@@ -15,14 +16,17 @@ import (
 // CoreDependencies 核心基础设施初始化结果
 type CoreDependencies struct {
 	XDP              *ebpfs.Xdp
+	TcEgress         *ebpfs.TcEgress
 	BlacklistManager *manual.BlacklistManager
 	WhitelistManager *manual.WhitelistManager
 	BlockLogMgr      *blocklog.Manager
+	EgressLogMgr     *egresslog.Manager
 }
 
 // InitCore 初始化核心 eBPF 基础设施（不加载缓存规则，缓存需在 Start 后通过 LoadCachedRules 加载）
 func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 	xdp := ebpfs.NewXdp(cfg.Ebpf.InterfaceName)
+	tcEgress := ebpfs.NewTcEgress(cfg.Ebpf.InterfaceName)
 
 	manual.InitProtectedNets(logger.Infof)
 	whitelistChecker := manual.NewWhitelistChecker()
@@ -52,11 +56,33 @@ func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 		blockLogMgr.AddRecord(record)
 	})
 
+	var egressLogMgr *egresslog.Manager
+	{
+		elConfig := egresslog.Config{
+			BufferSize:    1000,
+			FlushInterval: 5 * time.Second,
+		}
+		var err error
+		egressLogMgr, err = egresslog.NewManagerWithPersistence(elConfig, dbConn)
+		if err != nil {
+			logger.Fatalf("[EgressLog] Failed to initialize with persistence: %v", err)
+		}
+		logger.Info("[Main] Egress log initialized with SQLite persistence enabled")
+	}
+
+	tcEgress.SetDropCallback(func(dstIP string, pktLen uint32, tokens uint64, rateBytes uint64) {
+		record := egresslog.CreateDropRecord(dstIP, pktLen, tokens, rateBytes)
+		egressLogMgr.AddRecord(record)
+		logger.Debugf("[EgressLog] Drop: dstIP=%s, pktLen=%d, tokens=%d, rateBytes=%d", dstIP, pktLen, tokens, rateBytes)
+	})
+
 	return &CoreDependencies{
 		XDP:              xdp,
+		TcEgress:         tcEgress,
 		BlacklistManager: blacklistManager,
 		WhitelistManager: whitelistManager,
 		BlockLogMgr:      blockLogMgr,
+		EgressLogMgr:     egressLogMgr,
 	}
 }
 
@@ -112,20 +138,6 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 			}
 			logger.Infof("[Whitelist] Loaded %d/%d rules from cache", loaded, whitelistData.RuleCount())
 			c.WhitelistManager.Checker().LoadFromCache(whitelistData)
-		}
-	}
-
-	// 恢复 blocklog_events 动态配置（由 loadDynamicConfigFromDB 写入 cfg.BlockLog 扩展字段）
-	if cfg.BlockLog.EventsEnabled || cfg.BlockLog.EventsSampleRate > 0 {
-		sampleRate := cfg.BlockLog.EventsSampleRate
-		if sampleRate == 0 {
-			sampleRate = 1
-		}
-		if err := c.XDP.SetBlocklogEventConfig(cfg.BlockLog.EventsEnabled, sampleRate); err != nil {
-			logger.Warnf("[BlockLog] Failed to restore blocklog_events config: %v", err)
-		} else {
-			logger.Infof("[BlockLog] Restored blocklog_events config: enabled=%v, sample_rate=%d",
-				cfg.BlockLog.EventsEnabled, sampleRate)
 		}
 	}
 }

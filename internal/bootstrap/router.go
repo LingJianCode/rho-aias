@@ -32,14 +32,16 @@ func RegisterAllRoutes(
 	routers.RegisterUserRoutes(api, authDeps.UserHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterAuditRoutes(api, authDeps.AuditHandle, enforcer, authSvc, apiKeySvc)
 
-	// Manual / BlockLog handles — 从 core.Manager 创建
+	// Manual / BlockLog / EgressLog handles — 从 core.Manager 创建
 	blacklistHandle := handles.NewBlacklistHandle(core.BlacklistManager)
 	whitelistHandle := handles.NewWhitelistHandle(core.WhitelistManager)
 	blockLogHandle := handles.NewBlockLogHandle(core.BlockLogMgr, core.XDP)
+	egressLogHandle := handles.NewEgressLogHandle(core.EgressLogMgr, core.TcEgress)
 
 	routers.RegisterBlacklistRoutes(api, blacklistHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterWhitelistRoutes(api, whitelistHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterBlockLogRoutes(api, blockLogHandle, enforcer, authSvc, apiKeySvc)
+	routers.RegisterEgressLogRoutes(api, egressLogHandle, enforcer, authSvc, apiKeySvc)
 
 	ruleQueryHandle := handles.NewRuleQueryHandle(core.XDP)
 	routers.RegisterRuleRoutes(api, ruleQueryHandle, enforcer, authSvc, apiKeySvc)
@@ -48,7 +50,7 @@ func RegisterAllRoutes(
 		enforcer, authSvc, apiKeySvc)
 
 	// ConfigHandle
-	configHandle := newConfigHandle(dbs.DynamicConfigSvc, detectorDeps, anomalyDeps, core.XDP)
+	configHandle := newConfigHandle(dbs.DynamicConfigSvc, detectorDeps, anomalyDeps, core.XDP, core.TcEgress)
 	routers.RegisterConfigRoutes(api, configHandle, enforcer, authSvc, apiKeySvc)
 }
 
@@ -80,6 +82,7 @@ func newConfigHandle(
 	detectors *DetectorDeps,
 	anomaly *AnomalyDeps,
 	xdp *ebpfs.Xdp,
+	tcEgress *ebpfs.TcEgress,
 ) *handles.ConfigHandle {
 	configHandle := handles.NewConfigHandle(
 		dynamicConfigSvc,
@@ -90,6 +93,7 @@ func newConfigHandle(
 		detectors.GeoMgr,
 		detectors.IntelMgr,
 		xdp,
+		tcEgress,
 		xdp,
 		anomaly.RecordPacketFn,
 	)

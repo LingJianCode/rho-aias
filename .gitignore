@@ -23,3 +23,5 @@ caddy/.local
 
 *.mmdb
 dist
+
+.codex

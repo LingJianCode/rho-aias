@@ -191,3 +191,17 @@ hping3 -c 10000 -d 120 -S -w 64 -p 80 --flood x.x.x.x
 ```bash
 hping3 -c 10000 -d 120 -A -w 64 -p 80 --flood x.x.x.x
  ```
+
+
+# 限流测试
+
+rho-aias运行的服务器上使用如下命令：
+
+```bash
+iperf3 -s
+```
+
+客户端（注意必须带-R，不带则代表测试客户端上传到服务器的带宽）：
+```bash
+iperf3 -c <rho-aias> -R
+```

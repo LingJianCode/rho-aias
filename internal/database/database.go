@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"rho-aias/internal/auth/password"
 	"rho-aias/internal/casbin"
@@ -27,6 +29,12 @@ func NewDatabase(dsn string, debug bool) (*Database, error) {
 	logLevel := gormlogger.Warn
 	if debug {
 		logLevel = gormlogger.Info
+	}
+	// 确保数据库文件所在目录存在，否则 SQLite 会报 "unable to open database file"
+	if dir := filepath.Dir(dsn); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create database directory %s: %w", dir, err)
+		}
 	}
 	logger.Debugf("initlized dsn %s", dsn)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{

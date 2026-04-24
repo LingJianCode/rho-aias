@@ -221,6 +221,48 @@ func (h *ConfigHandle) applyBlocklogEventsConfig(raw json.RawMessage) error {
 	return nil
 }
 
+// ========== EgressLimit 模块应用逻辑 ==========
+
+func (h *ConfigHandle) applyEgressLimitConfig(raw json.RawMessage) error {
+	if h.tcEgress == nil {
+		return fmt.Errorf("egress_limit module is not initialized (TcEgress not available)")
+	}
+
+	var req config.EgressLimitRuntime
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return fmt.Errorf("invalid config format: %w", err)
+	}
+
+	// Mbps -> Bytes/s (除以 8)
+	rateBytes := uint64(req.RateMbps * 1000000 / 8)
+
+	egressCfg := ebpfs.EgressLimitConfig{
+		Enabled:    0,
+		RateBytes:  rateBytes,
+		BurstBytes: req.BurstBytes,
+	}
+	if req.Enabled {
+		egressCfg.Enabled = 1
+	}
+
+	if err := h.tcEgress.SetEgressLimitConfig(egressCfg); err != nil {
+		return fmt.Errorf("failed to set egress limit config: %w", err)
+	}
+
+	// 设置丢包日志配置
+	sampleRate := req.DropLogSampleRate
+	if sampleRate == 0 {
+		sampleRate = 100
+	}
+	if err := h.tcEgress.SetDropLogConfig(req.DropLogEnabled, sampleRate); err != nil {
+		logger.Warnf("[ConfigAPI] Failed to set drop log config: %v", err)
+	}
+
+	logger.Infof("[ConfigAPI] Egress Limit config updated: enabled=%v, rate=%.1f Mbps, burst=%d bytes, drop_log=%v, drop_sample_rate=%d",
+		req.Enabled, req.RateMbps, req.BurstBytes, req.DropLogEnabled, sampleRate)
+	return nil
+}
+
 // ========== 辅助函数 ==========
 
 func tryStart(startFn func() error, prefix string) {
