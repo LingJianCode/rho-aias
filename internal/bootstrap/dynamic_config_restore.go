@@ -129,7 +129,24 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		loaded["blocklog_events"] = fmt.Sprintf("enabled=%v, sample_rate=%d", blocklogEvents.Enabled, blocklogEvents.SampleRate)
 	}
 
-	modules := []string{"failguard", "waf", "rate_limit", "anomaly_detection", "geo_blocking", "intel", "blocklog_events"}
+	var egressLimit config.EgressLimitRuntime
+	if ok, err := svc.LoadTo("egress_limit", &egressLimit); err != nil {
+		logger.Warnf("[Main] Failed to load egress_limit dynamic config from DB: %v", err)
+	} else if ok {
+		cfg.EgressLimit.Enabled = egressLimit.Enabled
+		cfg.EgressLimit.RateMbps = egressLimit.RateMbps
+		cfg.EgressLimit.BurstBytes = egressLimit.BurstBytes
+		cfg.EgressLimit.DropLogEnabled = egressLimit.DropLogEnabled
+		cfg.EgressLimit.DropLogSampleRate = egressLimit.DropLogSampleRate
+		// 写入运行时扩展字段，供 LoadCachedRules 恢复 eBPF 丢包日志配置
+		cfg.EgressLimit.DropLogEnabledRuntime = egressLimit.DropLogEnabled
+		cfg.EgressLimit.DropLogSampleRateRuntime = egressLimit.DropLogSampleRate
+		loaded["egress_limit"] = fmt.Sprintf("enabled=%v, rate=%.1f, burst=%d, drop_log=%v, drop_sample_rate=%d",
+			egressLimit.Enabled, egressLimit.RateMbps, egressLimit.BurstBytes,
+			egressLimit.DropLogEnabled, egressLimit.DropLogSampleRate)
+	}
+
+	modules := []string{"failguard", "waf", "rate_limit", "anomaly_detection", "geo_blocking", "intel", "blocklog_events", "egress_limit"}
 	logger.Info("[Main] Dynamic config loaded (DB values override YAML):")
 	for _, mod := range modules {
 		if val, exists := loaded[mod]; exists {

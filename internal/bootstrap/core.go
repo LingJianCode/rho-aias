@@ -6,6 +6,7 @@ import (
 	"rho-aias/internal/blocklog"
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/egresslog"
 	"rho-aias/internal/logger"
 	"rho-aias/internal/manual"
 
@@ -19,6 +20,7 @@ type CoreDependencies struct {
 	BlacklistManager *manual.BlacklistManager
 	WhitelistManager *manual.WhitelistManager
 	BlockLogMgr      *blocklog.Manager
+	EgressLogMgr     *egresslog.Manager
 }
 
 // InitCore 初始化核心 eBPF 基础设施（不加载缓存规则，缓存需在 Start 后通过 LoadCachedRules 加载）
@@ -54,12 +56,33 @@ func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 		blockLogMgr.AddRecord(record)
 	})
 
+	var egressLogMgr *egresslog.Manager
+	{
+		elConfig := egresslog.Config{
+			BufferSize:    1000,
+			FlushInterval: 5 * time.Second,
+		}
+		var err error
+		egressLogMgr, err = egresslog.NewManagerWithPersistence(elConfig, dbConn)
+		if err != nil {
+			logger.Fatalf("[EgressLog] Failed to initialize with persistence: %v", err)
+		}
+		logger.Info("[Main] Egress log initialized with SQLite persistence enabled")
+	}
+
+	tcEgress.SetDropCallback(func(dstIP string, pktLen uint32, tokens uint64, rateBytes uint64) {
+		record := egresslog.CreateDropRecord(dstIP, pktLen, tokens, rateBytes)
+		egressLogMgr.AddRecord(record)
+		logger.Debugf("[EgressLog] Drop: dstIP=%s, pktLen=%d, tokens=%d, rateBytes=%d", dstIP, pktLen, tokens, rateBytes)
+	})
+
 	return &CoreDependencies{
 		XDP:              xdp,
 		TcEgress:         tcEgress,
 		BlacklistManager: blacklistManager,
 		WhitelistManager: whitelistManager,
 		BlockLogMgr:      blockLogMgr,
+		EgressLogMgr:     egressLogMgr,
 	}
 }
 
@@ -148,6 +171,20 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 			} else {
 				logger.Infof("[EgressLimit] Restored config: enabled=%v, rate=%.1f Mbps, burst=%d bytes",
 					cfg.EgressLimit.Enabled, cfg.EgressLimit.RateMbps, cfg.EgressLimit.BurstBytes)
+			}
+		}
+
+		// 恢复丢包日志配置
+		if cfg.EgressLimit.DropLogEnabledRuntime || cfg.EgressLimit.DropLogSampleRateRuntime > 0 {
+			sampleRate := cfg.EgressLimit.DropLogSampleRateRuntime
+			if sampleRate == 0 {
+				sampleRate = 100
+			}
+			if err := c.TcEgress.SetDropLogConfig(cfg.EgressLimit.DropLogEnabledRuntime, sampleRate); err != nil {
+				logger.Warnf("[EgressLimit] Failed to restore drop log config: %v", err)
+			} else {
+				logger.Infof("[EgressLimit] Restored drop log config: enabled=%v, sample_rate=%d",
+					cfg.EgressLimit.DropLogEnabledRuntime, sampleRate)
 			}
 		}
 	}

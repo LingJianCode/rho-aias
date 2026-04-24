@@ -55,12 +55,17 @@ func main() {
 	// AuthDB / BizDB 在 InitDatabase 中已保证非 nil（失败时 FatalExit）
 	dbConn := dbs.BizDB.DB
 
-	// 核心基础设施 (XDP / Manual / Whitelist / BlockLog)
+	// 核心基础设施 (XDP / Manual / Whitelist / BlockLog / EgressLog)
 	core := bootstrap.InitCore(cfg, dbConn)
 	defer core.XDP.Close()
 	defer func() {
 		if core.TcEgress != nil {
 			core.TcEgress.Close()
+		}
+	}()
+	defer func() {
+		if core.EgressLogMgr != nil {
+			core.EgressLogMgr.Close()
 		}
 	}()
 
@@ -73,6 +78,7 @@ func main() {
 	if err := core.TcEgress.Start(); err != nil {
 		logger.Warnf("[TcEgress] Failed to start: %v (continuing without egress rate limiting)", err)
 	}
+	go core.TcEgress.MonitorDropEvents()
 
 	// 加载持久化的缓存规则到 eBPF map（必须在 Start 之后）
 	core.LoadCachedRules(cfg)

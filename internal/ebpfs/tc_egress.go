@@ -1,9 +1,12 @@
 package ebpfs
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 	"unsafe"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/robfig/cron/v3"
 )
@@ -28,10 +32,49 @@ type EgressLimitConfig struct {
 func DefaultEgressLimitConfig() EgressLimitConfig {
 	return EgressLimitConfig{
 		Enabled:    0, // 默认关闭
-		RateBytes:  12500000,  // 100Mbps (100 * 10^6 / 8)
-		BurstBytes: 125000,    // 125KB (约 10ms 缓冲)
+		RateBytes:  12500000, // 100Mbps (100 * 10^6 / 8)
+		BurstBytes: 125000,   // 125KB (约 10ms 缓冲)
 	}
 }
+
+// EgressDropEventConfig 丢包事件上报配置 (与 eBPF 侧 egress_drop_event_config 对齐)
+type EgressDropEventConfig struct {
+	Enabled    uint32
+	SampleRate uint32
+	Padding    [2]uint32
+}
+
+// NewEgressDropEventConfig 创建丢包事件配置
+func NewEgressDropEventConfig(enabled bool, sampleRate uint32) EgressDropEventConfig {
+	enabledVal := uint32(0)
+	if enabled {
+		enabledVal = 1
+	}
+	if sampleRate == 0 {
+		sampleRate = 100 // 默认采样率
+	}
+	return EgressDropEventConfig{
+		Enabled:    enabledVal,
+		SampleRate: sampleRate,
+		Padding:    [2]uint32{0, 0},
+	}
+}
+
+// DefaultEgressDropEventConfig 返回默认丢包事件配置
+func DefaultEgressDropEventConfig() EgressDropEventConfig {
+	return NewEgressDropEventConfig(false, 100)
+}
+
+// EgressDropInfo 丢包事件结构体 (与 eBPF 侧 egress_drop_info 对齐)
+type EgressDropInfo struct {
+	DstIP     uint32
+	PktLen    uint32
+	Tokens    uint64
+	RateBytes uint64
+}
+
+// EgressDropCallback 丢包事件回调函数类型
+type EgressDropCallback func(dstIP string, pktLen uint32, tokens uint64, rateBytes uint64)
 
 // 清理配置常量
 const (
@@ -41,6 +84,9 @@ const (
 
 	// flowCleanupInterval 清理间隔
 	flowCleanupInterval = "@every 1m"
+
+	// minBurstBytes burst 下限 (至少容纳一个 MTU)
+	minBurstBytes = 1500
 )
 
 // tcLinkCloser 是 TC 链接的统一关闭接口
@@ -55,11 +101,13 @@ type TcEgress struct {
 	InterfaceName string
 	objects       *tcEgressObjects
 	tcLink        tcLinkCloser     // TCX link 或 netlink TC link 引用
+	dropReader    *ringbuf.Reader  // 丢包事件 RingBuf reader
 	cron          *cron.Cron       // 定时清理过期流条目
 	done          chan struct{}
 	doneOnce      sync.Once
 	closeMu       sync.Mutex
 	mapMu         sync.RWMutex
+	dropCallback  EgressDropCallback // 丢包事件回调
 }
 
 // NewTcEgress 创建新的 TcEgress 实例
@@ -99,6 +147,18 @@ func (t *TcEgress) startInternal() error {
 	if err := t.SetEgressLimitConfig(DefaultEgressLimitConfig()); err != nil {
 		t.closeResources()
 		return fmt.Errorf("failed to initialize default config: %w", err)
+	}
+
+	// 初始化默认丢包事件配置（关闭状态）
+	if err := t.SetDropLogConfig(false, 100); err != nil {
+		logger.Warnf("[TcEgress] Failed to initialize default drop log config: %v", err)
+	}
+
+	// 创建 RingBuf reader
+	t.dropReader, err = ringbuf.NewReader(t.objects.EgressDropEvents)
+	if err != nil {
+		t.closeResources()
+		return fmt.Errorf("failed to create drop event ringbuf reader: %w", err)
 	}
 
 	// 尝试挂载 TC 程序
@@ -156,6 +216,10 @@ func (t *TcEgress) closeResources() {
 		close(t.done)
 		t.done = nil
 	}
+	if t.dropReader != nil {
+		t.dropReader.Close()
+		t.dropReader = nil
+	}
 	if t.objects != nil {
 		if t.tcLink != nil {
 			t.tcLink.Close()
@@ -173,6 +237,12 @@ func (t *TcEgress) SetEgressLimitConfig(cfg EgressLimitConfig) error {
 
 	if t.objects == nil || t.objects.EgressLimitConfig == nil {
 		return errors.New("eBPF objects not initialized")
+	}
+
+	// burst 下限校验: 至少容纳一个 MTU 包
+	if cfg.BurstBytes < minBurstBytes {
+		cfg.BurstBytes = minBurstBytes
+		logger.Warnf("[TcEgress] BurstBytes too small (%d), adjusted to minimum %d", cfg.BurstBytes, minBurstBytes)
 	}
 
 	key := uint32(0)
@@ -201,6 +271,101 @@ func (t *TcEgress) GetEgressLimitConfig() (EgressLimitConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// SetDropLogConfig 设置丢包事件上报配置
+func (t *TcEgress) SetDropLogConfig(enabled bool, sampleRate uint32) error {
+	t.mapMu.Lock()
+	defer t.mapMu.Unlock()
+
+	if t.objects == nil || t.objects.EgressDropEventConfig == nil {
+		return errors.New("eBPF objects not initialized")
+	}
+
+	config := NewEgressDropEventConfig(enabled, sampleRate)
+	key := uint32(0)
+	if err := t.objects.EgressDropEventConfig.Put(&key, &config); err != nil {
+		return fmt.Errorf("failed to set drop log config: %w", err)
+	}
+
+	logger.Debugf("[TcEgress] Drop log config updated: enabled=%v, sample_rate=%d", enabled, sampleRate)
+	return nil
+}
+
+// GetDropLogConfig 获取当前丢包事件上报配置
+func (t *TcEgress) GetDropLogConfig() (EgressDropEventConfig, error) {
+	t.mapMu.RLock()
+	defer t.mapMu.RUnlock()
+
+	if t.objects == nil || t.objects.EgressDropEventConfig == nil {
+		return DefaultEgressDropEventConfig(), errors.New("eBPF objects not initialized")
+	}
+
+	key := uint32(0)
+	var cfg EgressDropEventConfig
+	if err := t.objects.EgressDropEventConfig.Lookup(&key, &cfg); err != nil {
+		return DefaultEgressDropEventConfig(), fmt.Errorf("failed to get drop log config: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// SetDropCallback 设置丢包事件回调函数
+func (t *TcEgress) SetDropCallback(callback EgressDropCallback) {
+	t.dropCallback = callback
+}
+
+// MonitorDropEvents 监控丢包事件 (应在独立 goroutine 中运行)
+func (t *TcEgress) MonitorDropEvents() {
+	logger.Info("[TcEgress] MonitorDropEvents started")
+	for {
+		select {
+		case <-t.done:
+			logger.Info("[TcEgress] MonitorDropEvents exit")
+			return
+		default:
+		}
+
+		record, err := t.dropReader.Read()
+		if err != nil {
+			if errors.Is(err, ringbuf.ErrClosed) {
+				logger.Warn("[TcEgress] Drop event ringbuf reader closed")
+				return
+			}
+			select {
+			case <-t.done:
+				logger.Info("[TcEgress] MonitorDropEvents exit after error")
+				return
+			default:
+				continue
+			}
+		}
+
+		var dropInfo EgressDropInfo
+		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &dropInfo); err != nil {
+			logger.Warnf("[TcEgress] Failed to parse drop info: %v", err)
+			continue
+		}
+
+		// 将网络字节序的 IP 转换为字符串
+		dstIP := formatEgressDropIP(dropInfo.DstIP)
+
+		logger.Debugf("[TcEgress] Drop event - DstIP: %s, PktLen: %d, Tokens: %d, Rate: %d",
+			dstIP, dropInfo.PktLen, dropInfo.Tokens, dropInfo.RateBytes)
+
+		if t.dropCallback != nil {
+			t.dropCallback(dstIP, dropInfo.PktLen, dropInfo.Tokens, dropInfo.RateBytes)
+		}
+	}
+}
+
+// formatEgressDropIP 将网络字节序的 uint32 IP 转换为字符串
+func formatEgressDropIP(ipNetOrder uint32) string {
+	// 网络字节序 -> [4]byte -> netip.Addr
+	var ipBytes [4]byte
+	binary.BigEndian.PutUint32(ipBytes[:], ipNetOrder)
+	addr := netip.AddrFrom4(ipBytes)
+	return addr.String()
 }
 
 // SetEnabled 快速设置开关状态
@@ -300,16 +465,17 @@ func (t *TcEgress) ClearAllFlows() error {
 }
 
 // FlowLimitState 对齐 eBPF 侧 struct flow_limit_state
-// 确保 unsafe.Sizeof() == 24 (8+8+4(lock)+4(padding))
+// 确保 unsafe.Sizeof() == 32 (8+8+8+4(lock)+4(padding))
 type FlowLimitState struct {
 	Tokens       uint64
 	LastUpdateNs uint64
-	Lock         uint32   // bpf_spin_lock (4 bytes)
-	_            [4]byte  // padding to 24 bytes
+	Fractional   uint64
+	Lock         uint32  // bpf_spin_lock (4 bytes)
+	_            [4]byte // padding to 32 bytes
 }
 
 // Ensure FlowLimitState size matches eBPF side
-var _ [24]byte = [24]byte{}
+var _ [32]byte = [32]byte{}
 
 var _ = unsafe.Sizeof(FlowLimitState{})
 

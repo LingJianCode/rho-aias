@@ -248,8 +248,18 @@ func (h *ConfigHandle) applyEgressLimitConfig(raw json.RawMessage) error {
 	if err := h.tcEgress.SetEgressLimitConfig(egressCfg); err != nil {
 		return fmt.Errorf("failed to set egress limit config: %w", err)
 	}
-	logger.Infof("[ConfigAPI] Egress Limit config updated: enabled=%v, rate=%.1f Mbps, burst=%d bytes",
-		req.Enabled, req.RateMbps, req.BurstBytes)
+
+	// 设置丢包日志配置
+	sampleRate := req.DropLogSampleRate
+	if sampleRate == 0 {
+		sampleRate = 100
+	}
+	if err := h.tcEgress.SetDropLogConfig(req.DropLogEnabled, sampleRate); err != nil {
+		logger.Warnf("[ConfigAPI] Failed to set drop log config: %v", err)
+	}
+
+	logger.Infof("[ConfigAPI] Egress Limit config updated: enabled=%v, rate=%.1f Mbps, burst=%d bytes, drop_log=%v, drop_sample_rate=%d",
+		req.Enabled, req.RateMbps, req.BurstBytes, req.DropLogEnabled, sampleRate)
 	return nil
 }
 

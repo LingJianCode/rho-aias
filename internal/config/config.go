@@ -197,9 +197,15 @@ type AttackConfig struct {
 
 // EgressLimitConfig Egress 限速配置
 type EgressLimitConfig struct {
-	Enabled    bool    `yaml:"enabled" json:"enabled"`       // 总开关
-	RateMbps   float64 `yaml:"rate_mbps" json:"rate_mbps"`  // 限速速率 (Mbps)
-	BurstBytes uint64  `yaml:"burst_bytes" json:"burst_bytes"` // 突发上限 (Bytes)
+	Enabled         bool    `yaml:"enabled" json:"enabled"`                    // 总开关
+	RateMbps        float64 `yaml:"rate_mbps" json:"rate_mbps"`               // 限速速率 (Mbps)
+	BurstBytes      uint64  `yaml:"burst_bytes" json:"burst_bytes"`            // 突发上限 (Bytes)
+	DropLogEnabled  bool    `yaml:"drop_log_enabled" json:"drop_log_enabled"`  // 丢包日志开关
+	DropLogSampleRate uint32 `yaml:"drop_log_sample_rate" json:"drop_log_sample_rate"` // 丢包日志采样率
+
+	// 以下字段由动态配置恢复写入（非 YAML），供 LoadCachedRules 恢复 eBPF 事件上报配置
+	DropLogEnabledRuntime  bool   `yaml:"-"`
+	DropLogSampleRateRuntime uint32 `yaml:"-"`
 }
 
 func NewConfig(fileName string) (*Config, error) {
@@ -303,6 +309,7 @@ func applyDefaults(config *Config) {
 	// EgressLimit 默认值
 	setIfZeroFloat(&config.EgressLimit.RateMbps, 100.0)   // 默认 100Mbps
 	setIfZero(&config.EgressLimit.BurstBytes, 125000)      // 默认 125KB (约 10ms 缓冲)
+	setIfZero(&config.EgressLimit.DropLogSampleRate, 100)  // 默认采样率 1/100
 }
 
 // setIfZero 当 *v 为零值时设为 def

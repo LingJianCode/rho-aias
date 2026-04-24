@@ -341,15 +341,29 @@ func (h *ConfigHandle) getEgressLimitRuntimeConfig() map[string]interface{} {
 	cfg, err := h.tcEgress.GetEgressLimitConfig()
 	if err != nil {
 		return map[string]interface{}{
-			"enabled":     false,
-			"rate_mbps":   100.0,
-			"burst_bytes": 125000,
+			"enabled":              false,
+			"rate_mbps":            100.0,
+			"burst_bytes":          125000,
+			"drop_log_enabled":     false,
+			"drop_log_sample_rate": 100,
 		}
 	}
 	rateMbps := float64(cfg.RateBytes) * 8 / 1000000
+
+	// 获取丢包日志配置
+	dropCfg, err := h.tcEgress.GetDropLogConfig()
+	dropLogEnabled := false
+	dropLogSampleRate := uint32(100)
+	if err == nil {
+		dropLogEnabled = dropCfg.Enabled == 1
+		dropLogSampleRate = dropCfg.SampleRate
+	}
+
 	return map[string]interface{}{
-		"enabled":     cfg.Enabled == 1,
-		"rate_mbps":   rateMbps,
-		"burst_bytes": cfg.BurstBytes,
+		"enabled":              cfg.Enabled == 1,
+		"rate_mbps":            rateMbps,
+		"burst_bytes":          cfg.BurstBytes,
+		"drop_log_enabled":     dropLogEnabled,
+		"drop_log_sample_rate": dropLogSampleRate,
 	}
 }

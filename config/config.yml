@@ -138,7 +138,10 @@ egress_limit:
   # 下限: >= 1500 (至少容纳一个 MTU 包，否则所有包都会被丢弃)
   # 上限: <= rate_mbps × 12,500 (eBPF 侧补票窗口上限 100ms，超过则令牌自然补满，无实际意义)
   #   例: 100Mbps → 上限 1,250,000 bytes; 1Mbps → 上限 12,500 bytes
-  burst_bytes: 1250               # 突发上限 (Bytes)，约 10ms 缓冲
+  burst_bytes: 12500              # 突发上限 (Bytes)，约 100ms 缓冲（1Mbps 下推荐值）
+  # 丢包日志配置（参考 blocklog 模式，通过 RingBuf 上报 → Go 回调 → 异步写入 SQLite）
+  drop_log_enabled: true          # 丢包日志开关，开启后限速丢包会上报到控制面
+  drop_log_sample_rate: 10        # 采样率: 每 N 个丢包上报 1 个 (例: 10 = 10% 上报率)
 
 # 异常流量检测系统配置
 # 检测流程：每个 check_interval 对每个 IP 依次执行：

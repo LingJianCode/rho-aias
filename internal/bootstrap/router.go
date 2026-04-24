@@ -32,14 +32,16 @@ func RegisterAllRoutes(
 	routers.RegisterUserRoutes(api, authDeps.UserHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterAuditRoutes(api, authDeps.AuditHandle, enforcer, authSvc, apiKeySvc)
 
-	// Manual / BlockLog handles — 从 core.Manager 创建
+	// Manual / BlockLog / EgressLog handles — 从 core.Manager 创建
 	blacklistHandle := handles.NewBlacklistHandle(core.BlacklistManager)
 	whitelistHandle := handles.NewWhitelistHandle(core.WhitelistManager)
 	blockLogHandle := handles.NewBlockLogHandle(core.BlockLogMgr, core.XDP)
+	egressLogHandle := handles.NewEgressLogHandle(core.EgressLogMgr, core.TcEgress)
 
 	routers.RegisterBlacklistRoutes(api, blacklistHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterWhitelistRoutes(api, whitelistHandle, enforcer, authSvc, apiKeySvc)
 	routers.RegisterBlockLogRoutes(api, blockLogHandle, enforcer, authSvc, apiKeySvc)
+	routers.RegisterEgressLogRoutes(api, egressLogHandle, enforcer, authSvc, apiKeySvc)
 
 	ruleQueryHandle := handles.NewRuleQueryHandle(core.XDP)
 	routers.RegisterRuleRoutes(api, ruleQueryHandle, enforcer, authSvc, apiKeySvc)

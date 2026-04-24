@@ -45,12 +45,13 @@
 
 char __license[] SEC("license") = "GPL";
 
-// 单条目大小: 8 + 8 + 4(lock) + 4(padding) = 24 字节
+// 单条目大小: 8 + 8 + 8 + 4(lock) + 4(padding) = 32 字节
 // 注意: 不使用 __attribute__((packed))，因为 bpf_spin_lock 要求 4 字节对齐，
 // packed 会导致 lock 地址可能未对齐，触发 -Waddress-of-packed-member 警告
 struct flow_limit_state {
     __u64 tokens;              // 当前剩余令牌数 (Bytes)
     __u64 last_update_ns;      // 上次更新时间戳 (ns)
+    __u64 fractional;          // 分数令牌余数 (0 ~ 999,999,999)，消除整数截断误差
     struct bpf_spin_lock lock; // 自旋锁，保护多核并发读写
 };
 
@@ -87,8 +88,41 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);          // 不能用 LRU_HASH + bpf_spin_lock
     __type(key, __u32);                        // Key: dst_ip (网络字节序)
     __type(value, struct flow_limit_state);
-    __uint(max_entries, 262144);               // 256k 条目 (~6MB)
+    __uint(max_entries, 262144);               // 256k 条目 (~8MB)
 } egress_limits SEC(".maps");
+
+// ==========================================
+// 3.5 丢包事件上报配置与 RingBuf
+// ==========================================
+
+// egress 丢包事件 (上报到用户态)
+struct egress_drop_info {
+    __be32 dst_ip;          // 目标 IP (网络字节序)
+    __u32  pkt_len;         // 被丢弃的包大小 (Bytes)
+    __u64  tokens;          // 丢包时的令牌数 (用于诊断)
+    __u64  rate_bytes;      // 当时限速速率 (用于诊断)
+};
+
+// 丢包事件上报配置
+struct egress_drop_event_config {
+    __u32 enabled;          // 0=关闭, 1=开启
+    __u32 sample_rate;      // 采样率: 每 N 个丢包上报 1 个
+    __u32 padding[2];       // 对齐填充
+} __attribute__((packed));
+
+// 丢包事件配置 Map (ARRAY, key=0)
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, __u32);
+    __type(value, struct egress_drop_event_config);
+    __uint(max_entries, 1);
+} egress_drop_event_config SEC(".maps");
+
+// 丢包事件 RingBuf (上报到用户态)
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 20);  // 1MB buffer size
+} egress_drop_events SEC(".maps");
 
 // ==========================================
 // 4. 协议类型常量
@@ -140,6 +174,7 @@ int egress_limit(struct __sk_buff *skb)
         // 初始令牌给满 (使用全局配置的 burst 值)
         new_state.tokens = cfg->burst_bytes;
         new_state.last_update_ns = bpf_ktime_get_ns();
+        new_state.fractional = 0;
 
         // 尝试插入 (BPF_NOEXIST 防止覆盖正在使用的条目，处理多核竞争)
         bpf_map_update_elem(&egress_limits, &daddr, &new_state, BPF_NOEXIST);
@@ -171,8 +206,13 @@ int egress_limit(struct __sk_buff *skb)
     }
 
     // 令牌补充: rate 是 Bytes/s, 需要转换为 ns 级别
-    // 公式: add_tokens = delta_ns * rate / 1_000_000_000
-    __u64 add_tokens = delta_ns * rate / 1000000000ULL;
+    // 使用分数令牌追踪，消除整数除法截断误差
+    // 公式: ns_tokens = delta_ns * rate + fractional
+    //       add_tokens = ns_tokens / 1_000_000_000
+    //       fractional = ns_tokens % 1_000_000_000
+    __u64 ns_tokens = delta_ns * rate + val->fractional;
+    val->fractional = ns_tokens % 1000000000ULL;
+    __u64 add_tokens = ns_tokens / 1000000000ULL;
     val->tokens += add_tokens;
 
     // 钳位 (令牌数不超过 burst 上限)
@@ -181,15 +221,41 @@ int egress_limit(struct __sk_buff *skb)
     }
 
     int action = TC_ACT_SHOT; // 默认丢包
+    __u64 tokens_at_drop = 0; // 丢包时令牌数（临界区外上报用）
 
     // 判定是否放行
     if (val->tokens >= (__u64)pkt_len) {
         val->tokens -= (__u64)pkt_len;
         action = TC_ACT_OK;
+    } else {
+        tokens_at_drop = val->tokens; // 记录丢包时令牌数
     }
 
     val->last_update_ns = now;
     bpf_spin_unlock(&val->lock);
+
+    // --- 5. 丢包事件上报 (临界区外，可调用 helper 函数) ---
+    if (action == TC_ACT_SHOT) {
+        __u32 config_key = 0;
+        struct egress_drop_event_config *dcfg = bpf_map_lookup_elem(&egress_drop_event_config, &config_key);
+
+        if (dcfg && dcfg->enabled) {
+            __u32 sample_rate = dcfg->sample_rate;
+            if (sample_rate == 0)
+                sample_rate = 100; // 默认采样率，防止除零
+
+            __u32 random_val = bpf_get_prandom_u32();
+            if ((random_val % sample_rate) == 0) {
+                struct egress_drop_info drop_info = {
+                    .dst_ip = daddr,
+                    .pkt_len = pkt_len,
+                    .tokens = tokens_at_drop,
+                    .rate_bytes = rate,
+                };
+                bpf_ringbuf_output(&egress_drop_events, &drop_info, sizeof(drop_info), 0);
+            }
+        }
+    }
 
     return action;
 }
