@@ -1,11 +1,10 @@
 package handles
 
 import (
-	"strconv"
 	"time"
 
-	"rho-aias/internal/egresslog"
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/egresslog"
 	"rho-aias/internal/response"
 
 	"github.com/gin-gonic/gin"
@@ -63,70 +62,4 @@ func (h *EgressLogHandle) GetRecords(c *gin.Context) {
 		return
 	}
 	response.OK(c, result)
-}
-
-// GetStats 获取丢包统计
-// GET /api/egresslog/stats
-func (h *EgressLogHandle) GetStats(c *gin.Context) {
-	stats := h.egressLog.GetStats()
-	response.OK(c, stats)
-}
-
-// GetTopDroppedIPs 获取丢包 Top IP 列表
-// GET /api/egresslog/top-ips?limit=20
-func (h *EgressLogHandle) GetTopDroppedIPs(c *gin.Context) {
-	limit := 20
-	if l := c.Query("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
-			limit = parsed
-		}
-	}
-
-	topIPs := h.egressLog.GetTopIPs(limit)
-
-	response.OK(c, gin.H{
-		"top_dropped_ips": topIPs,
-	})
-}
-
-// GetHourlyTrend 获取丢包计数小时趋势
-// GET /api/egresslog/hourly-trend?hours=24
-func (h *EgressLogHandle) GetHourlyTrend(c *gin.Context) {
-	hours := 24
-	if h := c.Query("hours"); h != "" {
-		if parsed, err := strconv.Atoi(h); err == nil && parsed > 0 && parsed <= 720 {
-			hours = parsed
-		}
-	}
-
-	trend := h.egressLog.GetHourlyTrend(hours)
-
-	response.OK(c, gin.H{
-		"hours":       hours,
-		"hourly_data": trend,
-	})
-}
-
-// DropLogStatusResponse 丢包日志状态响应结构
-type DropLogStatusResponse struct {
-	Enabled    bool   `json:"enabled"`     // 是否启用
-	SampleRate uint32 `json:"sample_rate"` // 采样率
-}
-
-// GetDropLogStatus 获取丢包日志上报状态
-// GET /api/egresslog/drop-log-status
-func (h *EgressLogHandle) GetDropLogStatus(c *gin.Context) {
-	if h.tcEgress == nil {
-		response.OK(c, DropLogStatusResponse{Enabled: false, SampleRate: 0})
-		return
-	}
-	config, err := h.tcEgress.GetDropLogConfig()
-	if err != nil {
-		config = ebpfs.DefaultEgressDropEventConfig()
-	}
-
-	response.OK(c, DropLogStatusResponse{
-		Enabled:    config.Enabled == 1,
-		SampleRate: config.SampleRate,
-	})
 }

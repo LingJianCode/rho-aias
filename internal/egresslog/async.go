@@ -71,9 +71,6 @@ func NewAsyncWriter(config Config, db *gorm.DB, onRotate func(time.Time)) (*Asyn
 			if err := aw.statsStore.CleanupOldDayTables(defaultRetentionDays); err != nil {
 				logger.Warnf("[EgressLog] Daily cleanup of old tables failed: %v", err)
 			}
-			if err := aw.statsStore.CleanupOldHourlyData(defaultRetentionDays); err != nil {
-				logger.Warnf("[EgressLog] Daily cleanup of old hourly stats failed: %v", err)
-			}
 		}); err != nil {
 			return nil, fmt.Errorf("failed to add cleanup cron job: %w", err)
 		}

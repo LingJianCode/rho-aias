@@ -74,8 +74,6 @@ func (db *Database) AutoMigrateBusiness() error {
 		&models.DynamicConfig{},
 		&models.BlocklogHourlyStat{},
 		&models.BlocklogTopIP{},
-		&models.EgresslogHourlyStat{},
-		&models.EgresslogTopIP{},
 	); err != nil {
 		return err
 	}
