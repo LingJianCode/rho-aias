@@ -33,11 +33,11 @@ type RateLimitRuntime struct {
 // --- AnomalyDetection ---
 
 type AnomalyDetectionRuntime struct {
-	Enabled    bool              `json:"enabled" yaml:"enabled" validate:"required"`
-	MinPackets int               `json:"min_packets" yaml:"min_packets" validate:"gte=1,lte=100000"`
-	Ports      []int             `json:"ports" yaml:"ports" validate:"required,dive,gte=1,lte=65535"`
-	Baseline   BaselineRuntime   `json:"baseline" yaml:"baseline"`
-	Attacks    AttacksRuntime    `json:"attacks" yaml:"attacks"`
+	Enabled    bool            `json:"enabled" yaml:"enabled" validate:"required"`
+	MinPackets int             `json:"min_packets" yaml:"min_packets" validate:"gte=1,lte=100000"`
+	Ports      []int           `json:"ports" yaml:"ports" validate:"required,dive,gte=1,lte=65535"`
+	Baseline   BaselineRuntime `json:"baseline" yaml:"baseline"`
+	Attacks    AttacksRuntime  `json:"attacks" yaml:"attacks"`
 }
 
 type BaselineRuntime struct {
@@ -81,7 +81,7 @@ type GeoSourceRuntime struct {
 // --- Intel ---
 
 type IntelRuntime struct {
-	Enabled bool                        `json:"enabled" yaml:"enabled" validate:"required"`
+	Enabled bool                          `json:"enabled" yaml:"enabled" validate:"required"`
 	Sources map[string]IntelSourceRuntime `json:"sources,omitempty" yaml:"sources"`
 }
 
@@ -101,7 +101,7 @@ type BlocklogEventsRuntime struct {
 // --- EgressLimit ---
 
 type EgressLimitRuntime struct {
-	Enabled           bool    `json:"enabled" yaml:"enabled" validate:"required"`
+	Enabled           bool    `json:"enabled" yaml:"enabled"`
 	RateMbps          float64 `json:"rate_mbps" yaml:"rate_mbps" validate:"gt=0"`
 	BurstBytes        uint64  `json:"burst_bytes" yaml:"burst_bytes" validate:"gte=1"`
 	DropLogEnabled    bool    `json:"drop_log_enabled" yaml:"drop_log_enabled"`
