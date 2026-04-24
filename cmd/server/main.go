@@ -75,7 +75,7 @@ func main() {
 	go core.XDP.MonitorBlockLogEvents()
 
 	// 启动 TC Egress 限速程序（可选，不影响主流程）
-	if err := core.TcEgress.Start(); err != nil {
+	if err := core.TcEgress.Start(cfg.EgressLimit); err != nil {
 		logger.Warnf("[TcEgress] Failed to start: %v (continuing without egress rate limiting)", err)
 	}
 	go core.TcEgress.MonitorDropEvents()

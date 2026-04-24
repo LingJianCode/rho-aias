@@ -11,6 +11,7 @@ import (
 	"time"
 	"unsafe"
 
+	"rho-aias/internal/config"
 	"rho-aias/internal/logger"
 
 	"github.com/cilium/ebpf"
@@ -118,14 +119,15 @@ func NewTcEgress(interfaceName string) *TcEgress {
 }
 
 // Start 启动 TC egress 程序
-func (t *TcEgress) Start() error {
+// cfg: 启动时一次性写入 eBPF map 的配置，避免"先写默认值再覆盖"的时序风险
+func (t *TcEgress) Start(cfg config.EgressLimitConfig) error {
 	t.closeMu.Lock()
 	defer t.closeMu.Unlock()
-	return t.startInternal()
+	return t.startInternal(cfg)
 }
 
 // startInternal 启动逻辑（不含锁，供 Start 复用）
-func (t *TcEgress) startInternal() error {
+func (t *TcEgress) startInternal(cfg config.EgressLimitConfig) error {
 	iface, err := net.InterfaceByName(t.InterfaceName)
 	if err != nil {
 		return fmt.Errorf("failed to get interface %s: %w", t.InterfaceName, err)
@@ -143,15 +145,27 @@ func (t *TcEgress) startInternal() error {
 	}
 	t.objects = &ebpfObj
 
-	// 初始化默认配置（关闭状态）
-	if err := t.SetEgressLimitConfig(DefaultEgressLimitConfig()); err != nil {
+	// 一次性写入实际配置（不再使用 DefaultEgressLimitConfig）
+	rateBytes := uint64(cfg.RateMbps * 1000000 / 8)
+	egressCfg := EgressLimitConfig{
+		RateBytes:  rateBytes,
+		BurstBytes: cfg.BurstBytes,
+	}
+	if cfg.Enabled {
+		egressCfg.Enabled = 1
+	}
+	if err := t.SetEgressLimitConfig(egressCfg); err != nil {
 		t.closeResources()
-		return fmt.Errorf("failed to initialize default config: %w", err)
+		return fmt.Errorf("failed to initialize config: %w", err)
 	}
 
-	// 初始化默认丢包事件配置（关闭状态）
-	if err := t.SetDropLogConfig(false, 100); err != nil {
-		logger.Warnf("[TcEgress] Failed to initialize default drop log config: %v", err)
+	// 一次性写入丢包事件配置
+	dropSampleRate := cfg.DropLogSampleRate
+	if dropSampleRate == 0 {
+		dropSampleRate = 100
+	}
+	if err := t.SetDropLogConfig(cfg.DropLogEnabled, dropSampleRate); err != nil {
+		logger.Warnf("[TcEgress] Failed to initialize drop log config: %v", err)
 	}
 
 	// 创建 RingBuf reader
@@ -363,7 +377,7 @@ func (t *TcEgress) MonitorDropEvents() {
 func formatEgressDropIP(ipNetOrder uint32) string {
 	// 网络字节序 -> [4]byte -> netip.Addr
 	var ipBytes [4]byte
-	binary.BigEndian.PutUint32(ipBytes[:], ipNetOrder)
+	binary.LittleEndian.PutUint32(ipBytes[:], ipNetOrder)
 	addr := netip.AddrFrom4(ipBytes)
 	return addr.String()
 }
