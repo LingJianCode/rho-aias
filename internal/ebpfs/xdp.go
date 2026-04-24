@@ -220,7 +220,7 @@ func (x *Xdp) MonitorBlockLogEvents() {
 		dstIP := formatIP(pi.DstIP, uint16(pi.EthProto))
 		matchTypeStr := matchTypeToString(pi.MatchType)
 
-		logger.Infof("[XDP] Blocked packet - Src: %s, MatchType: %s", srcIP, matchTypeStr)
+		logger.Debugf("[XDP] Blocked packet - Src: %s, MatchType: %s", srcIP, matchTypeStr)
 
 		if x.callback != nil {
 			ruleSource := x.getRuleSourceFromPacket(pi.SrcIP, uint16(pi.EthProto), pi.MatchType)
