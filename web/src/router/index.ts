@@ -25,6 +25,7 @@ const routes: RouteRecordRaw[] = [
 
       // 日志
       { path: 'logs/blocklog', name: 'BlockLog', component: () => import('@/views/blocklog/BlockLogView.vue') },
+      { path: 'logs/egresslog', name: 'EgressLog', component: () => import('@/views/egresslog/EgressLogView.vue') },
       { path: 'logs/ban-records', name: 'BanRecords', component: () => import('@/views/ban-records/BanRecordsView.vue') },
 
 

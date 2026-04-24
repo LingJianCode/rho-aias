@@ -242,6 +242,38 @@
             </el-form-item>
           </el-form>
         </template>
+
+        <!-- Egress Limit -->
+        <template v-else-if="activeModule === 'egress_limit'">
+          <h3>Egress 限速</h3>
+          <el-form :model="egressLimit" label-width="140px" style="max-width: 600px">
+            <el-form-item label="启用状态">
+              <el-switch v-model="egressLimit.enabled" />
+            </el-form-item>
+            <el-form-item label="限速速率">
+              <el-input-number v-model="egressLimit.rate_mbps" :min="0.1" :max="100000" :step="1" :precision="1" style="width: 200px" @change="onRateMbpsChange" />
+              <span style="margin-left: 8px; color: var(--el-text-color-secondary)">Mbps</span>
+            </el-form-item>
+            <el-form-item label="突发上限">
+              <el-input-number v-model="egressLimit.burst_bytes" :min="1500" :max="1073741824" :step="1024" style="width: 200px" />
+              <span style="margin-left: 8px; color: var(--el-text-color-secondary)">{{ formatBurstBytes(egressLimit.burst_bytes) }}</span>
+              <div class="form-hint formula-hint">
+                计算公式: <code>burst_bytes = rate_mbps × 1,000,000 ÷ 8 × 2s</code> = <code>rate_mbps × 250,000</code> (TCP 友好缓冲)
+              </div>
+            </el-form-item>
+            <el-divider content-position="left">丢包日志</el-divider>
+            <el-form-item label="丢包日志开关">
+              <el-switch v-model="egressLimit.drop_log_enabled" />
+            </el-form-item>
+            <el-form-item label="采样率">
+              <el-slider v-model="egressLimit.drop_log_sample_rate" :min="1" :max="10000" show-input input-size="small" />
+              <div class="form-hint">每 N 个被丢弃的包采样 1 个记录日志，1 为全部记录</div>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="prepareSave('egress_limit', egressLimit)" :loading="saving">保存</el-button>
+            </el-form-item>
+          </el-form>
+        </template>
       </div>
     </el-card>
 
@@ -341,6 +373,13 @@ const fieldLabels: Record<string, Record<string, string>> = {
   blocklog_events: {
     enabled: '启用状态',
     sample_rate: '采样率(%)',
+  },
+  egress_limit: {
+    enabled: '启用状态',
+    rate_mbps: '限速速率(Mbps)',
+    burst_bytes: '突发上限(Bytes)',
+    drop_log_enabled: '丢包日志开关',
+    drop_log_sample_rate: '采样率',
   },
 }
 
@@ -485,6 +524,9 @@ function takeSnapshot(module: ConfigModuleName) {
     case 'blocklog_events':
       originalSnapshot.value[module] = JSON.parse(JSON.stringify(blocklogEvents))
       break
+    case 'egress_limit':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(egressLimit))
+      break
   }
 }
 
@@ -496,6 +538,7 @@ const modules: { key: ConfigModuleName; label: string }[] = [
   { key: 'geo_blocking', label: '地域封禁' },
   { key: 'intel', label: '威胁情报' },
   { key: 'blocklog_events', label: 'XDP 上报' },
+  { key: 'egress_limit', label: 'Egress 限速' },
 ]
 
 const failguard = reactive({ enabled: false, max_retry: 5, find_time: 600, ban_duration: 3600, mode: 'normal' as string })
@@ -518,6 +561,18 @@ const attackLabels: Record<string, string> = {
 const geo = reactive({ enabled: false, mode: 'whitelist' as string, allowed_countries: [] as string[], sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
 const intel = reactive({ enabled: false, sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
 const blocklogEvents = reactive({ enabled: false, sample_rate: 100 })
+const egressLimit = reactive({ enabled: false, rate_mbps: 1.0, burst_bytes: 250000, drop_log_enabled: false, drop_log_sample_rate: 100 })
+
+function formatBurstBytes(bytes: number): string {
+  if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB'
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB'
+  if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB'
+  return bytes + ' B'
+}
+
+function onRateMbpsChange() {
+  egressLimit.burst_bytes = Math.round(egressLimit.rate_mbps * 250000)
+}
 
 const countryOptions = [
   { code: 'CN', name: '中国', flag: '\u{1F1E8}\u{1F1F3}' }, { code: 'US', name: '美国', flag: '\u{1F1FA}\u{1F1F8}' },
@@ -551,6 +606,15 @@ async function loadModuleConfig(module: ConfigModuleName) {
     else if (module === 'geo_blocking') Object.assign(geo, { enabled: data.enabled, mode: data.mode || 'whitelist', allowed_countries: data.allowed_countries || [], sources: data.sources || {} })
     else if (module === 'intel') Object.assign(intel, { enabled: data.enabled, sources: data.sources || {} })
     else if (module === 'blocklog_events') Object.assign(blocklogEvents, { enabled: data.enabled, sample_rate: data.sample_rate ?? 100 })
+    else if (module === 'egress_limit') {
+      Object.assign(egressLimit, {
+        enabled: data.enabled ?? false,
+        rate_mbps: data.rate_mbps ?? 1.0,
+        burst_bytes: data.burst_bytes ?? 250000,
+        drop_log_enabled: data.drop_log_enabled ?? false,
+        drop_log_sample_rate: data.drop_log_sample_rate ?? 100,
+      })
+    }
 
     // 加载完成后快照原始值
     takeSnapshot(module)
@@ -627,6 +691,20 @@ onMounted(() => loadModuleConfig(activeModule.value))
   font-size: 12px;
   color: var(--el-text-color-secondary);
   margin-top: 4px;
+}
+
+.formula-hint {
+  code {
+    background: var(--el-fill-color-light);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+    color: var(--el-color-primary);
+  }
+
+  strong {
+    color: var(--el-color-success);
+  }
 }
 
 /* ---- 确认对话框样式 ---- */

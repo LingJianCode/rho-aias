@@ -264,7 +264,7 @@ export interface DashboardStats {
 // 统一配置（运行时热更新）
 // ============================================
 
-export type ConfigModuleName = 'failguard' | 'waf' | 'rate_limit' | 'anomaly_detection' | 'geo_blocking' | 'intel' | 'blocklog_events'
+export type ConfigModuleName = 'failguard' | 'waf' | 'rate_limit' | 'anomaly_detection' | 'geo_blocking' | 'intel' | 'blocklog_events' | 'egress_limit'
 
 export interface FailGuardConfig {
   enabled?: boolean
@@ -327,4 +327,35 @@ export interface IntelSourceRuntimeConfig {
 export interface IntelRuntimeConfig {
   enabled?: boolean
   sources?: Record<string, IntelSourceRuntimeConfig>
+}
+
+// ============================================
+// Egress 丢包日志
+// ============================================
+
+export interface EgressLogRecord {
+  timestamp: number
+  dst_ip: string
+  pkt_len: number
+  tokens: number
+  rate_bytes: number
+}
+
+export interface EgressLogListResponse {
+  records: EgressLogRecord[]
+  total: number
+  page: number
+  page_size: number
+}
+
+// ============================================
+// Egress 限速配置
+// ============================================
+
+export interface EgressLimitRuntimeConfig {
+  enabled?: boolean
+  rate_mbps?: number
+  burst_bytes?: number
+  drop_log_enabled?: boolean
+  drop_log_sample_rate?: number
 }

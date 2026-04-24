@@ -34,6 +34,7 @@
             <span>日志</span>
           </template>
           <el-menu-item index="/logs/blocklog">阻断日志</el-menu-item>
+          <el-menu-item index="/logs/egresslog">Egress 日志</el-menu-item>
           <el-menu-item index="/logs/ban-records">封禁记录</el-menu-item>
         </el-sub-menu>
         <el-sub-menu index="settings" v-if="authStore.isAdmin || true">
