@@ -138,9 +138,6 @@ func loadDynamicConfigFromDB(svc *services.DynamicConfigService, cfg *config.Con
 		cfg.EgressLimit.BurstBytes = egressLimit.BurstBytes
 		cfg.EgressLimit.DropLogEnabled = egressLimit.DropLogEnabled
 		cfg.EgressLimit.DropLogSampleRate = egressLimit.DropLogSampleRate
-		// 写入运行时扩展字段，供 LoadCachedRules 恢复 eBPF 丢包日志配置
-		cfg.EgressLimit.DropLogEnabledRuntime = egressLimit.DropLogEnabled
-		cfg.EgressLimit.DropLogSampleRateRuntime = egressLimit.DropLogSampleRate
 		loaded["egress_limit"] = fmt.Sprintf("enabled=%v, rate=%.1f, burst=%d, drop_log=%v, drop_sample_rate=%d",
 			egressLimit.Enabled, egressLimit.RateMbps, egressLimit.BurstBytes,
 			egressLimit.DropLogEnabled, egressLimit.DropLogSampleRate)

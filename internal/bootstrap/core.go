@@ -155,16 +155,16 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 		}
 	}
 
-	// 恢复 egress_limit 动态配置（由 loadDynamicConfigFromDB 写入 cfg.EgressLimit 扩展字段）
+	// 恢复 egress_limit 动态配置（YAML 默认 → DB 覆盖，统一写入 cfg.EgressLimit 主字段）
 	if c.TcEgress != nil {
 		if cfg.EgressLimit.Enabled || cfg.EgressLimit.RateMbps > 0 {
+			rateBytes := uint64(cfg.EgressLimit.RateMbps * 1000000 / 8)
 			egressCfg := ebpfs.EgressLimitConfig{
-				Enabled:    0,
+				RateBytes:  rateBytes,
 				BurstBytes: cfg.EgressLimit.BurstBytes,
 			}
 			if cfg.EgressLimit.Enabled {
 				egressCfg.Enabled = 1
-				egressCfg.RateBytes = uint64(cfg.EgressLimit.RateMbps * 1000000 / 8)
 			}
 			if err := c.TcEgress.SetEgressLimitConfig(egressCfg); err != nil {
 				logger.Warnf("[EgressLimit] Failed to restore config: %v", err)
@@ -174,17 +174,17 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 			}
 		}
 
-		// 恢复丢包日志配置
-		if cfg.EgressLimit.DropLogEnabledRuntime || cfg.EgressLimit.DropLogSampleRateRuntime > 0 {
-			sampleRate := cfg.EgressLimit.DropLogSampleRateRuntime
+		// 恢复丢包日志配置（使用主字段，YAML 和 DB 都写入此处）
+		if cfg.EgressLimit.DropLogEnabled || cfg.EgressLimit.DropLogSampleRate > 0 {
+			sampleRate := cfg.EgressLimit.DropLogSampleRate
 			if sampleRate == 0 {
 				sampleRate = 100
 			}
-			if err := c.TcEgress.SetDropLogConfig(cfg.EgressLimit.DropLogEnabledRuntime, sampleRate); err != nil {
+			if err := c.TcEgress.SetDropLogConfig(cfg.EgressLimit.DropLogEnabled, sampleRate); err != nil {
 				logger.Warnf("[EgressLimit] Failed to restore drop log config: %v", err)
 			} else {
 				logger.Infof("[EgressLimit] Restored drop log config: enabled=%v, sample_rate=%d",
-					cfg.EgressLimit.DropLogEnabledRuntime, sampleRate)
+					cfg.EgressLimit.DropLogEnabled, sampleRate)
 			}
 		}
 	}

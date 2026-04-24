@@ -141,7 +141,7 @@ egress_limit:
   burst_bytes: 12500              # 突发上限 (Bytes)，约 100ms 缓冲（1Mbps 下推荐值）
   # 丢包日志配置（参考 blocklog 模式，通过 RingBuf 上报 → Go 回调 → 异步写入 SQLite）
   drop_log_enabled: true          # 丢包日志开关，开启后限速丢包会上报到控制面
-  drop_log_sample_rate: 10        # 采样率: 每 N 个丢包上报 1 个 (例: 10 = 10% 上报率)
+  drop_log_sample_rate: 1         # 采样率: 每 N 个丢包上报 1 个 (例: 10 = 10% 上报率)
 
 # 异常流量检测系统配置
 # 检测流程：每个 check_interval 对每个 IP 依次执行：

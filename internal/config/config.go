@@ -111,9 +111,9 @@ type APIKeyConfig struct {
 
 // BlockLogConfig 阻断日志配置（始终持久化）
 type BlockLogConfig struct {
-	BufferSize    int            `yaml:"buffer_size"`       // 异步写入缓冲区大小
-	FlushInterval int            `yaml:"flush_interval"`    // 刷盘间隔（秒）
-	GeoEnrich     GeoEnrichConfig `yaml:"geo_enrich"`       // IP 归属地补全配置
+	BufferSize    int             `yaml:"buffer_size"`    // 异步写入缓冲区大小
+	FlushInterval int             `yaml:"flush_interval"` // 刷盘间隔（秒）
+	GeoEnrich     GeoEnrichConfig `yaml:"geo_enrich"`     // IP 归属地补全配置
 
 	// 以下字段由动态配置恢复写入（非 YAML），供 LoadCachedRules 恢复 eBPF 事件上报配置
 	EventsEnabled    bool   `yaml:"-"`
@@ -173,7 +173,7 @@ type AnomalyDetectionConfig struct {
 // BaselineConfig IQR 基线检测配置
 type BaselineConfig struct {
 	MinSampleCount int     `yaml:"min_sample_count" json:"min_sample_count"` // 最小样本数
-	IQRMultiplier  float64 `yaml:"iqr_multiplier" json:"iqr_multiplier"`    // IQR 倍数
+	IQRMultiplier  float64 `yaml:"iqr_multiplier" json:"iqr_multiplier"`     // IQR 倍数
 	MinThreshold   int     `yaml:"min_threshold" json:"min_threshold"`       // 最小 PPS 阈值
 	MaxAge         int     `yaml:"max_age" json:"max_age"`                   // 基线最大年龄（秒）
 	BlockDuration  int     `yaml:"block_duration" json:"block_duration"`     // 封禁时长（秒）
@@ -197,15 +197,11 @@ type AttackConfig struct {
 
 // EgressLimitConfig Egress 限速配置
 type EgressLimitConfig struct {
-	Enabled         bool    `yaml:"enabled" json:"enabled"`                    // 总开关
-	RateMbps        float64 `yaml:"rate_mbps" json:"rate_mbps"`               // 限速速率 (Mbps)
-	BurstBytes      uint64  `yaml:"burst_bytes" json:"burst_bytes"`            // 突发上限 (Bytes)
-	DropLogEnabled  bool    `yaml:"drop_log_enabled" json:"drop_log_enabled"`  // 丢包日志开关
-	DropLogSampleRate uint32 `yaml:"drop_log_sample_rate" json:"drop_log_sample_rate"` // 丢包日志采样率
-
-	// 以下字段由动态配置恢复写入（非 YAML），供 LoadCachedRules 恢复 eBPF 事件上报配置
-	DropLogEnabledRuntime  bool   `yaml:"-"`
-	DropLogSampleRateRuntime uint32 `yaml:"-"`
+	Enabled           bool    `yaml:"enabled" json:"enabled"`                           // 总开关
+	RateMbps          float64 `yaml:"rate_mbps" json:"rate_mbps"`                       // 限速速率 (Mbps)
+	BurstBytes        uint64  `yaml:"burst_bytes" json:"burst_bytes"`                   // 突发上限 (Bytes)
+	DropLogEnabled    bool    `yaml:"drop_log_enabled" json:"drop_log_enabled"`         // 丢包日志开关
+	DropLogSampleRate uint32  `yaml:"drop_log_sample_rate" json:"drop_log_sample_rate"` // 丢包日志采样率
 }
 
 func NewConfig(fileName string) (*Config, error) {
@@ -307,9 +303,9 @@ func applyDefaults(config *Config) {
 	applyAttackDefaults(&config.AnomalyDetection.Attacks.AckFlood, 0.8, 60, 1000)
 
 	// EgressLimit 默认值
-	setIfZeroFloat(&config.EgressLimit.RateMbps, 100.0)   // 默认 100Mbps
-	setIfZero(&config.EgressLimit.BurstBytes, 125000)      // 默认 125KB (约 10ms 缓冲)
-	setIfZero(&config.EgressLimit.DropLogSampleRate, 100)  // 默认采样率 1/100
+	setIfZeroFloat(&config.EgressLimit.RateMbps, 1.0)
+	setIfZero(&config.EgressLimit.BurstBytes, 12500)
+	setIfZero(&config.EgressLimit.DropLogSampleRate, 1)
 }
 
 // setIfZero 当 *v 为零值时设为 def
