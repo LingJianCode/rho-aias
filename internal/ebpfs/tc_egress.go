@@ -32,9 +32,9 @@ type EgressLimitConfig struct {
 // DefaultEgressLimitConfig 返回默认限速配置
 func DefaultEgressLimitConfig() EgressLimitConfig {
 	return EgressLimitConfig{
-		Enabled:    0, // 默认关闭
-		RateBytes:  12500000, // 100Mbps (100 * 10^6 / 8)
-		BurstBytes: 125000,   // 125KB (约 10ms 缓冲)
+		Enabled:    0,          // 默认关闭
+		RateBytes:  12500000,   // 100Mbps (100 * 10^6 / 8)
+		BurstBytes: 25000000,   // 25MB (约 2s 缓冲，TCP 友好)
 	}
 }
 

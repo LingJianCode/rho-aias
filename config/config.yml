@@ -134,11 +134,11 @@ egress_limit:
   # burst_bytes: 令牌桶突发上限 (Bytes)
   # 1,000,000 是 Mbps 到 bps (bits per second) 的换算系数，网络带宽领域惯例使用十进制 Mbps，这与存储容量（如内存、磁盘常用 MiB/GiB）的惯例不同
   # 公式: burst_bytes = rate_mbps × 1,000,000 / 8 × burst_time_seconds
-  #   其中 burst_time_seconds 为期望的突发缓冲时长 (推荐 10ms~100ms)
+  #   其中 burst_time_seconds 为期望的突发缓冲时长 (推荐 1s~2s，TCP 友好)
   # 下限: >= 1500 (至少容纳一个 MTU 包，否则所有包都会被丢弃)
-  # 上限: <= rate_mbps × 12,500 (eBPF 侧补票窗口上限 100ms，超过则令牌自然补满，无实际意义)
-  #   例: 100Mbps → 上限 1,250,000 bytes; 1Mbps → 上限 12,500 bytes
-  burst_bytes: 12500              # 突发上限 (Bytes)，约 100ms 缓冲（1Mbps 下推荐值）
+  # 上限: <= rate_mbps × 2,500,000 (eBPF 侧补票窗口上限 2s，超过则令牌自然补满，无实际意义)
+  #   例: 100Mbps → 上限 250,000,000 bytes; 1Mbps → 上限 2,500,000 bytes
+  burst_bytes: 250000              # 突发上限 (Bytes)，约 2s 缓冲（1Mbps 下推荐值）
   # 丢包日志配置（参考 blocklog 模式，通过 RingBuf 上报 → Go 回调 → 异步写入 SQLite）
   drop_log_enabled: true          # 丢包日志开关，开启后限速丢包会上报到控制面
   drop_log_sample_rate: 1         # 采样率: 每 N 个丢包上报 1 个 (例: 10 = 10% 上报率)

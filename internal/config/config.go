@@ -304,7 +304,7 @@ func applyDefaults(config *Config) {
 
 	// EgressLimit 默认值
 	setIfZeroFloat(&config.EgressLimit.RateMbps, 1.0)
-	setIfZero(&config.EgressLimit.BurstBytes, 12500)
+	setIfZero(&config.EgressLimit.BurstBytes, 250000)
 	setIfZero(&config.EgressLimit.DropLogSampleRate, 1)
 }
 

@@ -21,7 +21,7 @@
  * - IPv4 分片: 处理首片和非首片（非首片无法获取端口信息，但令牌桶逻辑一致）
  * - 边界检查: 所有指针访问前进行边界验证
  * - 协议检查: 仅处理 TCP（可扩展）
- * - 溢出保护: delta_ns 截断至 100ms 防止乘法溢出
+ * - 溢出保护: delta_ns 截断至 2s 防止乘法溢出
  *
  * 依赖:
  * - 内核 5.1+ (bpf_spin_lock)
@@ -199,10 +199,12 @@ int egress_limit(struct __sk_buff *skb)
 
     __u64 delta_ns = now - val->last_update_ns;
 
-    // [防溢出补丁] 限制最大补票窗口为 100ms
+    // [防溢出补丁] 限制最大补票窗口为 2s
     // 防止长时间空闲后 delta_ns 过大导致乘法溢出
-    if (delta_ns > 100000000ULL) {
-        delta_ns = 100000000ULL;
+    // 2s 上限允许 TCP 在丢包恢复后有足够的令牌池重建 CWND
+    // 乘法安全性验证: 2e9 * 1.25e8 (200Mbps) = 2.5e17, 远小于 u64 最大值 1.8e19
+    if (delta_ns > 2000000000ULL) {
+        delta_ns = 2000000000ULL;
     }
 
     // 令牌补充: rate 是 Bytes/s, 需要转换为 ns 级别

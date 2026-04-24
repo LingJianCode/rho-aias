@@ -343,7 +343,7 @@ func (h *ConfigHandle) getEgressLimitRuntimeConfig() map[string]interface{} {
 		return map[string]interface{}{
 			"enabled":              false,
 			"rate_mbps":            100.0,
-			"burst_bytes":          125000,
+			"burst_bytes":          25000000,
 			"drop_log_enabled":     false,
 			"drop_log_sample_rate": 100,
 		}
