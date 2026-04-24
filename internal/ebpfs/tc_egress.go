@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	"rho-aias/internal/config"
+	"rho-aias/internal/kernel"
 	"rho-aias/internal/logger"
 
 	"github.com/cilium/ebpf"
@@ -19,6 +20,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/robfig/cron/v3"
+	netlink "github.com/vishvananda/netlink"
 )
 
 // EgressLimitConfig 限速配置结构体 (与 eBPF 侧 egress_limit_config 对齐)
@@ -123,6 +125,12 @@ func NewTcEgress(interfaceName string) *TcEgress {
 func (t *TcEgress) Start(cfg config.EgressLimitConfig) error {
 	t.closeMu.Lock()
 	defer t.closeMu.Unlock()
+
+	// 清理残留 TC 程序（仅 netlink TC 路径，内核 < 6.6）
+	if err := t.cleanupStaleTC(); err != nil {
+		return fmt.Errorf("cleanup stale TC: %w", err)
+	}
+
 	return t.startInternal(cfg)
 }
 
@@ -244,6 +252,40 @@ func (t *TcEgress) closeResources() {
 	}
 }
 
+// cleanupStaleTC 清理指定网卡上可能残留的 egress TC 过滤规则
+// 仅处理 netlink TC 路径（内核 < 6.6），TCX 路径无需清理
+func (t *TcEgress) cleanupStaleTC() error {
+	// 检查内核版本，>= 6.6 使用 TCX，无需清理 netlink TC
+	kv, err := kernel.GetKernelVersion()
+	if err != nil {
+		return fmt.Errorf("get kernel version: %w", err)
+	}
+	if kv.AtLeast(kernel.Version{Major: 6, Minor: 6}) {
+		return nil
+	}
+
+	// 获取网卡 netlink link
+	link, err := netlink.LinkByName(t.InterfaceName)
+	if err != nil {
+		return fmt.Errorf("lookup interface %s: %w", t.InterfaceName, err)
+	}
+
+	// 列出 egress 方向 filter，找到 Priority==1 的残留
+	filters, err := netlink.FilterList(link, netlink.HANDLE_MIN_EGRESS)
+	if err != nil {
+		return fmt.Errorf("list egress filters on %s: %w", t.InterfaceName, err)
+	}
+	for _, f := range filters {
+		if bf, ok := f.(*netlink.BpfFilter); ok && bf.Priority == 1 {
+			if err := netlink.FilterDel(bf); err != nil {
+				return fmt.Errorf("delete stale egress filter on %s: %w", t.InterfaceName, err)
+			}
+			logger.Infof("[TcEgress] Stale egress filter cleaned from %s", t.InterfaceName)
+		}
+	}
+	return nil
+}
+
 // SetEgressLimitConfig 设置限速配置
 func (t *TcEgress) SetEgressLimitConfig(cfg EgressLimitConfig) error {
 	t.mapMu.Lock()
@@ -331,6 +373,10 @@ func (t *TcEgress) SetDropCallback(callback EgressDropCallback) {
 
 // MonitorDropEvents 监控丢包事件 (应在独立 goroutine 中运行)
 func (t *TcEgress) MonitorDropEvents() {
+	if t.dropReader == nil {
+		logger.Warn("[TcEgress] dropReader is nil, skipping MonitorDropEvents")
+		return
+	}
 	logger.Info("[TcEgress] MonitorDropEvents started")
 	for {
 		select {

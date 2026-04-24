@@ -77,8 +77,9 @@ func main() {
 	// 启动 TC Egress 限速程序（可选，不影响主流程）
 	if err := core.TcEgress.Start(cfg.EgressLimit); err != nil {
 		logger.Warnf("[TcEgress] Failed to start: %v (continuing without egress rate limiting)", err)
+	} else {
+		go core.TcEgress.MonitorDropEvents()
 	}
-	go core.TcEgress.MonitorDropEvents()
 
 	// 加载持久化的缓存规则到 eBPF map（必须在 Start 之后）
 	core.LoadCachedRules(cfg)
