@@ -163,6 +163,23 @@ int egress_limit(struct __sk_buff *skb)
     if (iph->protocol != IPPROTO_TCP)
         return TC_ACT_OK;
 
+    // --- 新增：解析 TCP 头部以排除本机主动发起的流量 ---
+    struct tcphdr *tcph = (void *)iph + (iph->ihl * 4);
+    if ((void *)tcph + sizeof(struct tcphdr) > data_end) {
+        return TC_ACT_OK;
+    }
+
+    __u16 source_port = bpf_ntohs(tcph->source);
+
+    /* 
+     * 排除临时端口范围 (推荐)
+     * 只要源端口大于 32768，通常意味着这是本机 curl/scp 等程序随机申请的客户端端口。
+     * 这样就不会影响本机作为客户端的上传行为。
+     */
+    if (source_port >= 32768) {
+        return TC_ACT_OK;
+    }
+
     // --- 3. 查表与懒加载初始化 ---
     __u32 daddr = iph->daddr;
     struct flow_limit_state *val = bpf_map_lookup_elem(&egress_limits, &daddr);
