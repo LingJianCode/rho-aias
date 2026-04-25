@@ -9,6 +9,36 @@ import './styles/variables.scss'
 import './styles/dark.scss'
 import './styles/global.scss'
 
+const userAgent = navigator.userAgent
+const isEdge = /Edg\//.test(userAgent)
+
+if (isEdge) {
+  const rawReplaceState = window.history.replaceState.bind(window.history)
+  const rawPushState = window.history.pushState.bind(window.history)
+
+  const shouldSkipHistoryStateUpdate = (state: unknown): boolean => {
+    return document.visibilityState === 'hidden' && state != null
+  }
+
+  window.history.replaceState = function (
+    state: unknown,
+    unused: string,
+    url?: string | URL | null
+  ): void {
+    if (shouldSkipHistoryStateUpdate(state)) return
+    rawReplaceState(state, unused, url)
+  }
+
+  window.history.pushState = function (
+    state: unknown,
+    unused: string,
+    url?: string | URL | null
+  ): void {
+    if (shouldSkipHistoryStateUpdate(state)) return
+    rawPushState(state, unused, url)
+  }
+}
+
 const app = createApp(App)
 
 // Register Element Plus icons
