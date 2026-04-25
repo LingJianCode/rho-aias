@@ -167,7 +167,7 @@ tc filter del dev ens33 egress pref 1
 ## 重启网卡
 
 ```bash
-# debain12
+# debian12
 systemctl restart networking.service
 # or
 ip link set ens33 down && ip link set ens33 up
