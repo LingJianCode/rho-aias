@@ -49,14 +49,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
-import { formatDateTime, formatNumber } from '@/utils/format'
-
-function formatNanoTimestamp(ts: number | string): string {
-  if (typeof ts === 'number') {
-    return formatDateTime(new Date(ts / 1e6).toISOString())
-  }
-  return formatDateTime(ts)
-}
+import { formatNumber } from '@/utils/format'
 // 统计与趋势
 import { getBlockLogStats,  getBlockedTopIPs, getHourlyTrend } from '@/api/blocklog'
 import type { BlockLog } from '@/types/api'

@@ -114,14 +114,7 @@ import { DataLine, Connection } from '@element-plus/icons-vue'
 import StatsCard from '@/components/StatsCard.vue'
 import RuleSourceTag from '@/components/RuleSourceTag.vue'
 import CountryFlag from '@/components/CountryFlag.vue'
-import { formatDateTime, formatBytes } from '@/utils/format'
-
-function formatNanoTimestamp(ts: number | string): string {
-  if (typeof ts === 'number') {
-    return formatDateTime(new Date(ts / 1e6).toISOString())
-  }
-  return formatDateTime(ts)
-}
+import { formatNanoTimestamp, formatBytes } from '@/utils/format'
 import { useConfirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import { getBlockLogs, getBlockLogStats } from '@/api/blocklog'

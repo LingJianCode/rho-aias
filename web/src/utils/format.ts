@@ -11,6 +11,13 @@ export function formatDateTime(dateStr: string): string {
   })
 }
 
+export function formatNanoTimestamp(timestamp: number | string): string {
+  if (typeof timestamp === 'number') {
+    return formatDateTime(new Date(timestamp / 1e6).toISOString())
+  }
+  return formatDateTime(timestamp)
+}
+
 export function formatDate(dateStr: string): string {
   if (!dateStr) return '-'
   const date = new Date(dateStr)

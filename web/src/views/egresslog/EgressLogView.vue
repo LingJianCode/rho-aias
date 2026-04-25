@@ -76,18 +76,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { formatBytes, formatNumber } from '@/utils/format'
-
-function formatNanoTimestamp(ts: number | string): string {
-  if (typeof ts === 'number') {
-    const date = new Date(ts / 1e6)
-    return date.toLocaleString('zh-CN', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    })
-  }
-  return String(ts)
-}
+import { formatBytes, formatNanoTimestamp, formatNumber } from '@/utils/format'
 
 function formatRate(bytesPerSec: number): string {
   if (!bytesPerSec) return '-'
@@ -129,10 +118,7 @@ async function fetchLogs() {
       page: page.value,
       page_size: pageSize.value,
     })
-    logs.value = res.data.records.map((r: any) => ({
-      ...r,
-      timestamp: typeof r.timestamp === 'number' ? new Date(r.timestamp / 1e6).toISOString() : r.timestamp,
-    }))
+    logs.value = res.data.records
     total.value = res.data.total
   } catch {
     logs.value = []
