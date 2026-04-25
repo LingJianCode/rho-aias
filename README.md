@@ -159,5 +159,16 @@ apt install make llvm clang libbpf-dev
 ```bash
 tc filter show dev ens33 egress
 
- tc filter del dev ens33 egress pref 1
+tc filter del dev ens33 egress pref 1
+
+# tc qdisc del dev ens33 root
+```
+
+## 重启网卡
+
+```bash
+# debain12
+systemctl status networking.service
+# or
+ip link set ens33 down && ip link set ens33 up
 ```
