@@ -168,7 +168,7 @@ tc filter del dev ens33 egress pref 1
 
 ```bash
 # debain12
-systemctl status networking.service
+systemctl restart networking.service
 # or
 ip link set ens33 down && ip link set ens33 up
 ```
