@@ -26,6 +26,7 @@
 - **频率限制联动**：监控 Rate Limit 日志，高频请求自动封禁
 - **RESTful API**：完整的管理接口（JWT 认证 + RBAC 权限控制）
 - **持久化存储**：规则自动落盘，支持离线启动
+- **服务器上行限速**：限制网站出口流量速度
 
 ## 快速开始
 
@@ -39,6 +40,31 @@
 | 网卡 | 需确认本机网卡名称（如 `ens33`、`eth0`） |
 
 > ⚠️ 本项目依赖 eBPF XDP 技术，**仅支持 Linux 系统**，不支持 macOS / Windows。
+
+### 使用预构建镜像部署
+
+> 使用`git clone https://cnb.cool/MakeCNBGreatAgain/rho-aias`命令克隆代码后直接在项目目录下执行
+
+```bash
+# 修改监听的网卡名称`interface_name: ens33`
+vim config/config.yml
+
+# 直接启动（拉取预构建镜像）,默认账号密码：admin/admin123
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+```
+
+### 从源码构建部署
+
+```bash
+# 从源码构建并启动
+docker compose -f docker-compose-build-run.yml up -d --build
+
+# 查看日志
+docker compose -f docker-compose-build-run.yml logs -f
+```
 
 ### WAF IP 封禁清理机制
 
@@ -82,28 +108,6 @@ WAF 模块通过监控 Caddy + Coraza WAF 日志和 Rate Limit 日志，自动�
 
 > **后续计划**：未来版本可能支持启动时从数据库恢复 active 记录到 eBPF map。
 
-### 使用预构建镜像部署
-
-> 克隆代码后直接在项目目录下执行
-
-```bash
-# 直接启动（拉取预构建镜像）,默认账号密码：admin/admin123
-docker compose up -d
-
-# 查看日志
-docker compose logs -f
-```
-
-### 从源码构建部署
-
-```bash
-# 从源码构建并启动
-docker compose -f docker-compose-build-run.yml up -d --build
-
-# 查看日志
-docker compose -f docker-compose-build-run.yml logs -f
-```
-
 ## 安全说明
 
 - **rho-aias** 容器使用最小权限能力（`CAP_BPF`、`CAP_PERFMON`、`CAP_NET_ADMIN`、`CAP_NET_RAW`），不使用 privileged 模式
@@ -112,16 +116,7 @@ docker compose -f docker-compose-build-run.yml logs -f
 
 ## 动态配置
 
-系统支持运行时通过 API 热更新以下 6 个模块的核心参数，无需重启服务：
-
-| 模块 | 配置项 | 说明 |
-|------|--------|------|
-| `failguard` | `enabled`, `max_retry`, `find_time`, `ban_duration`, `mode` | SSH 防爆破 |
-| `waf` | `enabled`, `ban_duration` | WAF 日志监控 |
-| `rate_limit` | `enabled`, `ban_duration` | 频率限制联动 |
-| `anomaly_detection` | `enabled`, `min_packets`, `ports`, `baseline`, `attacks` | 异常流量检测 |
-| `geo_blocking` | `enabled`, `mode`, `allowed_countries` | 地域封禁 |
-| `intel` | `enabled`, `sources.{name}` | 威胁情报 |
+系统支持运行时通过 API 热更新核心参数，无需重启服务，支持配置请查看防护策略配置页面
 
 > ⚠️ **重要：动态配置优先级高于 `config.yml`**
 >
