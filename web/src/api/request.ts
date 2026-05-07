@@ -16,16 +16,23 @@ let isRefreshing = false
 // 因 Token 过期导致的请求等待队列
 const waitingQueue: (() => void)[] = []
 
+// 防止多个并发 401 导致重复弹通知和跳转
+let isRedirecting = false
+
 // 处理会话过期
 async function handleSessionExpired() {
+  if (isRedirecting) return
   if (router.currentRoute.value.path === '/login') return
+
+  isRedirecting = true
   ElNotification({
     title: '提示',
     message: '您的会话已过期，请重新登录',
     type: 'info',
   })
   clearAuth()
-  router.push('/login')
+  // 使用 replace 而非 push，避免用户按后退键回到过期页面
+  router.replace('/login')
 }
 
 // 刷新 Token 处理：将请求加入等待队列，仅由首个请求触发刷新
