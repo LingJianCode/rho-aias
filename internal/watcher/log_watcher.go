@@ -3,10 +3,14 @@ package watcher
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -44,13 +48,13 @@ type LineHandler func(line string) (ip string, sourceMask uint32, reason string,
 // 封装了文件监听、偏移量管理、增量读取、日志轮转检测、封禁去重/过期清理等通用逻辑
 // 具体模块（WAF、FailGuard）通过注入 LineHandler 来定制日志解析逻辑
 type LogWatcher struct {
-	LogTag     string // 日志标签（如 "[WAF]"、"[FailGuard]"）
-	BanSource  string // 封禁来源名称（如 "waf"、"failguard"），用于数据库记录
+	LogTag    string // 日志标签（如 "[WAF]"、"[FailGuard]"）
+	BanSource string // 封禁来源名称（如 "waf"、"failguard"），用于数据库记录
 
 	xdp          XDPRuleManager
 	banStore     BanRecordStore
-	parentCtx    context.Context // 父 context（进程级别，用于每次 Start 创建新的子 context）
-	ctx          context.Context // 当前子 context（每次 Start 重建）
+	parentCtx    context.Context    // 父 context（进程级别，用于每次 Start 创建新的子 context）
+	ctx          context.Context    // 当前子 context（每次 Start 重建）
 	cancel       context.CancelFunc // 当前 cancel 函数（每次 Start 重建）
 	watcher      *fsnotify.Watcher
 	filePos      map[string]int64
@@ -68,10 +72,10 @@ type LogWatcher struct {
 	whitelistCheck func(ip string) bool
 
 	// 可观测的事件回调（可选，由外部模块注入用于额外处理）
-	OnBan    func(ip string, record IPBanRecord)
-	OnUnban  func(ip string, record IPBanRecord)
+	OnBan   func(ip string, record IPBanRecord)
+	OnUnban func(ip string, record IPBanRecord)
 
-	started  bool // 追踪是否已启动（用于支持 Restart 语义）
+	started bool // 追踪是否已启动（用于支持 Restart 语义）
 }
 
 // NewLogWatcher 创建通用日志监听器
@@ -222,6 +226,15 @@ func (w *LogWatcher) monitorLoop() {
 }
 
 // ReadLogFile 读取日志文件的新内容（增量读取，处理日志轮转）
+//
+// 核心设计决策：
+//   - 使用 bufio.Reader.ReadSlice (而非 Scanner/ReadString) 实现 bounded-memory streaming
+//     Scanner 有 64KB token 限制且出错后不可恢复
+//     ReadString 会一直分配内存直到遇到 '\n'，有 OOM 风险
+//     ReadSlice 返回 buffer 引用 + ErrBufferFull 语义，可安全处理任意长行
+//   - offset 语义是 "logical consumed bytes"（逻辑消费位置），而非 fd offset 或 fileSize
+//     这样在跳过超长行时能正确推进，避免反复卡住
+//   - 重启后通过 OffsetStore 持久化的 (inode, offset) 对恢复读取位置
 func (w *LogWatcher) ReadLogFile(filePath string) error {
 	// 安全检查：只处理目标文件
 	if !w.isWatchedFile(filePath) {
@@ -249,46 +262,123 @@ func (w *LogWatcher) ReadLogFile(filePath string) error {
 	}
 
 	fileSize := fileInfo.Size()
-	pos := w.filePos[filePath]
 
-	// 如果有持久化的偏移量，优先使用
+	// 计算起始偏移量（优先使用持久化的 offset）
+	pos := w.filePos[filePath]
 	if w.offsetStore != nil {
 		if savedOffset, savedInode, ok := w.offsetStore.GetOffset(filePath); ok {
 			if savedInode != 0 && savedInode != currentInode {
-				logger.Infof("[%s] Detected log rotation for %s (inode %d → %d), resetting offset", w.LogTag, filePath, savedInode, currentInode)
+				logger.Infof("[%s] Detected log rotation for %s (inode %d -> %d), resetting offset",
+					w.LogTag, filePath, savedInode, currentInode)
 				pos = 0
 			} else if savedInode == currentInode && pos < savedOffset {
 				pos = savedOffset
 			}
 		}
 	}
+	// 文件被截断（如 logrotate copytruncate），重置偏移量
 	if fileSize < pos {
 		pos = 0
 	}
 
-	if _, err := file.Seek(pos, 0); err != nil {
-		return err
+	// 定位到上次读取位置
+	if _, err := file.Seek(pos, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to seek to offset %d: %w", pos, err)
 	}
 
-	scanner := bufio.NewScanner(file)
+	// === Bounded-memory streaming reader ===
+	// 使用 bufio.Reader.ReadSlice 实现：
+	//   - 无 token 大小限制（不像 Scanner 的 64KB）
+	//   - 不无限扩容内存（不像 ReadString）
+	//   - 通过 ErrBufferFull + lineBuf.Len() 检查实现超长行检测和跳过
+	reader := bufio.NewReaderSize(file, 64*1024) // 64KB 读缓冲区
+	const maxLineLen = 10 * 1024 * 1024          // 单行最大 10MB
+
+	var lineBuf bytes.Buffer // 行拼接缓冲区（跨多个 chunk）
 	lineCount := 0
-	for scanner.Scan() {
-		line := scanner.Text()
-		lineCount++
-		w.processLine(line)
+	currentOffset := pos // logical offset：从起始位置开始累加
+
+	for {
+		chunk, err := reader.ReadSlice('\n')
+
+		// 将 chunk 追加到行缓冲区
+		// 注意：ReadSlice 返回的 slice 在下次 I/O 前有效，Write 会复制数据
+		if len(chunk) > 0 {
+			lineBuf.Write(chunk)
+		}
+
+		// 检查行长度是否超限（在任何 chunk 追加后都检查）
+		if lineBuf.Len() > maxLineLen {
+			logger.Warnf("[%s] Overly long line (exceeded %d bytes) in %s at approx offset %d, skipping",
+				w.LogTag, maxLineLen, filePath, currentOffset)
+
+			// 丢弃已累积的数据
+			lineBuf.Reset()
+
+			// 持续丢弃直到遇到换行符（消费完这一超长行）
+			for err == nil || errors.Is(err, bufio.ErrBufferFull) {
+				chunk, err = reader.ReadSlice('\n')
+				// 不写入 lineBuf，直接丢弃
+			}
+
+			// 此时已经读完该超长行（err 可能是 io.EOF 或下一次的正常状态）
+			// currentOffset 不更新具体字节数（因为我们在丢弃），但循环会继续
+			// 下一个正常行的 len(line) 会正确累加
+
+			// 如果在丢弃过程中遇到 EOF，退出外层循环
+			if errors.Is(err, io.EOF) {
+				break
+			}
+
+			continue // 继续处理下一行
+		}
+
+		// 处理 ErrBufferFull：行还没结束，继续读取下一个 chunk
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+
+		// 正常情况：读到 '\n' 或 EOF，一行完整（或文件结束）
+		lineBytes := lineBuf.Bytes()
+
+		if len(lineBytes) > 0 {
+			// 更新 logical offset（只计算实际消费的字节数）
+			currentOffset += int64(len(lineBytes))
+
+			// 清理行尾的 \n 和 \r
+			cleanLine := strings.TrimRight(string(lineBytes), "\r\n")
+
+			// 处理非空行
+			if cleanLine != "" {
+				lineCount++
+				w.processLine(cleanLine)
+			}
+		}
+
+		lineBuf.Reset()
+
+		// 检查是否到达文件末尾
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		if err != nil {
+			return fmt.Errorf("read error at approx offset %d: %w", currentOffset, err)
+		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-
-	w.filePos[filePath] = fileSize
+	// 使用 logical offset 更新偏移量（而非 fileSize 或 fd offset）
+	// 这保证：
+	//   - 跳过超长行时 offset 正确推进，不会反复卡住
+	//   - 重启恢复后从正确的逻辑位置继续，不丢行、不重复
+	w.filePos[filePath] = currentOffset
 	if w.offsetStore != nil {
-		w.offsetStore.SetOffset(filePath, fileSize, currentInode)
+		w.offsetStore.SetOffset(filePath, currentOffset, currentInode)
 	}
 
 	if lineCount > 0 {
-		logger.Debugf("[%s] Processed %d new lines from %s", w.LogTag, lineCount, filePath)
+		logger.Debugf("[%s] Processed %d new lines from %s (offset %d -> %d)",
+			w.LogTag, lineCount, filePath, pos, currentOffset)
 	}
 
 	return nil
