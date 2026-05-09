@@ -419,9 +419,12 @@ func (t *TcEgress) MonitorDropEvents() {
 	}
 }
 
-// formatEgressDropIP 将网络字节序的 uint32 IP 转换为字符串
+// formatEgressDropIP 将 eBPF map 中读取的 IP 值转换为字符串
+// 注意：eBPF 侧 dst_ip 为 __be32（网络字节序），用户态通过 binary.LittleEndian.Read
+// 读取时已做了一次字节反转，因此 ipNetOrder 参数实际是"反转后的值"。
+// 此处再用 LittleEndian.PutUint32 写回字节数组，两次小端操作互相抵消，
+// 等价于直接将 uint32 的内存表示作为 IPv4 地址字节。
 func formatEgressDropIP(ipNetOrder uint32) string {
-	// 网络字节序 -> [4]byte -> netip.Addr
 	var ipBytes [4]byte
 	binary.LittleEndian.PutUint32(ipBytes[:], ipNetOrder)
 	addr := netip.AddrFrom4(ipBytes)
@@ -542,10 +545,10 @@ var _ = unsafe.Sizeof(FlowLimitState{})
 // doCleanup 执行一次过期条目清理
 // 替代 LRU_HASH 的自动淘汰机制
 func (t *TcEgress) doCleanup() {
+	// Phase 1: 读锁下遍历收集过期 key
 	t.mapMu.RLock()
-	defer t.mapMu.RUnlock()
-
 	if t.objects == nil || t.objects.EgressLimits == nil {
+		t.mapMu.RUnlock()
 		return
 	}
 
@@ -562,11 +565,25 @@ func (t *TcEgress) doCleanup() {
 		}
 	}
 	if err := iter.Err(); err != nil {
+		t.mapMu.RUnlock()
 		logger.Warnf("[TcEgress] Cleanup iteration error: %v", err)
 		return
 	}
+	t.mapMu.RUnlock()
 
-	// 删除过期条目
+	// Phase 2: 写锁下执行删除操作
+	if len(expiredKeys) == 0 {
+		return
+	}
+
+	t.mapMu.Lock()
+	defer t.mapMu.Unlock()
+
+	// 双重检查：重新获取写锁后，objects 可能已被 Close 置为 nil
+	if t.objects == nil || t.objects.EgressLimits == nil {
+		return
+	}
+
 	deleted := 0
 	for _, k := range expiredKeys {
 		if err := t.objects.EgressLimits.Delete(&k); err == nil {

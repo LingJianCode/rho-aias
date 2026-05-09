@@ -19,6 +19,7 @@ func main() {
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	result, err := kernel.CheckAndValidate()
 	if err != nil {

@@ -36,7 +36,7 @@ func NewDatabase(dsn string, debug bool) (*Database, error) {
 			return nil, fmt.Errorf("failed to create database directory %s: %w", dir, err)
 		}
 	}
-	logger.Debugf("initlized dsn %s", dsn)
+	logger.Debugf("initialized dsn %s", dsn)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(logLevel),
 	})
