@@ -62,18 +62,12 @@ func (m *EBPFMonitor) Start() error {
 		return fmt.Errorf("eBPF monitor already running")
 	}
 
-	// 1. 加载 eBPF 对象
-	if err := m.monitor.Load(); err != nil {
+	// 1. 加载 eBPF 对象（含全局变量配置）
+	if err := m.monitor.Load(uint16(m.cfg.SSHPort), m.cfg.ShortConnSeconds); err != nil {
 		return fmt.Errorf("load eBPF objects: %w", err)
 	}
 
-	// 2. 配置运行时参数
-	if err := m.monitor.Configure(uint16(m.cfg.SSHPort), m.cfg.ShortConnSeconds); err != nil {
-		m.closeResources()
-		return fmt.Errorf("configure maps: %w", err)
-	}
-
-	// 3. 附加 probes
+	// 2. 附加 probes
 	if err := m.monitor.AttachProbes(); err != nil {
 		m.closeResources()
 		return fmt.Errorf("attach probes: %w", err)

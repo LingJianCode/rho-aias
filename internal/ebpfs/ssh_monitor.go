@@ -27,37 +27,37 @@ func NewSshMonitor() *SshMonitor {
 	return &SshMonitor{}
 }
 
-// Load 加载 eBPF 对象到内核
-func (s *SshMonitor) Load() error {
+// Load 加载 eBPF 对象到内核（在加载前通过 spec 设置全局变量，避免 const 变量只读问题）
+func (s *SshMonitor) Load(sshPort uint16, shortConnSeconds int) error {
+	spec, err := loadSshMonitor()
+	if err != nil {
+		return fmt.Errorf("load ssh_monitor spec: %w", err)
+	}
+
+	// 在 spec 层面设置全局变量（此时尚未加载到内核）
+	if modeVar := spec.Variables["aggressive_mode"]; modeVar != nil {
+		if err := modeVar.Set(uint8(1)); err != nil {
+			return fmt.Errorf("set aggressive_mode (spec): %w", err)
+		}
+	}
+	if connVar := spec.Variables["preauth_short_conn_ns"]; connVar != nil {
+		shortConnNS := uint64(shortConnSeconds) * uint64(time.Second)
+		if err := connVar.Set(shortConnNS); err != nil {
+			return fmt.Errorf("set preauth_short_conn_ns (spec): %w", err)
+		}
+	}
+
+	// 加载到内核
 	var obj sshMonitorObjects
-	if err := loadSshMonitorObjects(&obj, nil); err != nil {
-		return fmt.Errorf("load ssh_monitor objects: %w", err)
+	if err := spec.LoadAndAssign(&obj, nil); err != nil {
+		return fmt.Errorf("load and assign ssh_monitor objects: %w", err)
 	}
 	s.objects = &obj
-	return nil
-}
 
-// Configure 配置运行时参数（端口、模式等）
-func (s *SshMonitor) Configure(sshPort uint16, shortConnSeconds int) error {
-	if s.objects == nil {
-		return errors.New("objects not loaded")
-	}
-
-	// 配置监控端口 map
+	// 配置监控端口 map（map 可以在加载后写入）
 	portVal := uint8(1)
 	if err := s.objects.MonitoredPorts.Put(&sshPort, &portVal); err != nil {
 		return fmt.Errorf("set monitored_ports[%d]: %w", sshPort, err)
-	}
-
-	// aggressive_mode 固定开启以支持 preauth 检测
-	if err := s.objects.AggressiveMode.Set(uint8(1)); err != nil {
-		return fmt.Errorf("set aggressive_mode: %w", err)
-	}
-
-	// preauth_short_conn_ns
-	shortConnNS := uint64(shortConnSeconds) * uint64(time.Second)
-	if err := s.objects.PreauthShortConnNs.Set(shortConnNS); err != nil {
-		return fmt.Errorf("set preauth_short_conn_ns: %w", err)
 	}
 
 	return nil
@@ -94,14 +94,23 @@ func (s *SshMonitor) AttachProbes() error {
 	}
 	s.links = append(s.links, lFork)
 
-	// C. uretprobe/pam_authenticate（当前跳过，cilium/ebpf v0.20.0 不支持 uretprobe）
+	// C. uretprobe/pam_authenticate
 	pamPath, pamErr := findLibPAM()
-	if pamErr == nil {
-		_ = pamPath
-		logger.Warn("[FailGuard] uretprobe/pam_authenticate: cilium/ebpf v0.20.0 不支持 uretprobe，" +
-			"PAM 认证检测暂不可用。升级依赖后可恢复此功能。")
-	} else {
+	if pamErr != nil {
 		logger.Warnf("[FailGuard] libpam.so.0 not found: %v — PAM auth events will be unavailable", pamErr)
+	} else {
+		ex, err := link.OpenExecutable(pamPath)
+		if err != nil {
+			logger.Warnf("[FailGuard] open libpam executable failed: %v — PAM auth unavailable", err)
+		} else {
+			up, err := ex.Uretprobe("pam_authenticate", s.objects.HandlePamAuth, nil)
+			if err != nil {
+				logger.Warnf("[FailGuard] uretprobe/pam_authenticate attach failed: %v", err)
+			} else {
+				s.links = append(s.links, up)
+				logger.Info("[FailGuard] Attached uretprobe/pam_authenticate")
+			}
+		}
 	}
 
 	// D. tracepoint sched_process_exit
@@ -111,7 +120,7 @@ func (s *SshMonitor) AttachProbes() error {
 	}
 	s.links = append(s.links, lExit)
 
-	logger.Infof("[FailGuard] Attached %d probes successfully (PAM probe pending dependency upgrade)", len(s.links))
+	logger.Infof("[FailGuard] Attached %d probes successfully", len(s.links))
 	return nil
 }
 
