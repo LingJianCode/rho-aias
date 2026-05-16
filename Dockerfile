@@ -26,7 +26,7 @@ RUN npm run build
 #  - 利用 Go embed 将前端资源嵌入二进制
 #  - 编译 eBPF 字节码并构建最终可执行文件
 # ============================================================
-FROM docker.cnb.cool/lingjiancode/docker-builder/mygolang:1.25-alpine AS builder
+FROM docker.cnb.cool/lingjiancode/docker-builder/mygolang:1.25-alpine AS backend-builder
 ENV GOPRIVATE="cnb.cool"
 ENV GOPROXY="https://goproxy.cn,direct"
 
