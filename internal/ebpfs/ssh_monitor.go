@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"rho-aias/internal/logger"
@@ -101,8 +102,15 @@ func (s *SshMonitor) AttachProbes() error {
 	} else {
 		// uretprobe requires the target file to have executable permission (+x).
 		// .so shared libraries are typically 0644 (no +x), especially in containers.
-		if chmodErr := os.Chmod(pamPath, 0755); chmodErr != nil {
-			logger.Debugf("[FailGuard] cannot chmod +x %s: %v", pamPath, chmodErr)
+		chmodTarget := pamPath
+		if fi, statErr := os.Lstat(pamPath); statErr == nil && fi.Mode()&os.ModeSymlink != 0 {
+			// pamPath is a symlink → resolve to real .so and chmod that
+			if resolved, resolveErr := filepath.EvalSymlinks(pamPath); resolveErr == nil {
+				chmodTarget = resolved
+			}
+		}
+		if chmodErr := os.Chmod(chmodTarget, 0755); chmodErr != nil {
+			logger.Warnf("[FailGuard] chmod +x %s failed: %v", chmodTarget, chmodErr)
 		}
 		ex, err := link.OpenExecutable(pamPath)
 		if err != nil {
