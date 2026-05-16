@@ -35,7 +35,7 @@ gen: vmlinux.h
 
 backend: gen
 	@echo "==> Building"
-	$(GO) build -o $(APP) ./cmd/server
+	CGO_ENABLED=0 $(GO) build -o $(APP) ./cmd/server
 
 build: frontend gen backend
 
