@@ -8,8 +8,8 @@
 
 char __license[] SEC("license") = "GPL";
 
-const volatile __u8 aggressive_mode = 0;
-const volatile __u64 preauth_short_conn_ns = 2000000000ULL;
+volatile __u8 aggressive_mode = 0;
+volatile __u64 preauth_short_conn_ns = 2000000000ULL;
 
 enum ssh_event_type {
     EVENT_AUTH_RESULT = 1,
