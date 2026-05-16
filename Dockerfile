@@ -32,7 +32,7 @@ ENV GOPROXY="https://goproxy.cn,direct"
 
 # 安装构建依赖（包含 LLVM、bpftool 和 libbpf 用于 eBPF）
 RUN sed -i "s/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g" /etc/apk/repositories && \
-    apk add --no-cache git build-base linux-headers clang llvm lld bpftool libbpf-dev
+    apk add --no-cache git build-base linux-headers clang llvm lld bpftool libbpf-dev make
 
 WORKDIR /build
 
@@ -48,23 +48,8 @@ COPY . .
 # 将前一阶段前端产物内容复制到 internal/frontend/dist/（供 go:embed 引用）
 COPY --from=frontend-builder /web/dist/. ./internal/frontend/dist/
 
-# 生成 vmlinux.h（CO-RE 头文件）
-RUN if [ -f /sys/kernel/btf/vmlinux ]; then \
-        bpftool btf dump file /sys/kernel/btf/vmlinux format c > ebpfs/vmlinux.h; \
-    elif [ -f /usr/src/linux-headers-$(uname -r)/include/uapi/linux/vmlinux.h ]; then \
-        ln -s /usr/src/linux-headers-$(uname -r)/include/uapi/linux/vmlinux.h ebpfs/vmlinux.h; \
-    else \
-        echo "/* CO-RE stub vmlinux.h - generated for build */" > ebpfs/vmlinux.h; \
-        echo "#include <linux/types.h>" >> ebpfs/vmlinux.h; \
-        echo "#include <linux/pkt_cls.h>" >> ebpfs/vmlinux.h; \
-    fi
-
-# 生成 eBPF 字节码
-RUN go generate ./internal/ebpfs/...
-
 # 构建二进制文件（前端已通过 embed 嵌入其中）
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o rho-aias ./cmd/server
-
+RUN make backend
 
 # ============================================================
 #  阶段 3: 运行阶段 (runtime)

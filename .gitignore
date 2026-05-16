@@ -25,3 +25,4 @@ caddy/.local
 dist
 
 .codex
+fail2ban-ebpf

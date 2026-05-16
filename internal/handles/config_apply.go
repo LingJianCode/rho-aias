@@ -107,10 +107,10 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 			BlockDuration:  req.Baseline.BlockDuration,
 		},
 		Attacks: anomaly.AttacksConfig{
-			SynFlood: anomaly.AttackConfig{Enabled: req.Attacks.SynFlood.Enabled, RatioThreshold: req.Attacks.SynFlood.RatioThreshold, BlockDuration: req.Attacks.SynFlood.BlockDuration, MinPackets: req.Attacks.SynFlood.MinPackets},
-			UdpFlood: anomaly.AttackConfig{Enabled: req.Attacks.UdpFlood.Enabled, RatioThreshold: req.Attacks.UdpFlood.RatioThreshold, BlockDuration: req.Attacks.UdpFlood.BlockDuration, MinPackets: req.Attacks.UdpFlood.MinPackets},
+			SynFlood:  anomaly.AttackConfig{Enabled: req.Attacks.SynFlood.Enabled, RatioThreshold: req.Attacks.SynFlood.RatioThreshold, BlockDuration: req.Attacks.SynFlood.BlockDuration, MinPackets: req.Attacks.SynFlood.MinPackets},
+			UdpFlood:  anomaly.AttackConfig{Enabled: req.Attacks.UdpFlood.Enabled, RatioThreshold: req.Attacks.UdpFlood.RatioThreshold, BlockDuration: req.Attacks.UdpFlood.BlockDuration, MinPackets: req.Attacks.UdpFlood.MinPackets},
 			IcmpFlood: anomaly.AttackConfig{Enabled: req.Attacks.IcmpFlood.Enabled, RatioThreshold: req.Attacks.IcmpFlood.RatioThreshold, BlockDuration: req.Attacks.IcmpFlood.BlockDuration, MinPackets: req.Attacks.IcmpFlood.MinPackets},
-			AckFlood: anomaly.AttackConfig{Enabled: req.Attacks.AckFlood.Enabled, RatioThreshold: req.Attacks.AckFlood.RatioThreshold, BlockDuration: req.Attacks.AckFlood.BlockDuration, MinPackets: req.Attacks.AckFlood.MinPackets},
+			AckFlood:  anomaly.AttackConfig{Enabled: req.Attacks.AckFlood.Enabled, RatioThreshold: req.Attacks.AckFlood.RatioThreshold, BlockDuration: req.Attacks.AckFlood.BlockDuration, MinPackets: req.Attacks.AckFlood.MinPackets},
 		},
 	}
 

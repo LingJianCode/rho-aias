@@ -1,142 +1,62 @@
 package failguard
 
 import (
-	"context"
-	"fmt"
-	"net"
-	"regexp"
-	"sync"
 	"time"
 
 	"rho-aias/internal/config"
-	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
-	"rho-aias/internal/watcher"
+	"rho-aias/internal/manual"
+	"rho-aias/internal/services"
 
 	"github.com/robfig/cron/v3"
 )
 
-
-
-// Manager FailGuard 日志管理器
+// Manager FailGuard eBPF 防爆破管理器（纯调度层）
 type Manager struct {
 	cfg     *config.FailGuardConfig
-	watcher *watcher.LogWatcher
+	monitor *EBPFMonitor
 	cron    *cron.Cron
 	running bool
-
-	// FailGuard 特有的字段
-	failRegex   []*regexp.Regexp
-	ignoreRegex []*regexp.Regexp
-	ignoreCIDRs []*net.IPNet
-
-	// 失败计数器：IP → 失败时间戳列表（滑动窗口）
-	failures map[string][]time.Time
-	failMu   sync.RWMutex
 }
 
-// NewManager 创建 FailGuard 日志管理器
-func NewManager(cfg *config.FailGuardConfig, xdp watcher.XDPRuleManager, ctx context.Context,
-	offsetStore *watcher.OffsetStore, banRecordStore watcher.BanRecordStore, whitelistCheck func(ip string) bool) *Manager {
-	w := watcher.NewLogWatcher("FailGuard", "failguard", xdp, ctx)
-	w.SetOffsetStore(offsetStore)
-	w.SetBanRecordStore(banRecordStore)
-	w.SetWhitelistCheck(whitelistCheck)
-
-	m := &Manager{
+// NewManager 创建 FailGuard 管理器
+func NewManager(
+	cfg *config.FailGuardConfig,
+	xdpMgr EBPFManager,
+	dbStore *services.BanRecordService,
+	whitelistChecker *manual.WhitelistChecker,
+) *Manager {
+	return &Manager{
 		cfg:     cfg,
-		watcher: w,
+		monitor: NewEBPFMonitor(cfg, xdpMgr, dbStore, NewBanFilter(whitelistChecker)),
 	}
-
-	// 确定使用的正则：用户配置覆盖或使用内置默认值
-	failPatterns := cfg.FailRegex
-	if len(failPatterns) == 0 {
-		failPatterns = GetFailRegexByMode(cfg.Mode)
-	}
-	ignorePatterns := cfg.IgnoreRegex
-	if len(ignorePatterns) == 0 {
-		ignorePatterns = DefaultSSHDIgnoreRegex
-	}
-
-	// 编译正则
-	var err error
-	m.failRegex, err = compileRegex(failPatterns)
-	if err != nil {
-		logger.Warnf("[FailGuard] Failed to compile fail regex: %v", err)
-	}
-	m.ignoreRegex, err = compileRegex(ignorePatterns)
-	if err != nil {
-		logger.Warnf("[FailGuard] Failed to compile ignore regex: %v", err)
-	}
-
-	// 解析忽略 IP/CIDR 列表
-	for _, cidr := range cfg.IgnoreIPs {
-		_, network, err := net.ParseCIDR(cidr)
-		if err != nil {
-			ip := net.ParseIP(cidr)
-			if ip == nil {
-				logger.Warnf("[FailGuard] Invalid ignore IP/CIDR: %s", cidr)
-				continue
-			}
-			if ip4 := ip.To4(); ip4 != nil {
-				network = &net.IPNet{IP: ip4, Mask: net.CIDRMask(32, 32)}
-			} else {
-				network = &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)}
-			}
-		}
-		m.ignoreCIDRs = append(m.ignoreCIDRs, network)
-	}
-
-	m.failures = make(map[string][]time.Time)
-
-	return m
 }
 
-// Start 启动 FailGuard 日志监控
+// Start 启动 eBPF 监控 + 定时清理任务
 func (m *Manager) Start() error {
-	if m.cfg.LogPath == "" {
-		return fmt.Errorf("log_path is required")
-	}
-
-	// 设置日志行处理回调
-	m.watcher.SetLineHandler(m.handleLine)
-
-	// 启动底层 watcher
-	if err := m.watcher.Start(); err != nil {
+	if err := m.monitor.Start(); err != nil {
 		return err
 	}
 
-	// 监听日志文件
-	if err := m.watcher.WatchLogFile(m.cfg.LogPath); err != nil {
-		return fmt.Errorf("failed to watch log file: %w", err)
-	}
-
-	// 初始化 Cron 定时任务
 	m.cron = cron.New(cron.WithSeconds())
 
-	// 添加定时清理封禁任务（每 5 分钟）
+	// 定期清理过期封禁记录（每 5 分钟，与 cleanupLoop 互为备份）
 	_, err := m.cron.AddFunc("@every 5m", func() {
-		m.watcher.CleanupExpiredBans()
+		expired := m.monitor.banMgr.Expired()
+		if len(expired) > 0 {
+			logger.Debugf("[FailGuard] Cron cleaned up %d expired bans", len(expired))
+		}
 	})
 	if err != nil {
-		return fmt.Errorf("failed to add cleanup bans cron job: %w", err)
+		m.monitor.Stop()
+		return err
 	}
 
-	// 添加定时清理失败计数任务（每 1 分钟）— FailGuard 特有
-	_, err = m.cron.AddFunc("@every 1m", func() {
-		m.cleanupFailures()
-	})
-	if err != nil {
-		return fmt.Errorf("failed to add cleanup failures cron job: %w", err)
-	}
-
-	// 启动定时任务
 	m.cron.Start()
 	m.running = true
 
-	logger.Infof("[FailGuard] Monitor started, mode=%s, log=%s, max_retry=%d, find_time=%ds, ban_duration=%ds",
-		m.cfg.Mode, m.cfg.LogPath, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
-
+	logger.Infof("[FailGuard] Monitor started (eBPF mode), ssh_port=%d, max_retry=%d, find_time=%ds, ban_duration=%ds",
+		m.cfg.SSHPort, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
 	return nil
 }
 
@@ -145,181 +65,53 @@ func (m *Manager) Stop() {
 	if m.cron != nil {
 		m.cron.Stop()
 	}
+	m.monitor.Stop()
 	m.running = false
-	m.watcher.Stop()
 	logger.Info("[FailGuard] Monitor stopped")
 }
 
-// handleLine 处理一行日志：ignore 检查 → fail 匹配 → 白名单 → 已封禁 → 滑动窗口计数
-// 实现 watcher.LineHandler 接口
-func (m *Manager) handleLine(line string) (string, uint32, string, int, bool) {
-	// 1. ignoreregex 匹配 → 跳过
-	if m.matchIgnore(line) {
-		return "", 0, "", 0, false
-	}
-
-	// 2. failregex 匹配 → 提取 IP
-	ip := m.matchFail(line)
-	if ip == "" {
-		return "", 0, "", 0, false
-	}
-
-	// 3. 白名单跳过
-	if m.isIgnoredIP(ip) {
-		return "", 0, "", 0, false
-	}
-
-	// 4. 已封禁跳过
-	if m.watcher.IsBanned(ip) {
-		return "", 0, "", 0, false
-	}
-
-	// 5. 滑动窗口计数，达阈值则封禁
-	if m.addFailureAndCheck(ip) {
-		return ip, ebpfs.SourceMaskFailGuard, "SSH brute force", m.cfg.BanDuration, true
-	}
-
-	return "", 0, "", 0, false
-}
-
-// matchIgnore 检查行是否匹配忽略规则
-func (m *Manager) matchIgnore(line string) bool {
-	for _, re := range m.ignoreRegex {
-		if re.MatchString(line) {
-			return true
-		}
-	}
-	return false
-}
-
-// matchFail 检查行是否匹配失败规则，返回提取的 IP
-func (m *Manager) matchFail(line string) string {
-	for _, re := range m.failRegex {
-		matches := re.FindStringSubmatch(line)
-		if len(matches) > 0 {
-			// 优先查找命名捕获组 "host"
-			for i, name := range re.SubexpNames() {
-				if name == "host" && i < len(matches) && matches[i] != "" {
-					return matches[i]
-				}
-			}
-			// 回退：查找第一个看起来像 IP 的子匹配
-			for i := 1; i < len(matches); i++ {
-				if matches[i] != "" && net.ParseIP(matches[i]) != nil {
-					return matches[i]
-				}
-			}
-		}
-	}
-	return ""
-}
-
-// isIgnoredIP 检查 IP 是否在忽略列表中
-func (m *Manager) isIgnoredIP(ip string) bool {
-	parsedIP := net.ParseIP(ip)
-	if parsedIP == nil {
-		return false
-	}
-	for _, network := range m.ignoreCIDRs {
-		if network.Contains(parsedIP) {
-			return true
-		}
-	}
-	return false
-}
-
-// addFailureAndCheck 添加失败记录并检查是否达到阈值
-func (m *Manager) addFailureAndCheck(ip string) bool {
-	m.failMu.Lock()
-	defer m.failMu.Unlock()
-
-	now := time.Now()
-	cutoff := now.Add(-time.Duration(m.cfg.FindTime) * time.Second)
-
-	// 清理窗口外的旧记录
-	var valid []time.Time
-	for _, t := range m.failures[ip] {
-		if t.After(cutoff) {
-			valid = append(valid, t)
-		}
-	}
-	valid = append(valid, now)
-	m.failures[ip] = valid
-
-	return len(valid) >= m.cfg.MaxRetry
-}
-
-// cleanupFailures 清理过期的失败计数记录
-func (m *Manager) cleanupFailures() {
-	m.failMu.Lock()
-	defer m.failMu.Unlock()
-
-	cutoff := time.Now().Add(-time.Duration(m.cfg.FindTime) * time.Second)
-	count := 0
-	for ip, attempts := range m.failures {
-		var valid []time.Time
-		for _, t := range attempts {
-			if t.After(cutoff) {
-				valid = append(valid, t)
-			}
-		}
-		if len(valid) == 0 {
-			delete(m.failures, ip)
-			count++
-		} else if len(valid) != len(attempts) {
-			m.failures[ip] = valid
-		}
-	}
-
-	if count > 0 {
-		logger.Debugf("[FailGuard] Cleaned up failure records for %d IPs", count)
-	}
-}
-
-// UpdateConfig 热更新 FailGuard 动态配置
-func (m *Manager) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int, mode string) {
-	m.failMu.Lock()
-	defer m.failMu.Unlock()
-
+// UpdateConfig 热更新配置
+func (m *Manager) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int, model string) {
 	m.cfg.Enabled = enabled
 	m.cfg.MaxRetry = maxRetry
 	m.cfg.FindTime = findTime
 	m.cfg.BanDuration = banDuration
-	if mode != "" {
-		m.cfg.Mode = mode
-	}
+	m.cfg.Mode = model
 
-	logger.Infof("[FailGuard] Config updated: enabled=%v, max_retry=%d, find_time=%d, ban_duration=%d, mode=%s",
-		enabled, maxRetry, findTime, banDuration, mode)
+	// 更新 BanManager 参数
+	m.monitor.banMgr.mu.Lock()
+	m.monitor.banMgr.threshold = maxRetry
+	m.monitor.banMgr.window = time.Duration(findTime) * time.Second
+	m.monitor.banMgr.duration = time.Duration(banDuration) * time.Second
+	m.monitor.banMgr.mu.Unlock()
+
+	logger.Infof("[FailGuard] Config updated: enabled=%v, max_retry=%d, find_time=%d, ban_duration=%d",
+		enabled, maxRetry, findTime, banDuration)
 }
 
-// GetConfig 获取当前 FailGuard 配置（返回可动态化的字段）
+// GetConfig 获取当前可动态化字段
 func (m *Manager) GetConfig() map[string]interface{} {
-	m.failMu.RLock()
-	defer m.failMu.RUnlock()
-
 	return map[string]interface{}{
 		"enabled":      m.cfg.Enabled,
 		"max_retry":    m.cfg.MaxRetry,
 		"find_time":    m.cfg.FindTime,
 		"ban_duration": m.cfg.BanDuration,
-		"mode":         m.cfg.Mode,
 	}
 }
 
-// GetBannedIPs 获取当前已封禁的 IP 列表
+// GetBannedIPs 获取当前已封禁 IP 列表
 func (m *Manager) GetBannedIPs() []string {
-	return m.watcher.GetBannedIPs()
+	return m.monitor.banMgr.GetBannedIPs()
 }
 
-// GetBanCount 获取当前封禁的 IP 数量
+// GetBanCount 获取当前封禁数量
 func (m *Manager) GetBanCount() int {
-	return m.watcher.GetBanCount()
+	return m.monitor.banMgr.GetBanCount()
 }
 
 // IsBanned 检查 IP 是否被封禁
 func (m *Manager) IsBanned(ip string) bool {
-	return m.watcher.IsBanned(ip)
+	return m.monitor.banMgr.IsBannedByString(ip)
 }
 
 // IsRunning 检查监控器是否正在运行

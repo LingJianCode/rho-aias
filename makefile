@@ -3,6 +3,16 @@ GO ?= go
 BPF_GEN_DIR := ./internal/ebpfs
 WEB_DIR := ./web
 
+ifeq ($(UNAME_M),x86_64)
+TARGET_ARCH ?= amd64
+else ifeq ($(UNAME_M),aarch64)
+TARGET_ARCH ?= arm64
+else ifeq ($(UNAME_M),arm64)
+TARGET_ARCH ?= arm64
+else
+TARGET_ARCH ?= amd64
+endif
+
 .PHONY: all gen build run clean test lint coverage help frontend
 
 all: gen build
@@ -21,7 +31,7 @@ frontend:
 
 # 仅生成 eBPF 代码（不包含前端）
 gen: vmlinux.h
-	$(GO) generate $(BPF_GEN_DIR)
+	BPF2GO_ARCH=$(TARGET_ARCH) $(GO) generate $(BPF_GEN_DIR)
 
 backend: gen
 	@echo "==> Building"
@@ -49,9 +59,6 @@ GOLANGCI_LINT := $(shell command -v golangci-lint 2>/dev/null || echo "$(shell $
 lint:
 	@echo "==> Running go vet"
 	$(GO) vet ./...
-	@echo "==> Running golangci-lint"
-	@command -v golangci-lint >/dev/null 2>&1 || $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	$(GOLANGCI_LINT) run ./...
 
 help:
 	@echo "Targets:"

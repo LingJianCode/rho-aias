@@ -126,20 +126,17 @@ type GeoEnrichConfig struct {
 	BatchSize int  `yaml:"batch_size"` // 每批处理记录数
 }
 
-// FailGuardConfig SSH 防爆破配置
-// 参考 fail2ban 的核心功能：日志匹配 + 滑动窗口计数 + 达阈值封禁
-// 模式说明：normal=认证失败, ddos=认证失败+preauth异常, aggressive=ddos+协议协商失败
+// FailGuardConfig SSH 防爆破配置（eBPF 模式）
+// 通过内核级 eBPF probes 实时检测 SSH 暴力破解
+// 探针: fexit/kretprobe(inet_csk_accept), tracepoint(sched_process_fork/exit), uretprobe(pam_authenticate)
 type FailGuardConfig struct {
-	Enabled         bool     `yaml:"enabled"`           // 是否启用 FailGuard
-	LogPath         string   `yaml:"log_path"`          // 监控的日志文件路径
-	OffsetStateFile string   `yaml:"offset_state_file"` // 偏移量持久化文件路径（默认 ./data/failguard_offset.json）
-	Mode            string   `yaml:"mode"`              // 检测模式: normal/ddos/aggressive（默认 normal）
-	FailRegex       []string `yaml:"fail_regex"`        // 失败匹配正则（留空使用内置默认）
-	IgnoreRegex     []string `yaml:"ignore_regex"`      // 忽略匹配正则（留空使用内置默认）
-	IgnoreIPs       []string `yaml:"ignore_ips"`        // 忽略的 IP/CIDR 列表（白名单）
-	MaxRetry        int      `yaml:"max_retry"`         // 触发封禁的失败次数阈值
-	FindTime        int      `yaml:"find_time"`         // 滑动窗口时长（秒）
-	BanDuration     int      `yaml:"ban_duration"`      // 封禁时长（秒）
+	Enabled          bool   `yaml:"enabled"`            // 是否启用 FailGuard
+	SSHPort          int    `yaml:"ssh_port"`           // 监控的 SSH 端口（默认 22）
+	ShortConnSeconds int    `yaml:"short_conn_seconds"` // preauth 短连接判定阈值（秒，默认 2）
+	MaxRetry         int    `yaml:"max_retry"`          // 触发封禁的失败次数阈值
+	FindTime         int    `yaml:"find_time"`          // 滑动窗口时长（秒）
+	BanDuration      int    `yaml:"ban_duration"`       // 封禁时长（秒）
+	Mode             string `yaml:"model"`
 }
 
 // WAFConfig WAF 日志监控配置
@@ -266,12 +263,11 @@ func applyDefaults(config *Config) {
 	}
 
 	// FailGuard 默认值
-	setIfEmpty(&config.FailGuard.Mode, "normal")
-	setIfEmpty(&config.FailGuard.LogPath, "/var/log/auth.log")
+	setIfZero(&config.FailGuard.SSHPort, 22)
+	setIfZero(&config.FailGuard.ShortConnSeconds, 2)
 	setIfZero(&config.FailGuard.MaxRetry, 5)
 	setIfZero(&config.FailGuard.FindTime, 600)     // 默认 10 分钟
 	setIfZero(&config.FailGuard.BanDuration, 3600) // 默认 1 小时
-	setIfEmpty(&config.FailGuard.OffsetStateFile, "./data/failguard_offset.json")
 
 	// WAF 默认值
 	setIfEmpty(&config.WAF.WAFLogPath, "/logs/waf_audit.log")
