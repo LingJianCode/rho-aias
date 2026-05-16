@@ -117,14 +117,14 @@ func TestBanFilter_NilChecker(t *testing.T) {
 
 func TestFormatRemoteIP(t *testing.T) {
 	tests := []struct {
-		raw  uint32
+		raw  uint32 // binary.LittleEndian 反序列化自 ringbuf 网络字节序后的值
 		want string
 	}{
-		{0x04030201, "4.3.2.1"},
+		{0x01020304, "4.3.2.1"},       // 内存 [04,03,02,01](BE) → LE读为 0x01020304
 		{0x00000000, "0.0.0.0"},
 		{0xFFFFFFFF, "255.255.255.255"},
-		{0x7F000001, "127.0.0.1"},
-		{0x6A361883, "106.54.24.131"},
+		{0x0100007F, "127.0.0.1"},      // 内存 [7F,00,00,01](BE) → LE读为 0x0100007F
+		{0x8318366A, "106.54.24.131"},  // 内存 [6A,36,18,83](BE) → LE读为 0x8318366A
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
@@ -218,7 +218,7 @@ func TestBanManager_IsBanned_PerIP(t *testing.T) {
 
 func TestBanManager_IsBannedByString(t *testing.T) {
 	bm := NewBanManager(1, 600, 3600, nil)
-	bm.ForceBan(uint32(0x6A361883))
+	bm.ForceBan(uint32(0x8318366A)) // 106.54.24.131 内存 [6A,36,18,83](BE) → LE读为 0x8318366A
 
 	if !bm.IsBannedByString("106.54.24.131") {
 		t.Error("106.54.24.131 should be banned")
@@ -233,7 +233,8 @@ func TestBanManager_IsBannedByString(t *testing.T) {
 
 func TestBanManager_Expired(t *testing.T) {
 	bm := NewBanManager(5, 600, 1, nil)
-	ip := uint32(0x0A000002)
+	// 10.0.0.2 内存大端 [0A,00,00,02] → LE反序列化为 0x0200000A
+	ip := uint32(0x0200000A)
 
 	bm.ForceBan(ip)
 
@@ -403,7 +404,8 @@ func TestFormatRoundTrip(t *testing.T) {
 	}
 	for _, ipStr := range testIPs {
 		parsed := net.ParseIP(ipStr).To4()
-		raw := uint32(parsed[0])<<24 | uint32(parsed[1])<<16 | uint32(parsed[2])<<8 | uint32(parsed[3])
+		// 模拟真实 eBPF 数据流: IP 字符串 → 内存(网络字节序/大端) → binary.LittleEndian 反序列化
+		raw := uint32(parsed[3])<<24 | uint32(parsed[2])<<16 | uint32(parsed[1])<<8 | uint32(parsed[0])
 		roundTripped := FormatRemoteIP(raw)
 		if roundTripped != ipStr {
 			t.Errorf("roundtrip failed: %s → raw=%#08x → %s", ipStr, raw, roundTripped)

@@ -123,6 +123,8 @@ func (m *BanManager) IsBanned(rawIP uint32) bool {
 }
 
 // IsBannedByString 通过字符串 IP 检查是否被封禁
+// 注意：BanManager 内部存储的 key 是 binary.LittleEndian 反序列化自网络字节序后的值，
+// 因此字符串转 uint32 时需匹配同一语义。
 func (m *BanManager) IsBannedByString(ip string) bool {
 	parsed := net.ParseIP(ip)
 	if parsed == nil {
@@ -132,7 +134,7 @@ func (m *BanManager) IsBannedByString(ip string) bool {
 	if ip4 == nil {
 		return false
 	}
-	rawIP := uint32(ip4[0])<<24 | uint32(ip4[1])<<16 | uint32(ip4[2])<<8 | uint32(ip4[3])
+	rawIP := uint32(ip4[3])<<24 | uint32(ip4[2])<<16 | uint32(ip4[1])<<8 | uint32(ip4[0])
 	return m.IsBanned(rawIP)
 }
 

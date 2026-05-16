@@ -47,12 +47,14 @@ func (f *BanFilter) ShouldBlock(ip string) bool {
 }
 
 // FormatRemoteIP 将网络字节序(uint32/big-endian) IPv4 转为点分十进制字符串
+// 注意：eBPF 内核通过 ringbuf 上报的数据经 binary.LittleEndian 反序列化后，
+// 网络字节序 IP 的最低有效字节落在 uint32 的低位，需从低位开始提取。
 func FormatRemoteIP(rawIP uint32) string {
 	ip := make(net.IP, 4)
-	ip[0] = byte(rawIP >> 24)
-	ip[1] = byte(rawIP >> 16)
-	ip[2] = byte(rawIP >> 8)
-	ip[3] = byte(rawIP)
+	ip[0] = byte(rawIP)
+	ip[1] = byte(rawIP >> 8)
+	ip[2] = byte(rawIP >> 16)
+	ip[3] = byte(rawIP >> 24)
 	return ip.String()
 }
 
