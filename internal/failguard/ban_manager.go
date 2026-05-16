@@ -4,6 +4,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	logger "rho-aias/internal/logger"
 )
 
 // BanManager 滑动窗口封禁管理器
@@ -38,13 +40,16 @@ func (m *BanManager) RegisterFailure(ip uint32) (shouldBan bool, expiresAt time.
 	defer m.mu.Unlock()
 
 	now := time.Now()
+	ipStr := FormatRemoteIP(ip)
 
 	// 已封禁 → 跳过
 	if exp, banned := m.banned[ip]; banned {
 		if exp.IsZero() || now.Before(exp) {
+			logger.Debugf("[FailGuard] IP %s already banned, skipping", ipStr)
 			return false, exp
 		}
 		// 已过期，清除旧记录重新计数
+		logger.Debugf("[FailGuard] IP %s ban expired, resetting counter", ipStr)
 		delete(m.banned, ip)
 	}
 
@@ -57,6 +62,8 @@ func (m *BanManager) RegisterFailure(ip uint32) (shouldBan bool, expiresAt time.
 	}
 	valid = append(valid, now)
 	m.attempts[ip] = valid
+
+	logger.Debugf("[FailGuard] Failure registered: ip=%s count=%d/%d (window=%v)", ipStr, len(valid), m.threshold, m.window)
 
 	if len(valid) < m.threshold {
 		return false, time.Time{}
@@ -78,12 +85,16 @@ func (m *BanManager) ForceBan(ip uint32) time.Time {
 	defer m.mu.Unlock()
 
 	now := time.Now()
+	ipStr := FormatRemoteIP(ip)
+
 	var expiresAt time.Time
 	if m.duration > 0 {
 		expiresAt = now.Add(m.duration)
 	}
 	m.banned[ip] = expiresAt
 	delete(m.attempts, ip)
+
+	logger.Debugf("[FailGuard] ForceBan: ip=%s until=%v", ipStr, expiresAt.Format("2006-01-02 15:04:05"))
 	return expiresAt
 }
 

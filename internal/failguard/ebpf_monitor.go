@@ -169,11 +169,13 @@ func (m *EBPFMonitor) eventLoop() {
 
 		switch event.Type {
 		case EventAuthResult:
+			logger.Debugf("[FailGuard] Recv EventAuthResult: pid=%d ip=0x%08x", event.PID, event.RemoteIP)
 			m.handleAuthResult(event)
 		case EventPreauthShortConn:
+			logger.Debugf("[FailGuard] Recv EventPreauthShortConn: pid=%d ip=0x%08x duration_ns=%d", event.PID, event.RemoteIP, event.DurationNS)
 			m.handlePreauthShortConn(event)
 		default:
-			logger.Debugf("[FailGuard] Unknown event type: %d", event.Type)
+			logger.Debugf("[FailGuard] Unknown event type: %d (pid=%d)", event.Type, event.PID)
 		}
 	}
 }
@@ -187,22 +189,23 @@ func (m *EBPFMonitor) handleAuthResult(e SSHEvent) {
 
 	ipStr := FormatRemoteIP(e.RemoteIP)
 
+	logger.Debugf("[FailGuard] Auth result: ip=%s pid=%d ret_code=%d", ipStr, e.PID, e.RetCode)
+
 	// 认证成功 → 不处理
 	if e.RetCode == 0 {
-		logger.Debugf("[FailGuard] Auth success pid=%d from %s", e.PID, ipStr)
 		return
 	}
 
 	// 白名单检查
 	if !m.filter.ShouldBlock(ipStr) {
-		logger.Debugf("[FailGuard] Auth failure whitelisted: %s", ipStr)
+		logger.Debugf("[FailGuard] Auth failure whitelisted: %s (ret_code=%d)", ipStr, e.RetCode)
 		return
 	}
 
 	// 注册失败，检查是否达到阈值
 	shouldBan, expiresAt := m.banMgr.RegisterFailure(e.RemoteIP)
 	if !shouldBan {
-		logger.Debugf("[FailGuard] Auth failure count++ for %s (not yet banned)", ipStr)
+		logger.Debugf("[FailGuard] Auth failure count++ for %s (ret_code=%d, not yet banned)", ipStr, e.RetCode)
 		return
 	}
 
@@ -218,12 +221,21 @@ func (m *EBPFMonitor) handlePreauthShortConn(e SSHEvent) {
 
 	ipStr := FormatRemoteIP(e.RemoteIP)
 
+	exitStatus := e.RetCode & 0xFF
+	exitSignal := (e.RetCode >> 16) & 0xFF
+	durationMs := e.DurationNS / 1_000_000
+
+	logger.Debugf("[FailGuard] Preauth anomaly: ip=%s pid=%d duration=%dms exit_status=%d exit_signal=%d",
+		ipStr, e.PID, durationMs, exitStatus, exitSignal)
+
 	// 白名单检查
 	if !m.filter.ShouldBlock(ipStr) {
+		logger.Debugf("[FailGuard] Preauth anomaly whitelisted: %s", ipStr)
 		return
 	}
 
 	// preauth 异常直接强制封禁（不经过滑动窗口计数）
+	logger.Debugf("[FailGuard] Force-banning %s for SSH preauth anomaly", ipStr)
 	expiresAt := m.banMgr.ForceBan(e.RemoteIP)
 	m.executeBan(ipStr, expiresAt, "SSH preauth anomaly")
 }
