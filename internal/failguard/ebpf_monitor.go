@@ -11,6 +11,7 @@ import (
 	"rho-aias/internal/config"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
+	"rho-aias/internal/watcher"
 
 	"github.com/cilium/ebpf/ringbuf"
 )
@@ -22,6 +23,7 @@ type EBPFMonitor struct {
 	xdpMgr EBPFManager
 	banMgr *BanManager
 	filter *BanFilter
+	store  watcher.BanRecordStore // 封禁记录持久化
 
 	// eBPF 运行时资源（通过 SshMonitor 门面管理）
 	monitor *ebpfs.SshMonitor
@@ -40,7 +42,7 @@ type EBPFMonitor struct {
 func NewEBPFMonitor(
 	cfg *config.FailGuardConfig,
 	xdpMgr EBPFManager,
-	store interface{}, // 可选：*services.BanRecordService（用于持久化），或 nil
+	store watcher.BanRecordStore, // 封禁记录持久化（可为 nil，nil 时跳过 DB 写入）
 	filter *BanFilter,
 ) *EBPFMonitor {
 	return &EBPFMonitor{
@@ -48,6 +50,7 @@ func NewEBPFMonitor(
 		xdpMgr:  xdpMgr,
 		banMgr:  NewBanManager(cfg.MaxRetry, cfg.FindTime, cfg.BanDuration, nil),
 		filter:  filter,
+		store:   store,
 		monitor: ebpfs.NewSshMonitor(),
 		done:    make(chan struct{}),
 	}
@@ -83,7 +86,6 @@ func (m *EBPFMonitor) Start() error {
 
 	m.running = true
 	go m.eventLoop()
-	go m.cleanupLoop()
 
 	logger.Infof("[FailGuard] eBPF monitor started, ssh_port=%d, max_retry=%d, find_time=%ds, ban_duration=%ds",
 		m.cfg.SSHPort, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
@@ -240,12 +242,20 @@ func (m *EBPFMonitor) handlePreauthShortConn(e SSHEvent) {
 	m.executeBan(ipStr, expiresAt, "SSH preauth anomaly")
 }
 
-// executeBan 通过 XDP 执行封禁
+// executeBan 通过 XDP 执行封禁并持久化到数据库
 func (m *EBPFMonitor) executeBan(ip string, expiresAt time.Time, reason string) {
 	err := m.xdpMgr.AddRuleWithSourceAndExpiry(ip, ebpfs.SourceMaskFailGuard, m.cfg.BanDuration)
 	if err != nil {
 		logger.Errorf("[FailGuard] Failed to ban %s via XDP: %v (reason: %s)", ip, err, reason)
 		return
+	}
+
+	// 持久化封禁记录到数据库
+	if m.store != nil {
+		banDuration := m.cfg.BanDuration
+		if err := m.store.UpsertActiveBan(ip, "failguard", reason, banDuration); err != nil {
+			logger.Errorf("[FailGuard] Failed to persist ban record for IP %s: %v", ip, err)
+		}
 	}
 
 	m.statsMu.Lock()
@@ -259,22 +269,35 @@ func (m *EBPFMonitor) executeBan(ip string, expiresAt time.Time, reason string) 
 	logger.Warnf("[FailGuard] BANNED %s until %s [reason: %s]", ip, expiryStr, reason)
 }
 
-// cleanupLoop 定期清理过期封禁记录
-func (m *EBPFMonitor) cleanupLoop() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
+// CleanupExpired 执行完整的过期清理（供外部 cron 调用）
+// 清理流程：1.从内存删除 → 2.移除XDP规则 → 3.标记数据库过期
+func (m *EBPFMonitor) CleanupExpired() int {
+	expired := m.banMgr.Expired()
+	if len(expired) == 0 {
+		return 0
+	}
 
-	for {
-		select {
-		case <-m.done:
-			return
-		case <-ticker.C:
-			expired := m.banMgr.Expired()
-			if len(expired) > 0 {
-				logger.Debugf("[FailGuard] Cleaned up %d expired ban records", len(expired))
+	count := 0
+	for _, ip := range expired {
+		// Step 2: 从 XDP eBPF map 中移除 FailGuard 规则位
+		if _, _, _, err := m.xdpMgr.UpdateRuleSourceMask(ip, ebpfs.SourceMaskFailGuard); err != nil {
+			logger.Warnf("[FailGuard] Failed to remove XDP rule for expired IP %s: %v", ip, err)
+		} else {
+			logger.Debugf("[FailGuard] Removed XDP rule for expired IP %s", ip)
+		}
+
+		// Step 3: 标记数据库记录为已过期
+		if m.store != nil {
+			if err := m.store.MarkExpired(ip, "failguard"); err != nil {
+				logger.Warnf("[FailGuard] Failed to mark ban record expired for IP %s: %v", ip, err)
 			}
 		}
+
+		count++
 	}
+
+	logger.Infof("[FailGuard] Cleaned up %d expired bans (XDP removed + DB marked expired)", count)
+	return count
 }
 
 // closeResources 关闭所有资源（不加锁，由 Stop 调用）

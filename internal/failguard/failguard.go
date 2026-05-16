@@ -42,9 +42,8 @@ func (m *Manager) Start() error {
 
 	// 定期清理过期封禁记录（每 5 分钟，与 cleanupLoop 互为备份）
 	_, err := m.cron.AddFunc("@every 5m", func() {
-		expired := m.monitor.banMgr.Expired()
-		if len(expired) > 0 {
-			logger.Debugf("[FailGuard] Cron cleaned up %d expired bans", len(expired))
+		if count := m.monitor.CleanupExpired(); count > 0 {
+			logger.Debugf("[FailGuard] Cron cleaned up %d expired bans (full unban)", count)
 		}
 	})
 	if err != nil {

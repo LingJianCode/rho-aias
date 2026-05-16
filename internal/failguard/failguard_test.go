@@ -36,6 +36,10 @@ func (m *mockEBPFManager) AddRuleWithSourceAndExpiry(value string, sourceMask ui
 	return nil
 }
 
+func (m *mockEBPFManager) UpdateRuleSourceMask(_ string, _ uint32) (uint32, bool, bool, error) {
+	return 0, true, true, nil
+}
+
 // ============================================
 // BanFilter 测试（使用手动构造的 WhitelistChecker 兼容接口）
 // ============================================

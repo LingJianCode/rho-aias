@@ -65,6 +65,7 @@ func FormatRemoteIP(rawIP uint32) string {
 // EBPFManager eBPF XDP 规则管理接口（由 ebpfs.Xdp 实现）
 type EBPFManager interface {
 	AddRuleWithSourceAndExpiry(value string, sourceMask uint32, duration int) error
+	UpdateRuleSourceMask(value string, removeMask uint32) (newMask uint32, exists bool, changed bool, err error)
 }
 
 // parseDurationNS 将秒数转为纳秒字符串（用于 eBPF volatile 变量配置）
@@ -82,4 +83,8 @@ type ebpfsXdpShim struct{}
 
 func (e *ebpfsXdpShim) AddRuleWithSourceAndExpiry(value string, sourceMask uint32, duration int) error {
 	return fmt.Errorf("shim: not implemented")
+}
+
+func (e *ebpfsXdpShim) UpdateRuleSourceMask(value string, removeMask uint32) (uint32, bool, bool, error) {
+	return 0, false, false, fmt.Errorf("shim: not implemented")
 }
