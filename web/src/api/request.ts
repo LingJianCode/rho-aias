@@ -2,6 +2,7 @@ import axios, { type AxiosInstance, type AxiosResponse, type InternalAxiosReques
 import { getToken, setToken, clearAuth } from '@/utils/auth'
 import type { ApiResponse } from '@/types/api'
 import router from '@/router'
+import { useAuthStore } from '@/stores/auth'
 
 const instance: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
@@ -31,6 +32,10 @@ async function handleSessionExpired() {
     type: 'info',
   })
   clearAuth()
+  // 同步清除 Pinia store 状态，避免路由守卫误判导致死循环
+  const authStore = useAuthStore()
+  authStore.token = null
+  authStore.user = null
   // 使用 replace 而非 push，避免用户按后退键回到过期页面
   router.replace('/login')
 }
