@@ -99,6 +99,11 @@ func (s *SshMonitor) AttachProbes() error {
 	if pamErr != nil {
 		logger.Warnf("[FailGuard] libpam.so.0 not found: %v — PAM auth events will be unavailable", pamErr)
 	} else {
+		// uretprobe requires the target file to have executable permission (+x).
+		// .so shared libraries are typically 0644 (no +x), especially in containers.
+		if chmodErr := os.Chmod(pamPath, 0755); chmodErr != nil {
+			logger.Debugf("[FailGuard] cannot chmod +x %s: %v", pamPath, chmodErr)
+		}
 		ex, err := link.OpenExecutable(pamPath)
 		if err != nil {
 			logger.Warnf("[FailGuard] open libpam executable failed: %v — PAM auth unavailable", err)
