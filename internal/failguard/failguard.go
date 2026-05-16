@@ -96,6 +96,7 @@ func (m *Manager) GetConfig() map[string]interface{} {
 		"max_retry":    m.cfg.MaxRetry,
 		"find_time":    m.cfg.FindTime,
 		"ban_duration": m.cfg.BanDuration,
+		"mode":         m.cfg.Mode,
 	}
 }
 

@@ -198,7 +198,7 @@ func (m *EBPFMonitor) handleAuthResult(e SSHEvent) {
 
 	// 白名单检查
 	if !m.filter.ShouldBlock(ipStr) {
-		logger.Debugf("[FailGuard] Auth failure whitelisted: %s (ret_code=%d)", ipStr, e.RetCode)
+		logger.Warnf("[FailGuard] Whitelist IP triggered auth failure rule: %s (ret_code=%d, action=skipped)", ipStr, e.RetCode)
 		return
 	}
 
@@ -230,7 +230,7 @@ func (m *EBPFMonitor) handlePreauthShortConn(e SSHEvent) {
 
 	// 白名单检查
 	if !m.filter.ShouldBlock(ipStr) {
-		logger.Debugf("[FailGuard] Preauth anomaly whitelisted: %s", ipStr)
+		logger.Warnf("[FailGuard] Whitelist IP triggered preauth anomaly rule: %s (action=skipped)", ipStr)
 		return
 	}
 
@@ -287,5 +287,3 @@ func (m *EBPFMonitor) closeResources() {
 		m.monitor.Close()
 	}
 }
-
-

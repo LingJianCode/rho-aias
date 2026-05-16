@@ -136,7 +136,7 @@ type FailGuardConfig struct {
 	MaxRetry         int    `yaml:"max_retry"`          // 触发封禁的失败次数阈值
 	FindTime         int    `yaml:"find_time"`          // 滑动窗口时长（秒）
 	BanDuration      int    `yaml:"ban_duration"`       // 封禁时长（秒）
-	Mode             string `yaml:"model"`
+	Mode             string `yaml:"mode"`
 }
 
 // WAFConfig WAF 日志监控配置
