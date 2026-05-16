@@ -7,7 +7,7 @@
 #   ./run_tests.sh --ddos       # 仅运行 DDoS 检测测试
 #   ./run_tests.sh --log-ban    # 仅运行日志触发封禁测试（WAF/FailGuard/Rate Limit）
 #   ./run_tests.sh --blocklog   # 仅运行 BlockLog 阻断日志测试
-#   ./run_tests.sh -t TestXDPIpBlocking.test_01_ipv4_exact_block  # 运行特定用例（透传到对应脚本）
+#   ./run_tests.sh  ./run_tests.sh --log-ban -t TestMixedBan.test_same_ip_different_sources  # 运行特定用例（透传到对应脚本）
 #   ./run_tests.sh --api-key sk_live_your-key-here  # 使用指定 API Key
 #   ./run_tests.sh --env-only   # 仅运行环境测试（不需要编译 rho-aias）
 #

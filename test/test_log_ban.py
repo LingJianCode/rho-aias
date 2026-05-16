@@ -528,6 +528,7 @@ class TestMixedBan(LogBanTestBase):
         waf_same_ip_line = json.dumps({
             "transaction": {
                 "timestamp": "2026/04/01 10:01:00",
+                "client_ip": "203.0.113.99",
                 "request": {
                     "uri": "/attack",
                     "method": "POST",
