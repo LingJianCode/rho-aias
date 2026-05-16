@@ -9,7 +9,7 @@ package config
 // --- FailGuard ---
 
 type FailGuardRuntime struct {
-	Enabled     bool   `json:"enabled" yaml:"enabled" validate:"required"`
+	Enabled     bool   `json:"enabled" yaml:"enabled"`
 	MaxRetry    int    `json:"max_retry" yaml:"max_retry" validate:"gte=1,lte=1000"`
 	FindTime    int    `json:"find_time" yaml:"find_time" validate:"gte=1,lte=86400"`
 	BanDuration int    `json:"ban_duration" yaml:"ban_duration" validate:"gte=1,lte=31536000"`
@@ -19,21 +19,21 @@ type FailGuardRuntime struct {
 // --- WAF ---
 
 type WAFRuntime struct {
-	Enabled     bool `json:"enabled" yaml:"enabled" validate:"required"`
+	Enabled     bool `json:"enabled" yaml:"enabled"`
 	BanDuration int  `json:"ban_duration" yaml:"ban_duration" validate:"gte=1,lte=31536000"`
 }
 
 // --- RateLimit ---
 
 type RateLimitRuntime struct {
-	Enabled     bool `json:"enabled" yaml:"enabled" validate:"required"`
+	Enabled     bool `json:"enabled" yaml:"enabled"`
 	BanDuration int  `json:"ban_duration" yaml:"ban_duration" validate:"gte=1,lte=31536000"`
 }
 
 // --- AnomalyDetection ---
 
 type AnomalyDetectionRuntime struct {
-	Enabled    bool            `json:"enabled" yaml:"enabled" validate:"required"`
+	Enabled    bool            `json:"enabled" yaml:"enabled"`
 	MinPackets int             `json:"min_packets" yaml:"min_packets" validate:"gte=1,lte=100000"`
 	Ports      []int           `json:"ports" yaml:"ports" validate:"required,dive,gte=1,lte=65535"`
 	Baseline   BaselineRuntime `json:"baseline" yaml:"baseline"`
@@ -65,7 +65,7 @@ type AttackRuntime struct {
 // --- GeoBlocking ---
 
 type GeoBlockingRuntime struct {
-	Enabled          bool                        `json:"enabled" yaml:"enabled" validate:"required"`
+	Enabled          bool                        `json:"enabled" yaml:"enabled"`
 	Mode             string                      `json:"mode" yaml:"mode" validate:"oneof=whitelist blacklist"`
 	AllowedCountries []string                    `json:"allowed_countries" yaml:"allowed_countries" validate:"omitempty,dive,len=2"`
 	Sources          map[string]GeoSourceRuntime `json:"sources,omitempty" yaml:"sources"`
@@ -81,7 +81,7 @@ type GeoSourceRuntime struct {
 // --- Intel ---
 
 type IntelRuntime struct {
-	Enabled bool                          `json:"enabled" yaml:"enabled" validate:"required"`
+	Enabled bool                          `json:"enabled" yaml:"enabled"`
 	Sources map[string]IntelSourceRuntime `json:"sources,omitempty" yaml:"sources"`
 }
 
@@ -94,7 +94,7 @@ type IntelSourceRuntime struct {
 // --- BlocklogEvents ---
 
 type BlocklogEventsRuntime struct {
-	Enabled    bool   `json:"enabled" yaml:"enabled" validate:"required"`
+	Enabled    bool   `json:"enabled" yaml:"enabled"`
 	SampleRate uint32 `json:"sample_rate" yaml:"sample_rate" validate:"gte=1"`
 }
 
