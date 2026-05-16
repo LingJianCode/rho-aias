@@ -117,8 +117,7 @@ int handle_fork(struct trace_event_raw_sched_process_fork *ctx) {
 
 // --- C. PAM 认证判定 ---
 SEC("uretprobe/pam_authenticate")
-int handle_pam_auth(struct pt_regs *ctx) {
-    int ret = PT_REGS_RC(ctx);
+int BPF_KRETPROBE(handle_pam_auth, int ret) {
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
 
     struct pid_ctx *conn_ctx = bpf_map_lookup_elem(&pid_ctx_map, &pid);
