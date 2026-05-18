@@ -46,9 +46,9 @@
             <el-form-item label="检测模式">
               <el-select v-model="failguard.mode" style="width: 100%">
                 <el-option value="normal" label="正常模式" />
-                <el-option value="ddos" label="DDoS 防护模式" />
                 <el-option value="aggressive" label="激进模式" />
               </el-select>
+              <div class="form-hint">激进模式额外检测 preauth 阶段的短连接和异常退出</div>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="prepareSave('failguard', failguard)" :loading="saving">保存</el-button>
@@ -410,7 +410,6 @@ function formatDiffValue(val: unknown): string {
 // 模式映射中文
 const modeLabels: Record<string, string> = {
   normal: '正常模式',
-  ddos: 'DDoS 防护模式',
   aggressive: '激进模式',
   whitelist: '白名单模式',
   blacklist: '黑名单模式',

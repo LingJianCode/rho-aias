@@ -66,7 +66,7 @@ func (m *EBPFMonitor) Start() error {
 	}
 
 	// 1. 加载 eBPF 对象（含全局变量配置）
-	if err := m.monitor.Load(uint16(m.cfg.SSHPort), m.cfg.ShortConnSeconds); err != nil {
+	if err := m.monitor.Load(uint16(m.cfg.SSHPort), m.cfg.ShortConnSeconds, m.cfg.Mode); err != nil {
 		return fmt.Errorf("load eBPF objects: %w", err)
 	}
 
@@ -114,6 +114,12 @@ func (m *EBPFMonitor) IsRunning() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.running
+}
+
+// UpdateMode 运行时动态切换检测模式（normal / aggressive）
+// 通过 SshMonitor 转发到 eBPF config_map 的 BPF_MAP_ARRAY Put 操作
+func (m *EBPFMonitor) UpdateMode(mode string) error {
+	return m.monitor.UpdateMode(mode)
 }
 
 // GetStats 获取统计信息

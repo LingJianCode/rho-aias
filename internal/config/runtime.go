@@ -13,7 +13,7 @@ type FailGuardRuntime struct {
 	MaxRetry    int    `json:"max_retry" yaml:"max_retry" validate:"gte=1,lte=1000"`
 	FindTime    int    `json:"find_time" yaml:"find_time" validate:"gte=1,lte=86400"`
 	BanDuration int    `json:"ban_duration" yaml:"ban_duration" validate:"gte=1,lte=31536000"`
-	Mode        string `json:"mode" yaml:"mode" validate:"oneof=normal ddos aggressive"`
+	Mode        string `json:"mode" yaml:"mode" validate:"oneof=normal aggressive"`
 }
 
 // --- WAF ---

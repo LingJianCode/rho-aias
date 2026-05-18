@@ -8,7 +8,14 @@
 
 char __license[] SEC("license") = "GPL";
 
-volatile __u8 aggressive_mode = 0;
+// 运行时配置（通过 BPF_MAP_ARRAY 实现动态热更新）
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u8);
+} config_map SEC(".maps");
+
 volatile __u64 preauth_short_conn_ns = 2000000000ULL;
 
 enum ssh_event_type {
@@ -159,7 +166,9 @@ int handle_exit(struct trace_event_raw_sched_process_template *ctx) {
     __u32 exit_status = (raw_exit_code >> 8) & 0xFF;
     __u32 exit_signal = raw_exit_code & 0x7F;
 
-    if (aggressive_mode) {
+    __u32 cfg_key = 0;
+    __u8 *aggressive_mode = bpf_map_lookup_elem(&config_map, &cfg_key);
+    if (aggressive_mode && *aggressive_mode) {
         if (conn_ctx->auth_attempted == 0) {
             __u64 duration_ns = bpf_ktime_get_ns() - conn_ctx->start_ns;
 

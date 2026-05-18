@@ -75,7 +75,6 @@ func (m *Manager) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int
 	m.cfg.MaxRetry = maxRetry
 	m.cfg.FindTime = findTime
 	m.cfg.BanDuration = banDuration
-	m.cfg.Mode = model
 
 	// 更新 BanManager 参数
 	m.monitor.banMgr.mu.Lock()
@@ -84,8 +83,17 @@ func (m *Manager) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int
 	m.monitor.banMgr.duration = time.Duration(banDuration) * time.Second
 	m.monitor.banMgr.mu.Unlock()
 
-	logger.Infof("[FailGuard] Config updated: enabled=%v, max_retry=%d, find_time=%d, ban_duration=%d",
-		enabled, maxRetry, findTime, banDuration)
+	// mode 变更：通过 ebpf.Variable.Set() 直接修改内核全局变量，无需重载 eBPF 程序
+	if m.cfg.Mode != model {
+		logger.Infof("[FailGuard] Mode changed %s → %s, updating eBPF variable", m.cfg.Mode, model)
+		if err := m.monitor.UpdateMode(model); err != nil {
+			logger.Errorf("[FailGuard] Failed to update aggressive_mode at runtime: %v", err)
+		}
+		m.cfg.Mode = model
+	}
+
+	logger.Infof("[FailGuard] Config updated: enabled=%v, max_retry=%d, find_time=%d, ban_duration=%d, mode=%s",
+		enabled, maxRetry, findTime, banDuration, m.cfg.Mode)
 }
 
 // GetConfig 获取当前可动态化字段
