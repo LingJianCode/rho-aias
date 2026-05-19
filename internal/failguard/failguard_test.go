@@ -315,7 +315,7 @@ func TestBanManager_Concurrent(t *testing.T) {
 func TestNewManager(t *testing.T) {
 	cfg := &config.FailGuardConfig{
 		Enabled:          true,
-		SSHPort:          22,
+		SSHPorts:         []int{22},
 		ShortConnSeconds: 2,
 		MaxRetry:         5,
 		FindTime:         600,
@@ -333,7 +333,7 @@ func TestNewManager(t *testing.T) {
 func TestManager_StopWithoutStart(t *testing.T) {
 	cfg := &config.FailGuardConfig{
 		Enabled:          true,
-		SSHPort:          22,
+		SSHPorts:         []int{22},
 		MaxRetry:         5,
 		FindTime:         600,
 		BanDuration:      3600,
@@ -345,7 +345,7 @@ func TestManager_StopWithoutStart(t *testing.T) {
 func TestManager_GetConfig(t *testing.T) {
 	cfg := &config.FailGuardConfig{
 		Enabled:     true,
-		SSHPort:     2222,
+		SSHPorts:    []int{2222},
 		MaxRetry:    10,
 		FindTime:    300,
 		BanDuration: 7200,

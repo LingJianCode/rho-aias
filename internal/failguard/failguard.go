@@ -54,8 +54,8 @@ func (m *Manager) Start() error {
 	m.cron.Start()
 	m.running = true
 
-	logger.Infof("[FailGuard] Monitor started (eBPF mode), ssh_port=%d, max_retry=%d, find_time=%ds, ban_duration=%ds",
-		m.cfg.SSHPort, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
+	logger.Infof("[FailGuard] Monitor started (eBPF mode), ssh_ports=%v, max_retry=%d, find_time=%ds, ban_duration=%ds",
+		m.cfg.SSHPorts, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
 	return nil
 }
 
@@ -70,7 +70,7 @@ func (m *Manager) Stop() {
 }
 
 // UpdateConfig 热更新配置
-func (m *Manager) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int, model string) {
+func (m *Manager) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int, model string, ports []int, shortConnSeconds int) {
 	m.cfg.Enabled = enabled
 	m.cfg.MaxRetry = maxRetry
 	m.cfg.FindTime = findTime
@@ -83,27 +83,43 @@ func (m *Manager) UpdateConfig(enabled bool, maxRetry, findTime, banDuration int
 	m.monitor.banMgr.duration = time.Duration(banDuration) * time.Second
 	m.monitor.banMgr.mu.Unlock()
 
-	// mode 变更：通过 ebpf.Variable.Set() 直接修改内核全局变量，无需重载 eBPF 程序
-	if m.cfg.Mode != model {
-		logger.Infof("[FailGuard] Mode changed %s → %s, updating eBPF variable", m.cfg.Mode, model)
-		if err := m.monitor.UpdateMode(model); err != nil {
-			logger.Errorf("[FailGuard] Failed to update aggressive_mode at runtime: %v", err)
+	// 端口变更：通过 BPF_MAP_HASH Put 热更新
+	if !intSliceEqual(m.cfg.SSHPorts, ports) {
+		u16 := toUint16Slice(ports)
+		logger.Infof("[FailGuard] Ports changed %v → %v, updating eBPF map", m.cfg.SSHPorts, ports)
+		if err := m.monitor.UpdatePorts(u16); err != nil {
+			logger.Errorf("[FailGuard] Failed to update monitored_ports at runtime: %v", err)
 		}
-		m.cfg.Mode = model
+		m.cfg.SSHPorts = ports
 	}
 
-	logger.Infof("[FailGuard] Config updated: enabled=%v, max_retry=%d, find_time=%d, ban_duration=%d, mode=%s",
-		enabled, maxRetry, findTime, banDuration, m.cfg.Mode)
+	// 运行时配置变更（mode + shortConnSeconds）：通过 BPF_MAP_ARRAY Put 热更新
+	modeChanged := m.cfg.Mode != model
+	nsChanged := m.cfg.ShortConnSeconds != shortConnSeconds
+	if modeChanged || nsChanged {
+		logger.Infof("[FailGuard] Runtime config changed: mode=%s→%s, short_conn=%d→%ds",
+			m.cfg.Mode, model, m.cfg.ShortConnSeconds, shortConnSeconds)
+		if err := m.monitor.UpdateRuntimeConfig(shortConnSeconds, model); err != nil {
+			logger.Errorf("[FailGuard] Failed to update config_map at runtime: %v", err)
+		}
+		m.cfg.Mode = model
+		m.cfg.ShortConnSeconds = shortConnSeconds
+	}
+
+	logger.Infof("[FailGuard] Config updated: enabled=%v, ssh_ports=%v, short_conn=%ds, max_retry=%d, find_time=%d, ban_duration=%d, mode=%s",
+		enabled, ports, shortConnSeconds, maxRetry, findTime, banDuration, m.cfg.Mode)
 }
 
 // GetConfig 获取当前可动态化字段
 func (m *Manager) GetConfig() map[string]interface{} {
 	return map[string]interface{}{
-		"enabled":      m.cfg.Enabled,
-		"max_retry":    m.cfg.MaxRetry,
-		"find_time":    m.cfg.FindTime,
-		"ban_duration": m.cfg.BanDuration,
-		"mode":         m.cfg.Mode,
+		"enabled":            m.cfg.Enabled,
+		"ssh_ports":          m.cfg.SSHPorts,
+		"short_conn_seconds": m.cfg.ShortConnSeconds,
+		"max_retry":          m.cfg.MaxRetry,
+		"find_time":          m.cfg.FindTime,
+		"ban_duration":       m.cfg.BanDuration,
+		"mode":               m.cfg.Mode,
 	}
 }
 
@@ -125,4 +141,17 @@ func (m *Manager) IsBanned(ip string) bool {
 // IsRunning 检查监控器是否正在运行
 func (m *Manager) IsRunning() bool {
 	return m.running
+}
+
+// intSliceEqual 比较两个 []int 是否相等
+func intSliceEqual(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

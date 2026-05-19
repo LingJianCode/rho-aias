@@ -65,8 +65,9 @@ func (m *EBPFMonitor) Start() error {
 		return fmt.Errorf("eBPF monitor already running")
 	}
 
-	// 1. 加载 eBPF 对象（含全局变量配置）
-	if err := m.monitor.Load(uint16(m.cfg.SSHPort), m.cfg.ShortConnSeconds, m.cfg.Mode); err != nil {
+	// 1. 加载 eBPF 对象
+	ports := toUint16Slice(m.cfg.SSHPorts)
+	if err := m.monitor.Load(ports, m.cfg.ShortConnSeconds, m.cfg.Mode); err != nil {
 		return fmt.Errorf("load eBPF objects: %w", err)
 	}
 
@@ -87,8 +88,8 @@ func (m *EBPFMonitor) Start() error {
 	m.running = true
 	go m.eventLoop()
 
-	logger.Infof("[FailGuard] eBPF monitor started, ssh_port=%d, max_retry=%d, find_time=%ds, ban_duration=%ds",
-		m.cfg.SSHPort, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
+	logger.Infof("[FailGuard] eBPF monitor started, ssh_ports=%v, max_retry=%d, find_time=%ds, ban_duration=%ds",
+		m.cfg.SSHPorts, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
 	return nil
 }
 
@@ -116,10 +117,23 @@ func (m *EBPFMonitor) IsRunning() bool {
 	return m.running
 }
 
-// UpdateMode 运行时动态切换检测模式（normal / aggressive）
-// 通过 SshMonitor 转发到 eBPF config_map 的 BPF_MAP_ARRAY Put 操作
-func (m *EBPFMonitor) UpdateMode(mode string) error {
-	return m.monitor.UpdateMode(mode)
+// UpdateRuntimeConfig 运行时动态更新全部运行时参数（mode + short_conn_ns）
+func (m *EBPFMonitor) UpdateRuntimeConfig(shortConnSeconds int, mode string) error {
+	return m.monitor.UpdateRuntimeConfig(shortConnSeconds, mode)
+}
+
+// UpdatePorts 运行时动态更新监控端口列表
+func (m *EBPFMonitor) UpdatePorts(ports []uint16) error {
+	return m.monitor.UpdatePorts(ports)
+}
+
+// toUint16Slice converts []int to []uint16
+func toUint16Slice(ports []int) []uint16 {
+	r := make([]uint16, len(ports))
+	for i, p := range ports {
+		r[i] = uint16(p)
+	}
+	return r
 }
 
 // GetStats 获取统计信息

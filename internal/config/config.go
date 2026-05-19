@@ -130,8 +130,8 @@ type GeoEnrichConfig struct {
 // 通过内核级 eBPF probes 实时检测 SSH 暴力破解
 // 探针: fexit/kretprobe(inet_csk_accept), tracepoint(sched_process_fork/exit), uretprobe(pam_authenticate)
 type FailGuardConfig struct {
-	Enabled          bool   `yaml:"enabled"`            // 是否启用 FailGuard
-	SSHPort          int    `yaml:"ssh_port"`           // 监控的 SSH 端口（默认 22）
+	Enabled          bool   `yaml:"enabled"`             // 是否启用 FailGuard
+	SSHPorts         []int  `yaml:"ssh_ports"`          // 监控的 SSH 端口列表
 	ShortConnSeconds int    `yaml:"short_conn_seconds"` // preauth 短连接判定阈值（秒，默认 2）
 	MaxRetry         int    `yaml:"max_retry"`          // 触发封禁的失败次数阈值
 	FindTime         int    `yaml:"find_time"`          // 滑动窗口时长（秒）
@@ -263,7 +263,9 @@ func applyDefaults(config *Config) {
 	}
 
 	// FailGuard 默认值
-	setIfZero(&config.FailGuard.SSHPort, 22)
+	if len(config.FailGuard.SSHPorts) == 0 {
+		config.FailGuard.SSHPorts = []int{22}
+	}
 	setIfZero(&config.FailGuard.ShortConnSeconds, 2)
 	setIfZero(&config.FailGuard.MaxRetry, 5)
 	setIfZero(&config.FailGuard.FindTime, 600)     // 默认 10 分钟

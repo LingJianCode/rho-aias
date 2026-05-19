@@ -13,10 +13,14 @@ struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, __u32);
-	__type(value, __u8);
+	__type(value, struct runtime_config);
 } config_map SEC(".maps");
 
-volatile __u64 preauth_short_conn_ns = 2000000000ULL;
+// 运行时配置结构体（存入 config_map，支持运行时热更新）
+struct runtime_config {
+	__u8  aggressive_mode;        // 0=normal, 1=aggressive
+	__u64 preauth_short_conn_ns;  // preauth 短连接判定阈值（纳秒）
+};
 
 enum ssh_event_type {
     EVENT_AUTH_RESULT = 1,
@@ -167,12 +171,12 @@ int handle_exit(struct trace_event_raw_sched_process_template *ctx) {
     __u32 exit_signal = raw_exit_code & 0x7F;
 
     __u32 cfg_key = 0;
-    __u8 *aggressive_mode = bpf_map_lookup_elem(&config_map, &cfg_key);
-    if (aggressive_mode && *aggressive_mode) {
+    struct runtime_config *cfg = bpf_map_lookup_elem(&config_map, &cfg_key);
+    if (cfg && cfg->aggressive_mode) {
         if (conn_ctx->auth_attempted == 0) {
             __u64 duration_ns = bpf_ktime_get_ns() - conn_ctx->start_ns;
 
-            if (duration_ns < preauth_short_conn_ns || exit_status != 0 || exit_signal != 0) {
+            if (duration_ns < cfg->preauth_short_conn_ns || exit_status != 0 || exit_signal != 0) {
                 struct ssh_event e = {
                     .type = EVENT_PREAUTH_SHORT_CONN,
                     .pid = pid,

@@ -24,7 +24,7 @@ func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
 
 	wasRunning := h.failguardMgr.IsRunning()
 
-	h.failguardMgr.UpdateConfig(req.Enabled, req.MaxRetry, req.FindTime, req.BanDuration, req.Mode)
+	h.failguardMgr.UpdateConfig(req.Enabled, req.MaxRetry, req.FindTime, req.BanDuration, req.Mode, req.SSHPorts, req.ShortConnSeconds)
 
 	if !wasRunning && req.Enabled {
 		tryStart(h.failguardMgr.Start, "[ConfigAPI] FailGuard")

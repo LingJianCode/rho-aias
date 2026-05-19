@@ -9,11 +9,13 @@ package config
 // --- FailGuard ---
 
 type FailGuardRuntime struct {
-	Enabled     bool   `json:"enabled" yaml:"enabled"`
-	MaxRetry    int    `json:"max_retry" yaml:"max_retry" validate:"gte=1,lte=1000"`
-	FindTime    int    `json:"find_time" yaml:"find_time" validate:"gte=1,lte=86400"`
-	BanDuration int    `json:"ban_duration" yaml:"ban_duration" validate:"gte=1,lte=31536000"`
-	Mode        string `json:"mode" yaml:"mode" validate:"oneof=normal aggressive"`
+	Enabled           bool   `json:"enabled" yaml:"enabled"`
+	SSHPorts          []int  `json:"ssh_ports" yaml:"ssh_ports" validate:"required,dive,gte=1,lte=65535,max=16"`
+	ShortConnSeconds  int    `json:"short_conn_seconds" yaml:"short_conn_seconds" validate:"gte=1,lte=60"`
+	MaxRetry          int    `json:"max_retry" yaml:"max_retry" validate:"gte=1,lte=1000"`
+	FindTime          int    `json:"find_time" yaml:"find_time" validate:"gte=1,lte=86400"`
+	BanDuration       int    `json:"ban_duration" yaml:"ban_duration" validate:"gte=1,lte=31536000"`
+	Mode              string `json:"mode" yaml:"mode" validate:"oneof=normal aggressive"`
 }
 
 // --- WAF ---

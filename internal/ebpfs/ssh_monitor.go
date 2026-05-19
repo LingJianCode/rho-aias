@@ -15,6 +15,12 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 )
 
+// runtimeConfig 与 eBPF C 端 struct runtime_config 对应
+type runtimeConfig struct {
+	AggressiveMode      uint8
+	PreauthShortConnNs uint64
+}
+
 // SshMonitor SSH 登录行为监控的 eBPF 门面
 // 封装 bpf2go 生成的 sshMonitorObjects，对外暴露高层 API
 type SshMonitor struct {
@@ -28,45 +34,70 @@ func NewSshMonitor() *SshMonitor {
 	return &SshMonitor{}
 }
 
-// Load 加载 eBPF 对象到内核（在加载前通过 spec 设置全局变量，避免 const 变量只读问题）
-func (s *SshMonitor) Load(sshPort uint16, shortConnSeconds int, mode string) error {
+// Load 加载 eBPF 对象到内核（运行时配置全部通过 Map.Put() 写入，无需 spec 全局变量）
+func (s *SshMonitor) Load(ports []uint16, shortConnSeconds int, mode string) error {
 	spec, err := loadSshMonitor()
 	if err != nil {
 		return fmt.Errorf("load ssh_monitor spec: %w", err)
 	}
 
-	// 在 spec 层面设置全局变量（此时尚未加载到内核）
-	if connVar := spec.Variables["preauth_short_conn_ns"]; connVar != nil {
-		shortConnNS := uint64(shortConnSeconds) * uint64(time.Second)
-		if err := connVar.Set(shortConnNS); err != nil {
-			return fmt.Errorf("set preauth_short_conn_ns (spec): %w", err)
-		}
-	}
-
-	// 加载到内核
+	// 直接加载，无需 spec.Variables 设置
 	var obj sshMonitorObjects
 	if err := spec.LoadAndAssign(&obj, nil); err != nil {
 		return fmt.Errorf("load and assign ssh_monitor objects: %w", err)
 	}
 	s.objects = &obj
 
-	// 配置监控端口 map（map 可以在加载后写入）
-	portVal := uint8(1)
-	if err := s.objects.MonitoredPorts.Put(&sshPort, &portVal); err != nil {
-		return fmt.Errorf("set monitored_ports[%d]: %w", sshPort, err)
+	// 写入端口列表
+	if err := s.putPorts(ports); err != nil {
+		return err
 	}
 
-	// 配置运行时模式 map（BPF_MAP_ARRAY，支持热更新）
+	// 写入运行时配置（mode + short_conn_ns 合一到 config_map）
+	return s.putRuntimeConfig(shortConnSeconds, mode)
+}
+
+// putRuntimeConfig 将运行时配置写入 config_map（BPF_MAP_ARRAY[0] = runtime_config）
+func (s *SshMonitor) putRuntimeConfig(shortConnSeconds int, mode string) error {
 	cfgKey := uint32(0)
-	modeVal := uint8(0)
+	cfgVal := runtimeConfig{
+		AggressiveMode:      0,
+		PreauthShortConnNs: uint64(shortConnSeconds) * uint64(time.Second),
+	}
 	if mode == "aggressive" {
-		modeVal = 1
+		cfgVal.AggressiveMode = 1
 	}
-	if err := s.objects.ConfigMap.Put(&cfgKey, &modeVal); err != nil {
-		return fmt.Errorf("set config_map[mode]: %w", err)
+	if err := s.objects.ConfigMap.Put(&cfgKey, &cfgVal); err != nil {
+		return fmt.Errorf("set config_map: %w", err)
 	}
-
 	return nil
+}
+
+// UpdateRuntimeConfig 运行时动态更新全部运行时参数（mode + short_conn_ns）
+func (s *SshMonitor) UpdateRuntimeConfig(shortConnSeconds int, mode string) error {
+	if s.objects == nil {
+		return fmt.Errorf("eBPF objects not loaded")
+	}
+	return s.putRuntimeConfig(shortConnSeconds, mode)
+}
+
+// putPorts 将端口列表写入 monitored_ports hash map
+func (s *SshMonitor) putPorts(ports []uint16) error {
+	portVal := uint8(1)
+	for _, p := range ports {
+		if err := s.objects.MonitoredPorts.Put(&p, &portVal); err != nil {
+			return fmt.Errorf("set monitored_ports[%d]: %w", p, err)
+		}
+	}
+	return nil
+}
+
+// UpdatePorts 运行时动态更新监控端口列表
+func (s *SshMonitor) UpdatePorts(ports []uint16) error {
+	if s.objects == nil {
+		return fmt.Errorf("eBPF objects not loaded")
+	}
+	return s.putPorts(ports)
 }
 
 // AttachProbes 附加所有 kprobe/tracepoint/fexit 探针
@@ -140,20 +171,6 @@ func (s *SshMonitor) AttachProbes() error {
 
 	logger.Infof("[FailGuard] Attached %d probes successfully", len(s.links))
 	return nil
-}
-
-// UpdateMode 运行时动态修改 eBPF config_map 中的 aggressive_mode（无需重载程序）
-// 通过 BPF_MAP_ARRAY 的 Put 操作直接更新内核 map，兼容所有支持 eBPF 的内核版本
-func (s *SshMonitor) UpdateMode(mode string) error {
-	if s.objects == nil {
-		return fmt.Errorf("eBPF objects not loaded")
-	}
-	cfgKey := uint32(0)
-	modeVal := uint8(0)
-	if mode == "aggressive" {
-		modeVal = 1
-	}
-	return s.objects.ConfigMap.Put(&cfgKey, &modeVal)
 }
 
 // EventsReader 创建 RingBuf 事件读取器
