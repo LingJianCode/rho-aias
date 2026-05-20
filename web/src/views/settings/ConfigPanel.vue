@@ -714,8 +714,7 @@ function addPort(module: string) {
 
   if (!target) return
   if (list.length >= 16) ElMessage.warning('最多支持 16 个端口')
-  else if (list.includes(22)) ElMessage.warning('该端口已存在')
-  else list.push(22)
+  else list.push(1)
 }
 
 function removePort(module: string, index: number) {
