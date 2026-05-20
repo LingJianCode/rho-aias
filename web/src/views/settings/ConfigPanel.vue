@@ -641,6 +641,16 @@ async function loadModuleConfig(module: ConfigModuleName) {
 
 /** 点击保存按钮 → 计算弹窗 */
 function prepareSave(module: ConfigModuleName, data: Record<string, unknown>) {
+  // failguard 提交前去重 ssh_ports
+  if (module === 'failguard' && Array.isArray(data.ssh_ports)) {
+    const seen = new Set<number>()
+    data.ssh_ports = (data.ssh_ports as number[]).filter((p: number) => {
+      if (seen.has(p)) return false
+      seen.add(p)
+      return true
+    })
+  }
+
   const diff = computeDiff(module, data)
 
   if (diff.length === 0) {
@@ -683,6 +693,7 @@ function addPort(module: string) {
   const target = module === 'failguard' ? failguard : null
   if (target && 'ssh_ports' in target) {
     if ((target.ssh_ports as number[]).length >= 16) ElMessage.warning('最多支持 16 个端口')
+    else if ((target.ssh_ports as number[]).includes(22)) ElMessage.warning('该端口已存在')
     else target.ssh_ports.push(22)
   }
 }

@@ -11,6 +11,19 @@ import (
 	"rho-aias/internal/logger"
 )
 
+// dedupIntSlice 对整数切片去重，保持原有顺序
+func dedupIntSlice(s []int) []int {
+	seen := map[int]bool{}
+	result := make([]int, 0, len(s))
+	for _, v := range s {
+		if !seen[v] {
+			seen[v] = true
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
 // ========== FailGuard / WAF / RateLimit 模块应用逻辑 ==========
 
 func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
@@ -18,6 +31,9 @@ func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
+
+	// SSHPorts 去重兜底，防止前端或 API 直调传入重复端口
+	req.SSHPorts = dedupIntSlice(req.SSHPorts)
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
