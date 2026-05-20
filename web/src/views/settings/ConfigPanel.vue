@@ -115,9 +115,15 @@
               <div class="form-hint">低于此数量的连接将被忽略</div>
             </el-form-item>
             <el-form-item label="监控端口列表">
-              <el-select v-model="anomaly.ports" multiple filterable allow-create placeholder="输入端口号" style="width: 100%">
-                <el-option v-for="p in anomaly.ports" :key="p" :label="String(p)" :value="p" />
-              </el-select>
+              <div style="display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap;">
+                <div v-for="(port, idx) in anomaly.ports" :key="idx" style="display: flex; gap: 4px; margin-bottom: 4px;">
+                  <el-input-number v-model="anomaly.ports[idx]" :min="1" :max="65535" :controls="false"
+                    style="width: 110px;" placeholder="端口号" />
+                  <el-button type="danger" size="small" plain @click="removePort('anomaly', idx)">删除</el-button>
+                </div>
+                <el-button type="primary" size="small" plain @click="addPort('anomaly')">+ 添加</el-button>
+              </div>
+              <div class="form-hint">监控的端口列表，最多支持 16 个</div>
             </el-form-item>
             <el-divider content-position="left">IQR 基线参数</el-divider>
             <el-form-item label="最小样本数">
@@ -651,6 +657,16 @@ function prepareSave(module: ConfigModuleName, data: Record<string, unknown>) {
     })
   }
 
+  // anomaly_detection 提交前去重 ports
+  if (module === 'anomaly_detection' && Array.isArray(data.ports)) {
+    const seen = new Set<number>()
+    data.ports = (data.ports as number[]).filter((p: number) => {
+      if (seen.has(p)) return false
+      seen.add(p)
+      return true
+    })
+  }
+
   const diff = computeDiff(module, data)
 
   if (diff.length === 0) {
@@ -690,19 +706,27 @@ async function confirmAndSave() {
 
 /** 端口列表管理 */
 function addPort(module: string) {
-  const target = module === 'failguard' ? failguard : null
-  if (target && 'ssh_ports' in target) {
-    if ((target.ssh_ports as number[]).length >= 16) ElMessage.warning('最多支持 16 个端口')
-    else if ((target.ssh_ports as number[]).includes(22)) ElMessage.warning('该端口已存在')
-    else target.ssh_ports.push(22)
-  }
+  let target: { ports?: number[]; ssh_ports?: number[] } | null = null
+  if (module === 'failguard') target = failguard
+  else if (module === 'anomaly') target = anomaly
+  const field = module === 'failguard' ? 'ssh_ports' : 'ports'
+  const list = (target?.[field] as number[]) ?? []
+
+  if (!target) return
+  if (list.length >= 16) ElMessage.warning('最多支持 16 个端口')
+  else if (list.includes(22)) ElMessage.warning('该端口已存在')
+  else list.push(22)
 }
 
 function removePort(module: string, index: number) {
-  const target = module === 'failguard' ? failguard : null
-  if (target && 'ssh_ports' in target) {
-    target.ssh_ports.splice(index, 1)
-  }
+  let target: { ports?: number[]; ssh_ports?: number[] } | null = null
+  if (module === 'failguard') target = failguard
+  else if (module === 'anomaly') target = anomaly
+  const field = module === 'failguard' ? 'ssh_ports' : 'ports'
+  const list = (target?.[field] as number[]) ?? []
+
+  if (!target || !list) return
+  list.splice(index, 1)
 }
 
 onMounted(() => loadModuleConfig(activeModule.value))
