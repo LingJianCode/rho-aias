@@ -55,10 +55,13 @@
         <el-form-item label="来源">
           <el-select v-model="filters.rule_source" placeholder="全部来源" clearable style="width: 140px" @change="handleSearch">
             <el-option label="手动" value="manual" />
+            <el-option label="IPsum" value="ipsum" />
+            <el-option label="Spamhaus" value="spamhaus" />
             <el-option label="WAF" value="waf" />
             <el-option label="DDoS" value="ddos" />
-            <el-option label="异常检测" value="anomaly" />
+            <el-option label="anomaly" value="anomaly" />
             <el-option label="FailGuard" value="failguard" />
+            <el-option label="Rate Limit" value="rate_limit" />
           </el-select>
         </el-form-item>
         <el-form-item>
