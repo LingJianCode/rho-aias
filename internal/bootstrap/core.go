@@ -140,4 +140,46 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 			c.WhitelistManager.Checker().LoadFromCache(whitelistData)
 		}
 	}
+
+	// 从 DB 动态配置恢复 blocklog_events 到 eBPF map（直接操作 eBPF map，不走 Manager）
+	if cfg.BlockLog.EventsEnabled || cfg.BlockLog.EventsSampleRate != 0 {
+		if err := c.XDP.SetBlocklogEventConfig(cfg.BlockLog.EventsEnabled, cfg.BlockLog.EventsSampleRate); err != nil {
+			logger.Warnf("[BlockLogEvents] Failed to restore DB config to eBPF map: %v", err)
+		} else {
+			logger.Infof("[BlockLogEvents] Restored from DB: enabled=%v, sample_rate=%d",
+				cfg.BlockLog.EventsEnabled, cfg.BlockLog.EventsSampleRate)
+		}
+	}
+
+	// 从 DB 动态配置恢复 egress_limit 到 TC eBPF map
+	if cfg.EgressLimit.Enabled || cfg.EgressLimit.RateMbps > 0 {
+		rateBytes := uint64(cfg.EgressLimit.RateMbps * 1000000 / 8)
+		burstBytes := cfg.EgressLimit.BurstBytes
+		if burstBytes == 0 {
+			burstBytes = uint64(rateBytes * 2) // 默认突发 = 2x 速率
+		}
+		egressCfg := ebpfs.EgressLimitConfig{
+			Enabled:    0,
+			RateBytes:  rateBytes,
+			BurstBytes: burstBytes,
+		}
+		if cfg.EgressLimit.Enabled {
+			egressCfg.Enabled = 1
+		}
+		if err := c.TcEgress.SetEgressLimitConfig(egressCfg); err != nil {
+			logger.Warnf("[EgressLimit] Failed to restore DB config to TC eBPF map: %v", err)
+		} else {
+			logger.Infof("[EgressLimit] Restored from DB: enabled=%v, rate=%.1f Mbps, burst=%d bytes",
+				cfg.EgressLimit.Enabled, cfg.EgressLimit.RateMbps, burstBytes)
+		}
+
+		// 恢复丢包日志配置
+		dropSampleRate := cfg.EgressLimit.DropLogSampleRate
+		if dropSampleRate == 0 {
+			dropSampleRate = 100
+		}
+		if err := c.TcEgress.SetDropLogConfig(cfg.EgressLimit.DropLogEnabled, dropSampleRate); err != nil {
+			logger.Warnf("[EgressLimit] Failed to restore drop log config: %v", err)
+		}
+	}
 }

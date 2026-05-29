@@ -11,6 +11,19 @@ import (
 	"rho-aias/internal/logger"
 )
 
+// dedupIntSlice 对整数切片去重，保持原有顺序
+func dedupIntSlice(s []int) []int {
+	seen := map[int]bool{}
+	result := make([]int, 0, len(s))
+	for _, v := range s {
+		if !seen[v] {
+			seen[v] = true
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
 // ========== FailGuard / WAF / RateLimit 模块应用逻辑 ==========
 
 func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
@@ -19,12 +32,15 @@ func (h *ConfigHandle) applyFailGuardConfig(raw json.RawMessage) error {
 		return fmt.Errorf("invalid config format: %w", err)
 	}
 
+	// SSHPorts 去重兜底，防止前端或 API 直调传入重复端口
+	req.SSHPorts = dedupIntSlice(req.SSHPorts)
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	wasRunning := h.failguardMgr.IsRunning()
 
-	h.failguardMgr.UpdateConfig(req.Enabled, req.MaxRetry, req.FindTime, req.BanDuration, req.Mode)
+	h.failguardMgr.UpdateConfig(req.Enabled, req.MaxRetry, req.FindTime, req.BanDuration, req.Mode, req.SSHPorts, req.ShortConnSeconds)
 
 	if !wasRunning && req.Enabled {
 		tryStart(h.failguardMgr.Start, "[ConfigAPI] FailGuard")
@@ -107,10 +123,10 @@ func (h *ConfigHandle) applyAnomalyDetectionConfig(raw json.RawMessage) error {
 			BlockDuration:  req.Baseline.BlockDuration,
 		},
 		Attacks: anomaly.AttacksConfig{
-			SynFlood: anomaly.AttackConfig{Enabled: req.Attacks.SynFlood.Enabled, RatioThreshold: req.Attacks.SynFlood.RatioThreshold, BlockDuration: req.Attacks.SynFlood.BlockDuration, MinPackets: req.Attacks.SynFlood.MinPackets},
-			UdpFlood: anomaly.AttackConfig{Enabled: req.Attacks.UdpFlood.Enabled, RatioThreshold: req.Attacks.UdpFlood.RatioThreshold, BlockDuration: req.Attacks.UdpFlood.BlockDuration, MinPackets: req.Attacks.UdpFlood.MinPackets},
+			SynFlood:  anomaly.AttackConfig{Enabled: req.Attacks.SynFlood.Enabled, RatioThreshold: req.Attacks.SynFlood.RatioThreshold, BlockDuration: req.Attacks.SynFlood.BlockDuration, MinPackets: req.Attacks.SynFlood.MinPackets},
+			UdpFlood:  anomaly.AttackConfig{Enabled: req.Attacks.UdpFlood.Enabled, RatioThreshold: req.Attacks.UdpFlood.RatioThreshold, BlockDuration: req.Attacks.UdpFlood.BlockDuration, MinPackets: req.Attacks.UdpFlood.MinPackets},
 			IcmpFlood: anomaly.AttackConfig{Enabled: req.Attacks.IcmpFlood.Enabled, RatioThreshold: req.Attacks.IcmpFlood.RatioThreshold, BlockDuration: req.Attacks.IcmpFlood.BlockDuration, MinPackets: req.Attacks.IcmpFlood.MinPackets},
-			AckFlood: anomaly.AttackConfig{Enabled: req.Attacks.AckFlood.Enabled, RatioThreshold: req.Attacks.AckFlood.RatioThreshold, BlockDuration: req.Attacks.AckFlood.BlockDuration, MinPackets: req.Attacks.AckFlood.MinPackets},
+			AckFlood:  anomaly.AttackConfig{Enabled: req.Attacks.AckFlood.Enabled, RatioThreshold: req.Attacks.AckFlood.RatioThreshold, BlockDuration: req.Attacks.AckFlood.BlockDuration, MinPackets: req.Attacks.AckFlood.MinPackets},
 		},
 	}
 

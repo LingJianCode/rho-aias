@@ -108,12 +108,6 @@ WAF 模块通过监控 Caddy + Coraza WAF 日志和 Rate Limit 日志，自动�
 
 > **后续计划**：未来版本可能支持启动时从数据库恢复 active 记录到 eBPF map。
 
-## 安全说明
-
-- **rho-aias** 容器使用最小权限能力（`CAP_BPF`、`CAP_PERFMON`、`CAP_NET_ADMIN`、`CAP_NET_RAW`），不使用 privileged 模式
-- **caddy** 容器仅保留 `NET_BIND_SERVICE` 能力，启用 `no-new-privileges`
-- 两个容器均使用 `network_mode: host` 以支持 XDP 驱动层拦截
-
 ## 动态配置
 
 系统支持运行时通过 API 热更新核心参数，无需重启服务，支持配置请查看防护策略配置页面

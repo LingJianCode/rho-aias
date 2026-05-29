@@ -80,10 +80,9 @@ func InitDetectors(
 		}
 	}
 
-	failguardMgr := failguard.NewManager(&cfg.FailGuard, xdp, ctx,
-		watcher.NewOffsetStore(cfg.FailGuard.OffsetStateFile),
+	failguardMgr := failguard.NewManager(&cfg.FailGuard, xdp,
 		services.NewBanRecordService(dbConn),
-		whitelistChecker.IsWhitelisted,
+		whitelistChecker,
 	)
 	if cfg.FailGuard.Enabled {
 		if err := failguardMgr.Start(); err != nil {

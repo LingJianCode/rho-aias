@@ -31,14 +31,7 @@ services:
     container_name: rho-aias
     environment:
       - TZ=Asia/Shanghai
-    privileged: false
-    cap_drop:
-      - ALL
-    cap_add:
-      - CAP_BPF
-      - CAP_PERFMON
-      - CAP_NET_ADMIN
-      - CAP_NET_RAW
+    privileged: true
     network_mode: host
     volumes:
       - ./config:/app/config:ro
@@ -48,6 +41,14 @@ services:
       # 挂载监听文件目录
       - ./logs/caddy:/caddy-logs:ro
       - /var/log:/var/log:ro
+      # failguard依赖
+      - /sys/fs/bpf:/sys/fs/bpf
+      - /sys/kernel/debug:/sys/kernel/debug
+      - /sys/kernel/btf:/sys/kernel/btf:ro
+      - /usr/lib:/usr/lib
+      - /usr/lib64:/usr/lib64
+      - /lib:/lib
+      - /lib64:/lib64
     command: ["--config", "/app/config/config.yml"]
     restart: unless-stopped
 

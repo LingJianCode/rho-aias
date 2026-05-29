@@ -268,6 +268,8 @@ export type ConfigModuleName = 'failguard' | 'waf' | 'rate_limit' | 'anomaly_det
 
 export interface FailGuardConfig {
   enabled?: boolean
+  ssh_ports?: number[]
+  short_conn_seconds?: number
   max_retry?: number
   find_time?: number
   ban_duration?: number

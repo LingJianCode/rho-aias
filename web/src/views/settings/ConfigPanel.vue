@@ -27,9 +27,24 @@
         <!-- FailGuard -->
         <template v-if="activeModule === 'failguard'">
           <h3>SSH 防爆破 (FailGuard)</h3>
-          <el-form :model="failguard" label-width="140px" style="max-width: 560px">
+          <el-form :model="failguard" label-width="160px" style="max-width: 580px">
             <el-form-item label="启用状态">
               <el-switch v-model="failguard.enabled" />
+            </el-form-item>
+            <el-form-item label="监控端口列表">
+              <div style="display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap;">
+                <div v-for="(port, idx) in failguard.ssh_ports" :key="idx" style="display: flex; gap: 4px; margin-bottom: 4px;">
+                  <el-input-number v-model="failguard.ssh_ports[idx]" :min="1" :max="65535" :controls="false"
+                    style="width: 110px;" placeholder="端口号" />
+                  <el-button type="danger" size="small" plain @click="removePort('failguard', idx)">删除</el-button>
+                </div>
+                <el-button type="primary" size="small" plain @click="addPort('failguard')">+ 添加</el-button>
+              </div>
+              <div class="form-hint">监控的 SSH 端口列表，最多支持 16 个</div>
+            </el-form-item>
+            <el-form-item label="短连接阈值(秒)">
+              <el-input-number v-model="failguard.short_conn_seconds" :min="1" :max="60" />
+              <div class="form-hint">preauth 阶段低于此值的连接视为异常短连接</div>
             </el-form-item>
             <el-form-item label="最大重试次数">
               <el-input-number v-model="failguard.max_retry" :min="1" :max="1000" />
@@ -46,9 +61,9 @@
             <el-form-item label="检测模式">
               <el-select v-model="failguard.mode" style="width: 100%">
                 <el-option value="normal" label="正常模式" />
-                <el-option value="ddos" label="DDoS 防护模式" />
                 <el-option value="aggressive" label="激进模式" />
               </el-select>
+              <div class="form-hint">激进模式额外检测 preauth 阶段的短连接和异常退出</div>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="prepareSave('failguard', failguard)" :loading="saving">保存</el-button>
@@ -100,9 +115,15 @@
               <div class="form-hint">低于此数量的连接将被忽略</div>
             </el-form-item>
             <el-form-item label="监控端口列表">
-              <el-select v-model="anomaly.ports" multiple filterable allow-create placeholder="输入端口号" style="width: 100%">
-                <el-option v-for="p in anomaly.ports" :key="p" :label="String(p)" :value="p" />
-              </el-select>
+              <div style="display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap;">
+                <div v-for="(port, idx) in anomaly.ports" :key="idx" style="display: flex; gap: 4px; margin-bottom: 4px;">
+                  <el-input-number v-model="anomaly.ports[idx]" :min="1" :max="65535" :controls="false"
+                    style="width: 110px;" placeholder="端口号" />
+                  <el-button type="danger" size="small" plain @click="removePort('anomaly', idx)">删除</el-button>
+                </div>
+                <el-button type="primary" size="small" plain @click="addPort('anomaly')">+ 添加</el-button>
+              </div>
+              <div class="form-hint">监控的端口列表，最多支持 16 个</div>
             </el-form-item>
             <el-divider content-position="left">IQR 基线参数</el-divider>
             <el-form-item label="最小样本数">
@@ -339,6 +360,8 @@ const originalSnapshot = ref<Record<string, Record<string, unknown>>>({})
 const fieldLabels: Record<string, Record<string, string>> = {
   failguard: {
     enabled: '启用状态',
+    ssh_ports: '监控端口列表',
+    short_conn_seconds: '短连接阈值(秒)',
     max_retry: '最大重试次数',
     find_time: '检测时间窗口(秒)',
     ban_duration: '封禁时长(秒)',
@@ -410,7 +433,6 @@ function formatDiffValue(val: unknown): string {
 // 模式映射中文
 const modeLabels: Record<string, string> = {
   normal: '正常模式',
-  ddos: 'DDoS 防护模式',
   aggressive: '激进模式',
   whitelist: '白名单模式',
   blacklist: '黑名单模式',
@@ -541,7 +563,7 @@ const modules: { key: ConfigModuleName; label: string }[] = [
   { key: 'egress_limit', label: 'Egress 限速' },
 ]
 
-const failguard = reactive({ enabled: false, max_retry: 5, find_time: 600, ban_duration: 3600, mode: 'normal' as string })
+const failguard = reactive({ enabled: false, ssh_ports: [22], short_conn_seconds: 2, max_retry: 5, find_time: 600, ban_duration: 3600, mode: 'normal' as string })
 const waf = reactive({ enabled: false, ban_duration: 3600 })
 const rate_limit = reactive({ enabled: false, ban_duration: 3600 })
 const baseline = reactive({ min_sample_count: 60, iqr_multiplier: 2.5, min_threshold: 1000, max_age: 3600, block_duration: 60 })
@@ -625,6 +647,26 @@ async function loadModuleConfig(module: ConfigModuleName) {
 
 /** 点击保存按钮 → 计算弹窗 */
 function prepareSave(module: ConfigModuleName, data: Record<string, unknown>) {
+  // failguard 提交前去重 ssh_ports
+  if (module === 'failguard' && Array.isArray(data.ssh_ports)) {
+    const seen = new Set<number>()
+    data.ssh_ports = (data.ssh_ports as number[]).filter((p: number) => {
+      if (seen.has(p)) return false
+      seen.add(p)
+      return true
+    })
+  }
+
+  // anomaly_detection 提交前去重 ports
+  if (module === 'anomaly_detection' && Array.isArray(data.ports)) {
+    const seen = new Set<number>()
+    data.ports = (data.ports as number[]).filter((p: number) => {
+      if (seen.has(p)) return false
+      seen.add(p)
+      return true
+    })
+  }
+
   const diff = computeDiff(module, data)
 
   if (diff.length === 0) {
@@ -660,6 +702,30 @@ async function confirmAndSave() {
   } finally {
     saving.value = false
   }
+}
+
+/** 端口列表管理 */
+function addPort(module: string) {
+  let target: { ports?: number[]; ssh_ports?: number[] } | null = null
+  if (module === 'failguard') target = failguard
+  else if (module === 'anomaly') target = anomaly
+  const field = module === 'failguard' ? 'ssh_ports' : 'ports'
+  const list = (target?.[field] as number[]) ?? []
+
+  if (!target) return
+  if (list.length >= 16) ElMessage.warning('最多支持 16 个端口')
+  else list.push(1)
+}
+
+function removePort(module: string, index: number) {
+  let target: { ports?: number[]; ssh_ports?: number[] } | null = null
+  if (module === 'failguard') target = failguard
+  else if (module === 'anomaly') target = anomaly
+  const field = module === 'failguard' ? 'ssh_ports' : 'ports'
+  const list = (target?.[field] as number[]) ?? []
+
+  if (!target || !list) return
+  list.splice(index, 1)
 }
 
 onMounted(() => loadModuleConfig(activeModule.value))

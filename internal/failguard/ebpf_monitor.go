@@ -1,0 +1,332 @@
+package failguard
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+
+	"rho-aias/internal/config"
+	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/logger"
+	"rho-aias/internal/watcher"
+
+	"github.com/cilium/ebpf/ringbuf"
+)
+
+// EBPFMonitor eBPF 监控引擎
+// 负责加载 eBPF 程序、附加 probe、读取 RingBuf 事件、执行封禁
+type EBPFMonitor struct {
+	cfg    *config.FailGuardConfig
+	xdpMgr EBPFManager
+	banMgr *BanManager
+	filter *BanFilter
+	store  watcher.BanRecordStore // 封禁记录持久化
+
+	// eBPF 运行时资源（通过 SshMonitor 门面管理）
+	monitor *ebpfs.SshMonitor
+	reader  *ringbuf.Reader
+	done    chan struct{}
+	mu      sync.Mutex
+	running bool
+
+	// 统计计数器（仅用于日志/监控展示）
+	statsMu     sync.RWMutex
+	totalEvents int64
+	totalBans   int64
+}
+
+// NewEBPFMonitor 创建 eBPF 监控实例
+func NewEBPFMonitor(
+	cfg *config.FailGuardConfig,
+	xdpMgr EBPFManager,
+	store watcher.BanRecordStore, // 封禁记录持久化（可为 nil，nil 时跳过 DB 写入）
+	filter *BanFilter,
+) *EBPFMonitor {
+	return &EBPFMonitor{
+		cfg:     cfg,
+		xdpMgr:  xdpMgr,
+		banMgr:  NewBanManager(cfg.MaxRetry, cfg.FindTime, cfg.BanDuration, nil),
+		filter:  filter,
+		store:   store,
+		monitor: ebpfs.NewSshMonitor(),
+		done:    make(chan struct{}),
+	}
+}
+
+// Start 加载并启动 eBPF 监控
+func (m *EBPFMonitor) Start() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.running {
+		return fmt.Errorf("eBPF monitor already running")
+	}
+
+	// 1. 加载 eBPF 对象
+	ports := toUint16Slice(m.cfg.SSHPorts)
+	if err := m.monitor.Load(ports, m.cfg.ShortConnSeconds, m.cfg.Mode); err != nil {
+		return fmt.Errorf("load eBPF objects: %w", err)
+	}
+
+	// 2. 附加 probes
+	if err := m.monitor.AttachProbes(); err != nil {
+		m.closeResources()
+		return fmt.Errorf("attach probes: %w", err)
+	}
+
+	// 4. 启动 RingBuf 读取循环
+	var err error
+	m.reader, err = m.monitor.EventsReader()
+	if err != nil {
+		m.closeResources()
+		return fmt.Errorf("create ringbuf reader: %w", err)
+	}
+
+	m.running = true
+	go m.eventLoop()
+
+	logger.Infof("[FailGuard] eBPF monitor started, ssh_ports=%v, max_retry=%d, find_time=%ds, ban_duration=%ds",
+		m.cfg.SSHPorts, m.cfg.MaxRetry, m.cfg.FindTime, m.cfg.BanDuration)
+	return nil
+}
+
+// Stop 停止监控并释放所有资源
+func (m *EBPFMonitor) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.running {
+		return
+	}
+	m.running = false
+
+	close(m.done)
+	m.done = make(chan struct{}) // 重置以便可能的 restart
+
+	m.closeResources()
+	logger.Info("[FailGuard] eBPF monitor stopped")
+}
+
+// IsRunning 检查是否正在运行
+func (m *EBPFMonitor) IsRunning() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.running
+}
+
+// UpdateRuntimeConfig 运行时动态更新全部运行时参数（mode + short_conn_ns）
+func (m *EBPFMonitor) UpdateRuntimeConfig(shortConnSeconds int, mode string) error {
+	return m.monitor.UpdateRuntimeConfig(shortConnSeconds, mode)
+}
+
+// UpdatePorts 运行时动态更新监控端口列表
+func (m *EBPFMonitor) UpdatePorts(ports []uint16) error {
+	return m.monitor.UpdatePorts(ports)
+}
+
+// toUint16Slice converts []int to []uint16
+func toUint16Slice(ports []int) []uint16 {
+	r := make([]uint16, len(ports))
+	for i, p := range ports {
+		r[i] = uint16(p)
+	}
+	return r
+}
+
+// GetStats 获取统计信息
+func (m *EBPFMonitor) GetStats() (events, bans int64) {
+	m.statsMu.RLock()
+	defer m.statsMu.RUnlock()
+	return m.totalEvents, m.totalBans
+}
+
+// ============================================
+// 内部方法：加载与配置
+// ============================================
+
+// ============================================
+// 内部方法：Probe 附加（已委托给 SshMonitor）
+// ============================================
+
+// ============================================
+// 内部方法：事件循环
+// ============================================
+
+func (m *EBPFMonitor) eventLoop() {
+	logger.Info("[FailGuard] Event loop started")
+	for {
+		select {
+		case <-m.done:
+			logger.Info("[FailGuard] Event loop exit")
+			return
+		default:
+		}
+
+		record, err := m.reader.Read()
+		if err != nil {
+			if errors.Is(err, ringbuf.ErrClosed) {
+				logger.Warn("[FailGuard] Ringbuf closed, stopping event loop")
+				return
+			}
+			select {
+			case <-m.done:
+				return
+			default:
+				continue
+			}
+		}
+
+		var event SSHEvent
+		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
+			logger.Warnf("[FailGuard] Failed to parse event: %v", err)
+			continue
+		}
+
+		m.statsMu.Lock()
+		m.totalEvents++
+		m.statsMu.Unlock()
+
+		switch event.Type {
+		case EventAuthResult:
+			logger.Debugf("[FailGuard] Recv EventAuthResult: pid=%d ip=0x%08x", event.PID, event.RemoteIP)
+			m.handleAuthResult(event)
+		case EventPreauthShortConn:
+			logger.Debugf("[FailGuard] Recv EventPreauthShortConn: pid=%d ip=0x%08x duration_ns=%d", event.PID, event.RemoteIP, event.DurationNS)
+			m.handlePreauthShortConn(event)
+		default:
+			logger.Debugf("[FailGuard] Unknown event type: %d (pid=%d)", event.Type, event.PID)
+		}
+	}
+}
+
+// handleAuthResult 处理 PAM 认证结果事件
+// ret_code == 0 表示认证成功，非零表示失败
+func (m *EBPFMonitor) handleAuthResult(e SSHEvent) {
+	if e.RemoteIP == 0 || e.PID == 0 {
+		return
+	}
+
+	ipStr := FormatRemoteIP(e.RemoteIP)
+
+	logger.Debugf("[FailGuard] Auth result: ip=%s pid=%d ret_code=%d", ipStr, e.PID, e.RetCode)
+
+	// 认证成功 → 不处理
+	if e.RetCode == 0 {
+		return
+	}
+
+	// 白名单检查
+	if !m.filter.ShouldBlock(ipStr) {
+		logger.Warnf("[FailGuard] Whitelist IP triggered auth failure rule: %s (ret_code=%d, action=skipped)", ipStr, e.RetCode)
+		return
+	}
+
+	// 注册失败，检查是否达到阈值
+	shouldBan, expiresAt := m.banMgr.RegisterFailure(e.RemoteIP)
+	if !shouldBan {
+		logger.Debugf("[FailGuard] Auth failure count++ for %s (ret_code=%d, not yet banned)", ipStr, e.RetCode)
+		return
+	}
+
+	// 执行封禁
+	m.executeBan(ipStr, expiresAt, "SSH auth failure")
+}
+
+// handlePreauthShortConn 处理 preauth 阶段异常短连接
+func (m *EBPFMonitor) handlePreauthShortConn(e SSHEvent) {
+	if e.RemoteIP == 0 || e.PID == 0 {
+		return
+	}
+
+	ipStr := FormatRemoteIP(e.RemoteIP)
+
+	exitStatus := e.RetCode & 0xFF
+	exitSignal := (e.RetCode >> 16) & 0xFF
+	durationMs := e.DurationNS / 1_000_000
+
+	logger.Debugf("[FailGuard] Preauth anomaly: ip=%s pid=%d duration=%dms exit_status=%d exit_signal=%d",
+		ipStr, e.PID, durationMs, exitStatus, exitSignal)
+
+	// 白名单检查
+	if !m.filter.ShouldBlock(ipStr) {
+		logger.Warnf("[FailGuard] Whitelist IP triggered preauth anomaly rule: %s (action=skipped)", ipStr)
+		return
+	}
+
+	// preauth 异常直接强制封禁（不经过滑动窗口计数）
+	logger.Debugf("[FailGuard] Force-banning %s for SSH preauth anomaly", ipStr)
+	expiresAt := m.banMgr.ForceBan(e.RemoteIP)
+	m.executeBan(ipStr, expiresAt, "SSH preauth anomaly")
+}
+
+// executeBan 通过 XDP 执行封禁并持久化到数据库
+func (m *EBPFMonitor) executeBan(ip string, expiresAt time.Time, reason string) {
+	err := m.xdpMgr.AddRuleWithSourceAndExpiry(ip, ebpfs.SourceMaskFailGuard, m.cfg.BanDuration)
+	if err != nil {
+		logger.Errorf("[FailGuard] Failed to ban %s via XDP: %v (reason: %s)", ip, err, reason)
+		return
+	}
+
+	// 持久化封禁记录到数据库
+	if m.store != nil {
+		banDuration := m.cfg.BanDuration
+		if err := m.store.UpsertActiveBan(ip, "failguard", reason, banDuration); err != nil {
+			logger.Errorf("[FailGuard] Failed to persist ban record for IP %s: %v", ip, err)
+		}
+	}
+
+	m.statsMu.Lock()
+	m.totalBans++
+	m.statsMu.Unlock()
+
+	expiryStr := "permanent"
+	if !expiresAt.IsZero() {
+		expiryStr = expiresAt.Format("2006-01-02 15:04:05")
+	}
+	logger.Warnf("[FailGuard] BANNED %s until %s [reason: %s]", ip, expiryStr, reason)
+}
+
+// CleanupExpired 执行完整的过期清理（供外部 cron 调用）
+// 清理流程：1.从内存删除 → 2.移除XDP规则 → 3.标记数据库过期
+func (m *EBPFMonitor) CleanupExpired() int {
+	expired := m.banMgr.Expired()
+	if len(expired) == 0 {
+		return 0
+	}
+
+	count := 0
+	for _, ip := range expired {
+		// Step 2: 从 XDP eBPF map 中移除 FailGuard 规则位
+		if _, _, _, err := m.xdpMgr.UpdateRuleSourceMask(ip, ebpfs.SourceMaskFailGuard); err != nil {
+			logger.Warnf("[FailGuard] Failed to remove XDP rule for expired IP %s: %v", ip, err)
+		} else {
+			logger.Debugf("[FailGuard] Removed XDP rule for expired IP %s", ip)
+		}
+
+		// Step 3: 标记数据库记录为已过期
+		if m.store != nil {
+			if err := m.store.MarkExpired(ip, "failguard"); err != nil {
+				logger.Warnf("[FailGuard] Failed to mark ban record expired for IP %s: %v", ip, err)
+			}
+		}
+
+		count++
+	}
+
+	logger.Infof("[FailGuard] Cleaned up %d expired bans (XDP removed + DB marked expired)", count)
+	return count
+}
+
+// closeResources 关闭所有资源（不加锁，由 Stop 调用）
+func (m *EBPFMonitor) closeResources() {
+	if m.reader != nil {
+		m.reader.Close()
+		m.reader = nil
+	}
+	if m.monitor != nil {
+		m.monitor.Close()
+	}
+}

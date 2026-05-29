@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { isTokenExpired, clearAuth } from '@/utils/auth'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -49,6 +50,13 @@ const router = createRouter({
 
 router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
+
+  // Token 过期预检：即使 Pinia 中有 token，若本地存储的过期时间已到，也视为未登录
+  if (authStore.token && isTokenExpired()) {
+    authStore.token = null
+    authStore.user = null
+    clearAuth()
+  }
 
   if (to.meta.requiresAuth !== false && !authStore.isLoggedIn) {
     next({ name: 'Login', query: { redirect: to.fullPath } })

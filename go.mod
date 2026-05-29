@@ -5,18 +5,21 @@ go 1.25.5
 require (
 	github.com/casbin/casbin/v2 v2.103.0
 	github.com/casbin/gorm-adapter/v3 v3.32.0
-	github.com/cilium/ebpf v0.20.0
+	github.com/cilium/ebpf v0.21.0
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/glebarez/sqlite v1.7.0
+	github.com/go-playground/validator/v10 v10.27.0
 	github.com/goccy/go-yaml v1.18.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0
 	github.com/mojocn/base64Captcha v1.3.8
 	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.43.0
+	golang.org/x/sys v0.37.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/gorm v1.25.12
 )
@@ -33,7 +36,6 @@ require (
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.27.0 // indirect
 	github.com/go-sql-driver/mysql v1.7.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
@@ -58,7 +60,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
-	github.com/vishvananda/netlink v1.3.1 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
@@ -67,7 +68,6 @@ require (
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/net v0.46.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect

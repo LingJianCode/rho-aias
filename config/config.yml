@@ -103,32 +103,24 @@ rate_limit:
   ban_duration: 60                # 封禁时长（秒，默认1小时）
   offset_state_file: ./data/ratelimit_offset.json    # 偏移量持久化文件路径
 
-# SSH 防爆破配置（参考 fail2ban 核心功能）
-# 日志匹配 + 滑动窗口计数 + 达阈值即封禁
+# SSH 防爆破配置（eBPF 内核级检测模式）
+# 通过 eBPF probes 实时监控 SSH 连接，无需日志文件或正则匹配
+# 架构: inet_csk_accept(fexit/kretprobe) → sched_process_fork → pam_authenticate(uretprobe) → sched_process_exit
+# 白名单统一由 manual 模块管理，此处不再单独配置 ignore_ips
 failguard:
-  enabled: false                    # 是否启用 SSH 防爆破
-  log_path: /var/log/auth.log       # 监控的日志文件路径
-  offset_state_file: ./data/failguard_offset.json  # 偏移量持久化文件路径
-  # 检测模式：normal=认证失败, ddos=认证失败+preauth异常, aggressive=ddos+协议协商失败
-  # normal: 密码错误/无效用户/PAM失败等（参考 fail2ban normal 模式）
-  # ddos: normal + 未发送识别字符串/认证超时/preauth断连等（参考 fail2ban ddos 模式）
-  # aggressive: ddos + 协议版本错误/密钥协商失败/banner异常等（参考 fail2ban aggressive 模式）
-  mode: aggressive                      # 检测模式（默认 normal）
-  # fail_regex 和 ignore_regex 留空则使用内置默认值（参考 fail2ban filter.d/sshd.conf）
-  # fail_regex:                       # 自定义失败匹配正则（留空则按 mode 使用内置规则）
-  #   - "Failed \\w+ for (?:invalid user )?(\\S+) from <HOST> port \\d+ ssh2"
-  # ignore_regex:                     # 自定义忽略匹配正则（留空使用内置默认）
-  #   - "Accepted \\w+ for .* from <HOST>"
-  ignore_ips:                       # 白名单 IP/CIDR（永不封禁）
-    # - "10.0.0.0/8"
-  max_retry: 5                      # 触发封禁的失败次数阈值
+  enabled: true                    # 是否启用 SSH 防爆破
+  ssh_ports:                        # 监控的 SSH 端口列表
+    - 22
+  short_conn_seconds: 2             # preauth 短连接阈值（秒），低于此值的连接视为异常
+  max_retry: 5                      # 触发封禁的失败次数阈值（PAM 认证失败计数）
   find_time: 600                    # 滑动窗口时长（秒，默认10分钟）
-  ban_duration: 60                # 封禁时长（秒，默认1小时）
+  ban_duration: 60                  # 封禁时长（秒）
+  mode: aggressive
 
 # Egress 限速配置（TC eBPF）
 # 在网卡 egress 方向进行令牌桶限速，基于目标 IP 进行 per-flow 限速
 egress_limit:
-  enabled: true                     # 总开关，默认关闭
+  enabled: false                     # 总开关，默认关闭
   rate_mbps: 1.0                  # 限速速率 (Mbps)，默认 100Mbps
   # burst_bytes: 令牌桶突发上限 (Bytes)
   # 1,000,000 是 Mbps 到 bps (bits per second) 的换算系数，网络带宽领域惯例使用十进制 Mbps，这与存储容量（如内存、磁盘常用 MiB/GiB）的惯例不同
@@ -139,8 +131,8 @@ egress_limit:
   #   例: 100Mbps → 上限 250,000,000 bytes; 1Mbps → 上限 2,500,000 bytes
   burst_bytes: 250000              # 突发上限 (Bytes)，约 2s 缓冲（1Mbps 下推荐值）
   # 丢包日志配置（参考 blocklog 模式，通过 RingBuf 上报 → Go 回调 → 异步写入 SQLite）
-  drop_log_enabled: true          # 丢包日志开关，开启后限速丢包会上报到控制面
-  drop_log_sample_rate: 100         # 采样率: 每 N 个丢包上报 1 个 (例: 10 = 10% 上报率)
+  drop_log_enabled: false          # 丢包日志开关，开启后限速丢包会上报到控制面
+  drop_log_sample_rate: 1         # 采样率: 每 N 个丢包上报 1 个 (例: 10 = 10% 上报率)
 
 # 异常流量检测系统配置
 # 检测流程：每个 check_interval 对每个 IP 依次执行：
