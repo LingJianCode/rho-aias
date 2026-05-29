@@ -121,18 +121,6 @@ func CasbinMiddleware(enforcer *casbin.Enforcer, obj string, act string) gin.Han
 	}
 }
 
-// AdminMiddleware 管理员权限中间件
-func AdminMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		role, exists := c.Get(ContextKeyUserRole)
-		if !exists || role != "admin" {
-			response.Fail(c, http.StatusForbidden, response.CodeAdminRequired, "admin access required")
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
-}
 
 // GetUserID 从上下文获取用户 ID
 func GetUserID(c *gin.Context) (uint, bool) {

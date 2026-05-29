@@ -214,65 +214,6 @@ func TestCasbinMiddleware_PermissionGranted(t *testing.T) {
 	}
 }
 
-func TestAdminMiddleware_AdminRole(t *testing.T) {
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set(ContextKeyUserRole, "admin")
-		c.Next()
-	})
-	router.Use(AdminMiddleware())
-	router.GET("/test", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
-	}
-}
-
-func TestAdminMiddleware_NonAdminRole(t *testing.T) {
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set(ContextKeyUserRole, "user")
-		c.Next()
-	})
-	router.Use(AdminMiddleware())
-	router.GET("/test", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Errorf("Expected status %d, got %d", http.StatusForbidden, w.Code)
-	}
-}
-
-func TestAdminMiddleware_MissingRole(t *testing.T) {
-	router := gin.New()
-	router.Use(AdminMiddleware())
-	router.GET("/test", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Errorf("Expected status %d, got %d", http.StatusForbidden, w.Code)
-	}
-}
-
 func TestGetUserID(t *testing.T) {
 	t.Run("user ID exists", func(t *testing.T) {
 		c, _ := gin.CreateTestContext(nil)
@@ -297,6 +238,7 @@ func TestGetUserID(t *testing.T) {
 	})
 }
 
+// TestGetUsername 测试 GetUsername 函数在上下文中用户名存在和不存在两种情况下的行为
 func TestGetUsername(t *testing.T) {
 	t.Run("username exists", func(t *testing.T) {
 		c, _ := gin.CreateTestContext(nil)
