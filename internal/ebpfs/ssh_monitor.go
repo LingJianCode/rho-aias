@@ -18,7 +18,8 @@ import (
 // runtimeConfig 与 eBPF C 端 struct runtime_config 对应
 type runtimeConfig struct {
 	AggressiveMode      uint8
-	PreauthShortConnNs uint64
+	_                   [7]byte
+	PreauthShortConnNs  uint64
 }
 
 // SshMonitor SSH 登录行为监控的 eBPF 门面
@@ -67,7 +68,7 @@ func (s *SshMonitor) putRuntimeConfig(shortConnSeconds int, mode string) error {
 	if mode == "aggressive" {
 		cfgVal.AggressiveMode = 1
 	}
-	if err := s.objects.ConfigMap.Put(&cfgKey, &cfgVal); err != nil {
+	if err := s.objects.ConfigMap.Put(&cfgKey, cfgVal); err != nil {
 		return fmt.Errorf("set config_map: %w", err)
 	}
 	return nil
