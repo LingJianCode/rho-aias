@@ -1,169 +1,58 @@
-// API 通用响应类型
-export interface ApiResponse<T = unknown> {
-  code: number
-  message: string
-  data: T
+// API 响应基础结构
+declare namespace Api {
+  namespace Auth {
+    export interface UserInfo {
+      userId?: number | string
+      username?: string
+      role?: string
+      roles?: string[]
+      avatar?: string
+      [key: string]: any
+    }
+
+    export interface LoginParams {
+      username: string
+      password: string
+      captcha_id?: string
+      captcha_code?: string
+    }
+
+    export interface LoginResult {
+      token: string
+      user: UserInfo
+    }
+  }
 }
 
-// 分页请求参数
-export interface PaginationParams {
-  page?: number
-  page_size?: number
-  limit?: number
-  offset?: number
-}
-
-// ============================================
-// 用户相关
-// ============================================
-
-export interface User {
+// 业务实体类型
+export interface BlockLog {
   id: number
-  username: string
-  nickname: string
-  email: string
-  role: string
-  active: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface LoginRequest {
-  username: string
-  password: string
-  captcha_id: string
-  captcha_code: string
-}
-
-export interface LoginResponse {
-  token: string
-  user: User
-  expires_at: string
-}
-
-export interface CaptchaResponse {
-  captcha_id: string
-  captcha_image: string
-}
-
-// ============================================
-// 规则相关
-// ============================================
-
-export type RuleSource = 'manual' | 'ipsum' | 'spamhaus' | 'waf' | 'ddos' | 'anomaly' | 'failguard' | 'rate_limit'
-
-// ============================================
-// 手动规则（黑名单/白名单）
-// ============================================
-
-export interface ManualRuleRequest {
-  value: string
-  remark?: string
+  timestamp: string
+  src_ip: string
+  dst_ip: string
+  dst_port: number
+  rule_source: string
+  action: string
+  protocol: string
+  [key: string]: any
 }
 
 export interface ManualRuleItem {
   value: string
-  remark?: string
-  added_at?: string
+  remark: string
+  added_at: string
 }
-
-export interface WhitelistRuleItem extends ManualRuleItem {
-  protected?: boolean
-}
-
-export interface WhitelistResponse {
-  rules: WhitelistRuleItem[]
-  total: number
-}
-
-export interface BlacklistResponse {
-  rules: ManualRuleItem[]
-  total: number
-}
-
-// ============================================
-// 阻断日志
-// ============================================
-
-export interface BlockLog {
-  timestamp: number
-  src_ip: string
-  dst_ip: string
-  dst_port: number
-  match_type: string
-  rule_source: string
-  country_code: string
-  packet_size: number
-}
-
-export interface BlockLogListResponse {
-  records: BlockLog[]
-  total: number
-  page: number
-  page_size: number
-}
-
-export interface BlockLogStats {
-  total_blocked: number
-  by_rule_source: Record<string, number>
-}
-
-// ============================================
-// 封禁记录
-// ============================================
 
 export interface BanRecord {
   id: number
   ip: string
-  source: string
   reason: string
-  duration: number
+  source: string
   status: string
   created_at: string
-  expires_at?: string
-  unblocked_at?: string
+  expires_at: string | null
+  duration: number
 }
-
-export interface BanRecordListResponse {
-  records: BanRecord[]
-  total: number
-}
-
-export interface BanRecordStats {
-  total: number
-  active: number
-  expired: number
-  today_count: number
-}
-
-// ============================================
-// 威胁情报
-// ============================================
-
-export interface IntelSourceStatus {
-  name: string
-  count: number
-  updated: string
-}
-
-export interface IntelSourceDetail {
-  enabled: boolean
-  last_update: string
-  success: boolean
-  rule_count: number
-  error: string
-}
-
-export interface IntelStatus {
-  enabled: boolean
-  last_update: string
-  total_rules: number
-  sources: Record<string, IntelSourceDetail>
-}
-
-// ============================================
-// 地域封禁
-// ============================================
 
 export interface GeoBlockingStatus {
   enabled: boolean
@@ -171,193 +60,24 @@ export interface GeoBlockingStatus {
   allowed_countries: string[]
   last_update: string
   total_rules: number
-  sources: Record<string, {
-    enabled: boolean
-    last_update: string
-    success: boolean
-    rule_count: number
-    error: string
-  }>
+  sources: Record<string, any>
 }
 
-// ============================================
-// API Key
-// ============================================
-
-export interface ApiKey {
-  id: number
-  name: string
-  key_prefix: string
-  permissions: string
-  user_id: number
-  last_used_at?: string
-  expires_at?: string
-  active: boolean
-  created_at: string
+export interface IntelStatus {
+  enabled: boolean
+  last_update: string
+  total_rules: number
+  sources: Record<string, any>
 }
-
-export interface ApiKeysResponse {
-  keys: ApiKey[]
-}
-
-export interface CreateApiKeyRequest {
-  name: string
-  permissions: string[]
-  expires_days?: number
-}
-
-export interface CreateApiKeyResponse {
-  id: number
-  name: string
-  key: string
-  permissions: string[]
-  expires_at?: string
-  created_at: string
-}
-
-// ============================================
-// 审计日志
-// ============================================
-
-export interface AuditLog {
-  id: number
-  user_id: number
-  username: string
-  action: string
-  resource: string
-  resource_id: string
-  detail: string
-  ip: string
-  user_agent: string
-  status: string
-  error: string
-  created_at: string
-}
-
-export interface AuditLogsResponse {
-  total: number
-  logs: AuditLog[]
-}
-
-// ============================================
-// XDP 事件
-// ============================================
 
 export interface BlockLogEventStatus {
   enabled: boolean
   sample_rate: number
 }
 
-// ============================================
-// 仪表盘统计（前端自定义聚合）
-// ============================================
-
-export interface DashboardStats {
-  total_blocks: number
-  active_rules: number
-  today_bans: number
-  block_trend: { date: string; count: number }[]
-  recent_blocks: BlockLog[]
-}
-
-// ============================================
-// 统一配置（运行时热更新）
-// ============================================
-
-export type ConfigModuleName = 'failguard' | 'waf' | 'rate_limit' | 'anomaly_detection' | 'geo_blocking' | 'intel' | 'blocklog_events' | 'egress_limit'
-
-export interface FailGuardConfig {
-  enabled?: boolean
-  ssh_ports?: number[]
-  short_conn_seconds?: number
-  max_retry?: number
-  find_time?: number
-  ban_duration?: number
-  mode?: 'normal' | 'ddos' | 'aggressive'
-}
-
-export interface WAFConfig {
-  enabled?: boolean
-  ban_duration?: number
-}
-
-export interface RateLimitConfig {
-  enabled?: boolean
-  ban_duration?: number
-}
-
-export interface BaselineConfig {
-  min_sample_count?: number
-  iqr_multiplier?: number
-  min_threshold?: number
-  max_age?: number
-  block_duration?: number
-}
-
-export interface AttackConfig {
-  enabled?: boolean
-  ratio_threshold?: number
-  block_duration?: number
-  min_packets?: number
-}
-
-export interface AnomalyDetectionConfig {
-  enabled?: boolean
-  min_packets?: number
-  ports?: number[]
-  baseline?: BaselineConfig
-  attacks?: {
-    syn_flood?: AttackConfig
-    udp_flood?: AttackConfig
-    icmp_flood?: AttackConfig
-    ack_flood?: AttackConfig
-  }
-}
-
-export interface GeoBlockingRuntimeConfig {
-  enabled?: boolean
-  mode?: 'whitelist' | 'blacklist'
-  allowed_countries?: string[]
-}
-
-export interface IntelSourceRuntimeConfig {
-  enabled?: boolean
-  schedule?: string
-  url?: string
-}
-
-export interface IntelRuntimeConfig {
-  enabled?: boolean
-  sources?: Record<string, IntelSourceRuntimeConfig>
-}
-
-// ============================================
-// Egress 丢包日志
-// ============================================
-
-export interface EgressLogRecord {
-  timestamp: number
-  dst_ip: string
-  pkt_len: number
-  tokens: number
-  rate_bytes: number
-}
-
-export interface EgressLogListResponse {
-  records: EgressLogRecord[]
-  total: number
-  page: number
-  page_size: number
-}
-
-// ============================================
-// Egress 限速配置
-// ============================================
-
-export interface EgressLimitRuntimeConfig {
-  enabled?: boolean
-  rate_mbps?: number
-  burst_bytes?: number
-  drop_log_enabled?: boolean
-  drop_log_sample_rate?: number
+// API 通用响应
+export interface ApiResponse<T = any> {
+  code: number
+  message: string
+  data: T
 }

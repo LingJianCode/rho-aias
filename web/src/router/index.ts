@@ -1,79 +1,23 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
-import { isTokenExpired, clearAuth } from '@/utils/auth'
+import type { App } from 'vue'
+import { createRouter, createWebHashHistory } from 'vue-router'
+import { staticRoutes } from './routes/staticRoutes'
+import { configureNProgress } from '@/utils/router'
+import { setupBeforeEachGuard } from './guards/beforeEach'
+import { setupAfterEachGuard } from './guards/afterEach'
 
-const routes: RouteRecordRaw[] = [
-  {
-    path: '/login',
-    name: 'Login',
-    component: () => import('@/views/login/LoginView.vue'),
-    meta: { requiresAuth: false },
-  },
-  {
-    path: '/',
-    component: () => import('@/layouts/DefaultLayout.vue'),
-    meta: { requiresAuth: true },
-    children: [
-      { path: '', redirect: '/dashboard' },
-      { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/dashboard/DashboardView.vue') },
-      
-      // 安全态势（只读监控）
-      { path: 'security', name: 'Security', component: () => import('@/views/security/SecurityView.vue') },
-
-      // 防火墙
-      { path: 'firewall/blacklist', name: 'Blacklist', component: () => import('@/views/firewall/BlacklistView.vue') },
-      { path: 'firewall/whitelist', name: 'Whitelist', component: () => import('@/views/firewall/WhitelistView.vue') },
-
-      // 日志
-      { path: 'logs/blocklog', name: 'BlockLog', component: () => import('@/views/blocklog/BlockLogView.vue') },
-      { path: 'logs/egresslog', name: 'EgressLog', component: () => import('@/views/egresslog/EgressLogView.vue') },
-      { path: 'logs/ban-records', name: 'BanRecords', component: () => import('@/views/ban-records/BanRecordsView.vue') },
-
-
-
-      // 系统设置
-      { path: 'settings', redirect: '/settings/config' },
-      { path: 'settings/config', name: 'Config', component: () => import('@/views/settings/ConfigPanel.vue'), meta: { title: '防护策略配置', requiresAdmin: true } },
-      { path: 'settings/users', name: 'Users', component: () => import('@/views/settings/UsersView.vue'), meta: { title: '用户管理', requiresAdmin: true } },
-      { path: 'settings/api-keys', name: 'ApiKeys', component: () => import('@/views/settings/ApiKeysView.vue'), meta: { title: 'API Keys', requiresAdmin: true } },
-      { path: 'settings/audit', name: 'Audit', component: () => import('@/views/settings/AuditPanel.vue'), meta: { title: '审计日志', requiresAdmin: true } },
-    ],
-  },
-  { path: '/403', name: 'Forbidden', component: () => import('@/views/error/403.vue') },
-  { path: '/:pathMatch(.*)*', name: 'NotFound', component: () => import('@/views/error/404.vue') },
-]
-
-const router = createRouter({
-  history: createWebHistory(),
-  routes,
+// 创建路由实例
+export const router = createRouter({
+  history: createWebHashHistory(),
+  routes: staticRoutes // 静态路由
 })
 
-router.beforeEach(async (to, _from, next) => {
-  const authStore = useAuthStore()
+// 初始化路由
+export function initRouter(app: App<Element>): void {
+  configureNProgress() // 顶部进度条
+  setupBeforeEachGuard(router) // 路由前置守卫
+  setupAfterEachGuard(router) // 路由后置守卫
+  app.use(router)
+}
 
-  // Token 过期预检：即使 Pinia 中有 token，若本地存储的过期时间已到，也视为未登录
-  if (authStore.token && isTokenExpired()) {
-    authStore.token = null
-    authStore.user = null
-    clearAuth()
-  }
-
-  if (to.meta.requiresAuth !== false && !authStore.isLoggedIn) {
-    next({ name: 'Login', query: { redirect: to.fullPath } })
-    return
-  }
-
-  if (to.meta.requiresAdmin && !authStore.isAdmin) {
-    next({ name: 'Forbidden' })
-    return
-  }
-
-  if (to.name === 'Login' && authStore.isLoggedIn) {
-    next({ name: 'Dashboard' })
-    return
-  }
-
-  next()
-})
-
-export default router
+// 主页路径，默认使用菜单第一个有效路径，配置后使用此路径
+export const HOME_PAGE_PATH = ''

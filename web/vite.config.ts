@@ -1,65 +1,162 @@
-import { type ConfigEnv, type UserConfig, defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { resolve } from 'path'
-import AutoImport from 'unplugin-auto-import/vite'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import vueDevTools from 'vite-plugin-vue-devtools'
+import viteCompression from 'vite-plugin-compression'
 import Components from 'unplugin-vue-components/vite'
+import AutoImport from 'unplugin-auto-import/vite'
+import ElementPlus from 'unplugin-element-plus/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
-import IconsResolver from 'unplugin-icons/resolver'
-import Icons from 'unplugin-icons/vite'
+import tailwindcss from '@tailwindcss/vite'
+// import { visualizer } from 'rollup-plugin-visualizer'
 
-const pathSrc = resolve(__dirname, 'src')
+export default ({ mode }: { mode: string }) => {
+  const root = process.cwd()
+  const env = loadEnv(mode, root)
+  const { VITE_VERSION, VITE_PORT, VITE_BASE_URL, VITE_API_URL, VITE_API_PROXY_URL } = env
 
-export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
-  const env = loadEnv(mode, process.cwd())
+  console.log(`🚀 API_URL = ${VITE_API_URL}`)
+  console.log(`🚀 VERSION = ${VITE_VERSION}`)
 
-  return {
+  return defineConfig({
+    define: {
+      __APP_VERSION__: JSON.stringify(VITE_VERSION)
+    },
+    base: VITE_BASE_URL,
+    server: {
+      port: Number(VITE_PORT),
+      allowedHosts: true,
+      proxy: {
+        '/api': {
+          target: VITE_API_PROXY_URL,
+          changeOrigin: true
+        }
+      },
+      host: true
+    },
+    // 路径别名
     resolve: {
       alias: {
-        '@': pathSrc,
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
+        '@views': fileURLToPath(new URL('./src/views', import.meta.url)),
+        '@imgs': fileURLToPath(new URL('./src/assets/images', import.meta.url)),
+        '@icons': fileURLToPath(new URL('./src/assets/icons', import.meta.url)),
+        '@utils': fileURLToPath(new URL('./src/utils', import.meta.url)),
+        '@stores': fileURLToPath(new URL('./src/store', import.meta.url)),
+        '@styles': fileURLToPath(new URL('./src/assets/styles', import.meta.url))
+      }
+    },
+    build: {
+      target: 'es2015',
+      outDir: 'dist',
+      chunkSizeWarningLimit: 2000,
+      minify: 'terser',
+      terserOptions: {
+        compress: {
+          // 生产环境去除 console
+          drop_console: true,
+          // 生产环境去除 debugger
+          drop_debugger: true
+        }
       },
+      dynamicImportVarsOptions: {
+        warnOnError: true,
+        exclude: [],
+        include: ['src/views/**/*.vue']
+      },
+      rollupOptions: {
+        output: {
+          manualChunks: undefined
+        }
+      }
     },
     plugins: [
       vue(),
+      tailwindcss(),
+      // 自动按需导入 API
       AutoImport({
-        imports: ['vue', 'vue-router', 'pinia'],
+        imports: ['vue', 'vue-router', 'pinia', '@vueuse/core'],
+        dts: 'src/types/import/auto-imports.d.ts',
         resolvers: [ElementPlusResolver()],
-        dts: 'src/auto-imports.d.ts',
+        eslintrc: {
+          enabled: true,
+          filepath: './.auto-import.json',
+          globalsPropValue: true
+        }
       }),
+      // 自动按需导入组件
       Components({
-        resolvers: [ElementPlusResolver(), IconsResolver({ enabledCollections: ['ep'] })],
-        dts: 'src/components.d.ts',
+        dts: 'src/types/import/components.d.ts',
+        resolvers: [ElementPlusResolver()]
       }),
-      Icons({ autoInstall: true }),
-    ].filter(Boolean), // 过滤掉 false 值
-    server: {
-      host: '0.0.0.0',
-      port: 3000,
-      proxy: {
-        [env.VITE_API_BASE_URL]: {
-          target: env.VITE_API_PROXY_TARGET || 'http://localhost:8081',
-          changeOrigin: true,
-          rewrite: (path: string) => path.replace(new RegExp(`^${env.VITE_API_BASE_URL}`), ''),
-        },
-      },
+      // 按需定制主题配置
+      ElementPlus({
+        useSource: true
+      }),
+      // 压缩
+      viteCompression({
+        verbose: false, // 是否在控制台输出压缩结果
+        disable: false, // 是否禁用
+        algorithm: 'gzip', // 压缩算法
+        ext: '.gz', // 压缩后的文件名后缀
+        threshold: 10240, // 只有大小大于该值的资源会被处理 10240B = 10KB
+        deleteOriginFile: false // 压缩后是否删除原文件
+      }),
+      vueDevTools()
+      // 打包分析
+      // visualizer({
+      //   open: true,
+      //   gzipSize: true,
+      //   brotliSize: true,
+      //   filename: 'dist/stats.html' // 分析图生成的文件名及路径
+      // }),
+    ],
+    // 依赖预构建：避免运行时重复请求与转换，提升首次加载速度
+    optimizeDeps: {
+      include: [
+        'echarts/core',
+        'echarts/charts',
+        'echarts/components',
+        'echarts/renderers',
+        'xlsx',
+        'xgplayer',
+        'crypto-js',
+        'file-saver',
+        'vue-img-cutter',
+        'element-plus/es',
+        'element-plus/es/components/*/style/css',
+        'element-plus/es/components/*/style/index'
+      ]
     },
-    build: {
-      outDir: 'dist',
-      sourcemap: false, // 生产环境建议关闭，减小体积
-      // 3. 核心优化：分包策略
-      rollupOptions: {
-        output: {
-          manualChunks: {
-            // 将 Vue 相关库单独打包
-            'vue-vendor': ['vue', 'vue-router', 'pinia'],
-            // 将 Element Plus 单独打包 (因为它比较大)
-            'element-plus': ['element-plus'],
-            // 其他大型工具库可以放这里
-            // 'lodash-lib': ['lodash-es'] 
-          },
-        },
+    css: {
+      preprocessorOptions: {
+        // sass variable and mixin
+        scss: {
+          additionalData: `
+            @use "${fileURLToPath(new URL('./src/assets/styles/core/el-light.scss', import.meta.url))}" as *;
+            @use "${fileURLToPath(new URL('./src/assets/styles/core/mixin.scss', import.meta.url))}" as *;
+          `
+        }
       },
-      // 4. 提高警告阈值 (如果确实需要大文件) 或 开启 Gzip 预压缩
-      chunkSizeWarningLimit: 1000, // 默认是 500kb，适当调大避免误报
-    },
-  }
-})
+      postcss: {
+        plugins: [
+          {
+            postcssPlugin: 'internal:charset-removal',
+            AtRule: {
+              charset: (atRule) => {
+                if (atRule.name === 'charset') {
+                  atRule.remove()
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  })
+}
+
+function resolvePath(paths: string) {
+  return path.resolve(__dirname, paths)
+}

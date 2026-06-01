@@ -1,5 +1,4 @@
-import request from './request'
-import type { ApiResponse, BlockLogListResponse, BlockLogStats, BlockLogEventStatus } from '@/types/api'
+import http from '@/utils/http'
 
 export interface BlockLogFilter {
   date: string
@@ -13,22 +12,32 @@ export interface BlockLogFilter {
   country_code?: string
 }
 
-export function getBlockLogs(params: BlockLogFilter): Promise<ApiResponse<BlockLogListResponse>> {
-  return request.get('/api/blocklog/records', { params }).then((res) => res.data)
+export interface BlockLogListResponse {
+  records: any[]
+  total: number
 }
 
-export function getBlockLogStats(): Promise<ApiResponse<BlockLogStats>> {
-  return request.get('/api/blocklog/stats').then((res) => res.data)
+export interface BlockLogStats {
+  // 统计数据结构
+  [key: string]: any
 }
 
-export function getHourlyTrend(hours?: number): Promise<ApiResponse<{ hours: number; hourly_data: { hour: string; total: number; breakdown: Record<string, number> }[] }>> {
-  return request.get('/api/blocklog/hourly-trend', { params: { hours } }).then((res) => res.data)
+export function getBlockLogs(params: BlockLogFilter) {
+  return http.get<any>({ url: '/api/blocklog/records', params })
 }
 
-export function getBlockedTopIPs(limit?: number): Promise<ApiResponse<{ top_blocked_ips: { ip: string; count: number }[] }>> {
-  return request.get('/api/blocklog/blocked-top-ips', { params: { limit } }).then((res) => res.data)
+export function getBlockLogStats() {
+  return http.get<any>({ url: '/api/blocklog/stats' })
 }
 
-export function getBlockLogEventStatus(): Promise<ApiResponse<BlockLogEventStatus>> {
-  return request.get('/api/blocklog/event-status').then((res) => res.data)
+export function getHourlyTrend(hours?: number) {
+  return http.get<any>({ url: '/api/blocklog/hourly-trend', params: { hours } })
+}
+
+export function getBlockedTopIPs(limit?: number) {
+  return http.get<any>({ url: '/api/blocklog/blocked-top-ips', params: { limit } })
+}
+
+export function getBlockLogEventStatus() {
+  return http.get<any>({ url: '/api/blocklog/event-status' })
 }

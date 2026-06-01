@@ -1,25 +1,17 @@
-import request from './request'
-import type { ApiResponse, AuditLog, AuditLogsResponse } from '@/types/api'
+import http from '@/utils/http'
 
-export interface ListAuditLogsParams {
-  page?: number
-  page_size?: number
-  user_id?: number
-  action?: string
-  resource?: string
-  start_time?: string
-  end_time?: string
-  status?: string
+export interface AuditLog {
+  id: number
+  user_id: number
+  username: string
+  action: string
+  target_type: string
+  target_id?: string
+  details: string
+  ip: string
+  created_at: string
 }
 
-export function listAuditLogs(params: ListAuditLogsParams = {}): Promise<ApiResponse<AuditLogsResponse>> {
-  return request.get('/api/audit/logs', { params }).then((res) => res.data)
-}
-
-export function getAuditLog(id: number): Promise<ApiResponse<AuditLog>> {
-  return request.get(`/api/audit/logs/${id}`).then((res) => res.data)
-}
-
-export function cleanAuditLogs(retentionDays: number): Promise<ApiResponse<void>> {
-  return request.post('/api/audit/clean', { retention_days: retentionDays }).then((res) => res.data)
+export function getAuditLogs(params: { page: number; page_size: number; action?: string; user_id?: number }) {
+  return http.get<any>({ url: '/api/audit/logs', params })
 }

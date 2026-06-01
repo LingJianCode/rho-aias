@@ -1,15 +1,16 @@
-import request from './request'
-import type { ApiResponse, EgressLogListResponse } from '@/types/api'
+import http from '@/utils/http'
 
 export interface EgressLogFilter {
   date: string
   start_hour?: number
   end_hour?: number
-  dst_ip?: string
   page?: number
   page_size?: number
+  src_ip?: string
+  dst_ip?: string
+  dst_port?: number
 }
 
-export function getEgressLogs(params: EgressLogFilter): Promise<ApiResponse<EgressLogListResponse>> {
-  return request.get('/api/egresslog/records', { params }).then((res) => res.data)
+export function getEgressLogs(params: EgressLogFilter) {
+  return http.get<any>({ url: '/api/egresslog/records', params })
 }

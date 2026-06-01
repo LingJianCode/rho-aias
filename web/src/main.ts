@@ -1,52 +1,25 @@
-import { createApp } from 'vue'
-import { createPinia } from 'pinia'
-
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
-
 import App from './App.vue'
-import router from './router'
-import './styles/variables.scss'
-import './styles/dark.scss'
-import './styles/global.scss'
+import { createApp } from 'vue'
+import { initStore } from './store'                 // Store
+import { initRouter } from './router'               // Router
+import language from './locales'                    // 国际化
+import './assets/styles/core/tailwind.css'          // tailwind
+import './assets/styles/index.scss'                 // 样式
+import './utils/sys/console.ts'                     // 控制台输出内容
+import { setupGlobDirectives } from './directives'
+import { setupErrorHandle } from './utils/sys/error-handle'
 
-const userAgent = navigator.userAgent
-const isEdge = /Edg\//.test(userAgent)
-
-if (isEdge) {
-  const rawReplaceState = window.history.replaceState.bind(window.history)
-  const rawPushState = window.history.pushState.bind(window.history)
-
-  const shouldSkipHistoryStateUpdate = (state: unknown): boolean => {
-    return document.visibilityState === 'hidden' && state != null
-  }
-
-  window.history.replaceState = function (
-    state: unknown,
-    unused: string,
-    url?: string | URL | null
-  ): void {
-    if (shouldSkipHistoryStateUpdate(state)) return
-    rawReplaceState(state, unused, url)
-  }
-
-  window.history.pushState = function (
-    state: unknown,
-    unused: string,
-    url?: string | URL | null
-  ): void {
-    if (shouldSkipHistoryStateUpdate(state)) return
-    rawPushState(state, unused, url)
-  }
-}
+document.addEventListener(
+  'touchstart',
+  function () {},
+  { passive: false }
+)
 
 const app = createApp(App)
+initStore(app)
+initRouter(app)
+setupGlobDirectives(app)
+setupErrorHandle(app)
 
-// Register Element Plus icons
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component)
-}
-
-app.use(createPinia())
-app.use(router)
-
+app.use(language)
 app.mount('#app')

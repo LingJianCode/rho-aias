@@ -1,27 +1,22 @@
-import request from './request'
-import type { ApiResponse, ApiKeysResponse, CreateApiKeyRequest, CreateApiKeyResponse } from '@/types/api'
+import http from '@/utils/http'
 
-export interface PermissionInfo {
-  value: string
-  label: string
+export interface ApiKey {
+  id: number
+  name: string
+  key: string
+  created_at: string
+  last_used?: string
+  expires_at?: string | null
 }
 
-export interface PermissionsResponse {
-  permissions: PermissionInfo[]
+export function getApiKeys() {
+  return http.get<any>({ url: '/api/api-keys' })
 }
 
-export function getApiKeys(): Promise<ApiResponse<ApiKeysResponse>> {
-  return request.get('/api/api-keys').then((res) => res.data)
+export function createApiKey(data: { name: string; expires_at?: string }) {
+  return http.post({ url: '/api/api-keys', data })
 }
 
-export function createApiKey(data: CreateApiKeyRequest): Promise<ApiResponse<CreateApiKeyResponse>> {
-  return request.post('/api/api-keys', data).then((res) => res.data)
-}
-
-export function revokeApiKey(id: number): Promise<ApiResponse<void>> {
-  return request.delete(`/api/api-keys/${id}`).then((res) => res.data)
-}
-
-export function getPermissions(): Promise<ApiResponse<PermissionsResponse>> {
-  return request.get('/api/api-keys/permissions').then((res) => res.data)
+export function deleteApiKey(id: number) {
+  return http.del({ url: `/api/api-keys/${id}` })
 }

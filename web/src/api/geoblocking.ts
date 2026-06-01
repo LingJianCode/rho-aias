@@ -1,10 +1,18 @@
-import request from './request'
-import type { ApiResponse, GeoBlockingStatus } from '@/types/api'
+import http from '@/utils/http'
 
-export function getGeoBlockingStatus(): Promise<ApiResponse<GeoBlockingStatus>> {
-  return request.get('/api/geoblocking/status').then((res) => res.data)
+export interface GeoBlockingStatus {
+  enabled: boolean
+  mode: 'whitelist' | 'blacklist'
+  allowed_countries: string[]
+  last_update: string
+  total_rules: number
+  sources: Record<string, any>
 }
 
-export function triggerGeoBlockingUpdate(): Promise<ApiResponse<void>> {
-  return request.post('/api/geoblocking/update').then((res) => res.data)
+export function getGeoBlockingStatus() {
+  return http.get<GeoBlockingStatus>({ url: '/api/geoblocking/status' })
+}
+
+export function triggerGeoBlockingUpdate() {
+  return http.post({ url: '/api/geoblocking/update' })
 }
