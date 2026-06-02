@@ -21,100 +21,24 @@
     <template #default>
       <div class="pt-3">
         <div class="flex-c pb-1 px-0">
-          <img
-            class="w-10 h-10 mr-3 ml-0 overflow-hidden rounded-full float-left"
-            :src="avatarImg"
-          />
-          <div class="w-[calc(100%-60px)] h-full">
-            <span class="block text-sm font-medium text-g-800 truncate">{{
-              userInfo.userName
-            }}</span>
-            <span class="block mt-0.5 text-xs text-g-500 truncate">{{ userInfo.email }}</span>
-          </div>
+          <span class="block text-sm font-medium text-g-800 truncate">{{ userInfo.userName }}</span>
         </div>
-        <ul class="py-4 mt-3 border-t border-g-300/80">
-          <li class="btn-item" @click="loginOut()">
-            <ArtSvgIcon icon="ri:logout-box-r-line" />
-            <span>{{ $t('topBar.user.logout') }}</span>
-          </li>
-        </ul>
       </div>
     </template>
   </ElPopover>
 </template>
 
 <script setup lang="ts">
-  import { useI18n } from 'vue-i18n'
-  import { ElMessageBox } from 'element-plus'
   import { useUserStore } from '@/store/modules/user'
-  import { mittBus } from '@/utils/sys'
   import avatarImg from '@/assets/images/user/avatar.webp'
 
   defineOptions({ name: 'ArtUserMenu' })
 
-  const { t } = useI18n()
   const userStore = useUserStore()
 
   const { getUserInfo: userInfo } = storeToRefs(userStore)
-  const userMenuPopover = ref()
-
-  /**
-   * 用户登出确认
-   */
-  const loginOut = (): void => {
-    closeUserMenu()
-    setTimeout(() => {
-      ElMessageBox.confirm(t('common.logOutTips'), t('common.tips'), {
-        confirmButtonText: t('common.confirm'),
-        cancelButtonText: t('common.cancel'),
-        customClass: 'login-out-dialog'
-      }).then(() => {
-        userStore.logOut()
-      })
-    }, 200)
-  }
-
-  /**
-   * 关闭用户菜单弹出层
-   */
-  const closeUserMenu = (): void => {
-    setTimeout(() => {
-      userMenuPopover.value.hide()
-    }, 100)
-  }
 </script>
 
 <style scoped>
   @reference '@styles/core/tailwind.css';
-
-  @layer components {
-    .btn-item {
-      @apply flex items-center p-2 mb-3 select-none rounded-md cursor-pointer last:mb-0;
-
-      span {
-        @apply text-sm;
-      }
-
-      .art-svg-icon {
-        @apply mr-2 text-base;
-      }
-
-      &:hover {
-        background-color: var(--art-gray-200);
-      }
-    }
-  }
-
-  .log-out {
-    @apply py-1.5
-    mt-5
-    text-xs
-    text-center
-    border
-    border-g-400
-    rounded-md
-    transition-all
-    duration-200
-    hover:shadow-xl;
-  }
 </style>

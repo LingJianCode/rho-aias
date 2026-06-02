@@ -22,11 +22,4 @@ export function fetchGetCaptcha() {
   })
 }
 
-/**
- * 获取用户信息（用于 Token 验证）
- */
-export function fetchGetUserInfo() {
-  return http.get<any>({
-    url: '/api/auth/userinfo'
-  })
-}
+

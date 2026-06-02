@@ -56,23 +56,6 @@
       </div>
 
       <div class="flex-c gap-2.5">
-        <!-- 搜索 -->
-        <div
-          v-if="shouldShowGlobalSearch"
-          class="flex-cb w-40 h-9 px-2.5 c-p border border-g-400 rounded-custom-sm max-md:!hidden"
-          @click="openSearchDialog"
-        >
-          <div class="flex-c">
-            <ArtSvgIcon icon="ri:search-line" class="text-sm text-g-500" />
-            <span class="ml-1 text-xs font-normal text-g-500">{{ $t('topBar.search.title') }}</span>
-          </div>
-          <div class="flex-c h-5 px-1.5 text-g-500/80 border border-g-400 rounded">
-            <ArtSvgIcon v-if="isWindows" icon="vaadin:ctrl-a" class="text-sm" />
-            <ArtSvgIcon v-else icon="ri:command-fill" class="text-xs" />
-            <span class="ml-0.5 text-xs">k</span>
-          </div>
-        </div>
-
         <!-- 全屏按钮 -->
         <ArtIconButton
           v-if="shouldShowFullscreen"
@@ -81,48 +64,6 @@
           class="max-md:!hidden"
           @click="toggleFullScreen"
         />
-
-        <!-- 国际化按钮 -->
-        <ElDropdown
-          @command="changeLanguage"
-          popper-class="langDropDownStyle"
-          v-if="shouldShowLanguage"
-        >
-          <ArtIconButton icon="ri:translate-2" class="language-btn text-[19px]" />
-          <template #dropdown>
-            <ElDropdownMenu>
-              <div v-for="item in languageOptions" :key="item.value" class="lang-btn-item">
-                <ElDropdownItem
-                  :command="item.value"
-                  :class="{ 'is-selected': locale === item.value }"
-                >
-                  <span class="menu-txt">{{ item.label }}</span>
-                  <ArtSvgIcon icon="ri:check-fill" v-if="locale === item.value" />
-                </ElDropdownItem>
-              </div>
-            </ElDropdownMenu>
-          </template>
-        </ElDropdown>
-
-        <!-- 通知按钮 -->
-        <ArtIconButton
-          v-if="shouldShowNotification"
-          icon="ri:notification-2-line"
-          class="notice-button relative"
-          @click="visibleNotice"
-        >
-          <div class="absolute top-2 right-2 size-1.5 !bg-danger rounded-full"></div>
-        </ArtIconButton>
-
-        <!-- 聊天按钮 -->
-        <ArtIconButton
-          v-if="shouldShowChat"
-          icon="ri:message-3-line"
-          class="chat-button relative"
-          @click="openChat"
-        >
-          <div class="breathing-dot absolute top-2 right-2 size-1.5 !bg-success rounded-full"></div>
-        </ArtIconButton>
 
         <!-- 设置按钮 -->
         <div v-if="shouldShowSettings">
@@ -157,22 +98,17 @@
 
     <!-- 标签页 -->
     <ArtWorkTab />
-
-    <!-- 通知 -->
-    <ArtNotification v-model:value="showNotice" ref="notice" />
   </div>
 </template>
 
 <script setup lang="ts">
-  import { useI18n } from 'vue-i18n'
   import { useRouter } from 'vue-router'
   import { useFullscreen, useWindowSize } from '@vueuse/core'
-  import { LanguageEnum, MenuTypeEnum } from '@/enums/appEnum'
+  import { MenuTypeEnum } from '@/enums/appEnum'
   import { useSettingStore } from '@/store/modules/setting'
   import { useUserStore } from '@/store/modules/user'
   import { useMenuStore } from '@/store/modules/menu'
   import AppConfig from '@/config'
-  import { languageOptions } from '@/locales'
   import { mittBus } from '@/utils/sys'
   import { themeAnimation } from '@/utils/ui/animation'
   import { useCommon } from '@/hooks/core/useCommon'
@@ -181,11 +117,7 @@
 
   defineOptions({ name: 'ArtHeaderBar' })
 
-  // 检测操作系统类型
-  const isWindows = navigator.userAgent.includes('Windows')
-
   const router = useRouter()
-  const { locale } = useI18n()
   const { width } = useWindowSize()
 
   const settingStore = useSettingStore()
@@ -197,11 +129,7 @@
     shouldShowMenuButton,
     shouldShowRefreshButton,
     shouldShowBreadcrumb,
-    shouldShowGlobalSearch,
     shouldShowFullscreen,
-    shouldShowNotification,
-    shouldShowChat,
-    shouldShowLanguage,
     shouldShowSettings,
     shouldShowThemeToggle
   } = useHeaderBar()
@@ -212,9 +140,6 @@
   const { language } = storeToRefs(userStore)
   const { menuList } = storeToRefs(menuStore)
 
-  const showNotice = ref(false)
-  const notice = ref(null)
-
   // 菜单类型判断
   const isLeftMenu = computed(() => menuType.value === MenuTypeEnum.LEFT)
   const isDualMenu = computed(() => menuType.value === MenuTypeEnum.DUAL_MENU)
@@ -224,12 +149,7 @@
   const { isFullscreen, toggle: toggleFullscreen } = useFullscreen()
 
   onMounted(() => {
-    initLanguage()
-    document.addEventListener('click', bodyCloseNotice)
-  })
-
-  onUnmounted(() => {
-    document.removeEventListener('click', bodyCloseNotice)
+    //
   })
 
   /**
@@ -267,24 +187,6 @@
   }
 
   /**
-   * 初始化语言设置
-   */
-  const initLanguage = (): void => {
-    locale.value = language.value
-  }
-
-  /**
-   * 切换系统语言
-   * @param {LanguageEnum} lang - 目标语言类型
-   */
-  const changeLanguage = (lang: LanguageEnum): void => {
-    if (locale.value === lang) return
-    locale.value = lang
-    userStore.setLanguage(lang)
-    reload(50)
-  }
-
-  /**
    * 打开设置面板
    */
   const openSetting = (): void => {
@@ -294,45 +196,6 @@
     if (showSettingGuide.value) {
       settingStore.hideSettingGuide()
     }
-  }
-
-  /**
-   * 打开全局搜索对话框
-   */
-  const openSearchDialog = (): void => {
-    mittBus.emit('openSearchDialog')
-  }
-
-  /**
-   * 点击页面其他区域关闭通知面板
-   * @param {Event} e - 点击事件对象
-   */
-  const bodyCloseNotice = (e: any): void => {
-    if (!showNotice.value) return
-
-    const target = e.target as HTMLElement
-
-    // 检查是否点击了通知按钮或通知面板内部
-    const isNoticeButton = target.closest('.notice-button')
-    const isNoticePanel = target.closest('.art-notification-panel')
-
-    if (!isNoticeButton && !isNoticePanel) {
-      showNotice.value = false
-    }
-  }
-
-  /**
-   * 切换通知面板显示状态
-   */
-  const visibleNotice = (): void => {
-    showNotice.value = !showNotice.value
-  }
-
-  /**
-   * 打开聊天窗口
-   */
-  const openChat = (): void => {
-    mittBus.emit('openChat')
   }
 </script>
 
@@ -345,28 +208,6 @@
 
     100% {
       transform: rotate(180deg);
-    }
-  }
-
-  @keyframes shake {
-    0% {
-      transform: rotate(0);
-    }
-
-    25% {
-      transform: rotate(-5deg);
-    }
-
-    50% {
-      transform: rotate(5deg);
-    }
-
-    75% {
-      transform: rotate(-5deg);
-    }
-
-    100% {
-      transform: rotate(0);
     }
   }
 
@@ -398,44 +239,9 @@
     }
   }
 
-  @keyframes moveUp {
-    0% {
-      transform: translateY(0);
-    }
-
-    50% {
-      transform: translateY(-3px);
-    }
-
-    100% {
-      transform: translateY(0);
-    }
-  }
-
-  @keyframes breathing {
-    0% {
-      opacity: 0.4;
-      transform: scale(0.9);
-    }
-
-    50% {
-      opacity: 1;
-      transform: scale(1.1);
-    }
-
-    100% {
-      opacity: 0.4;
-      transform: scale(0.9);
-    }
-  }
-
   /* Hover animation classes */
   .refresh-btn:hover :deep(.art-svg-icon) {
     animation: rotate180 0.5s;
-  }
-
-  .language-btn:hover :deep(.art-svg-icon) {
-    animation: moveUp 0.4s;
   }
 
   .setting-btn:hover :deep(.art-svg-icon) {
@@ -448,19 +254,6 @@
 
   .exit-full-screen-btn:hover :deep(.art-svg-icon) {
     animation: shrink 0.6s forwards;
-  }
-
-  .notice-button:hover :deep(.art-svg-icon) {
-    animation: shake 0.5s ease-in-out;
-  }
-
-  .chat-button:hover :deep(.art-svg-icon) {
-    animation: shake 0.5s ease-in-out;
-  }
-
-  /* Breathing animation for chat dot */
-  .breathing-dot {
-    animation: breathing 1.5s ease-in-out infinite;
   }
 
   /* iPad breakpoint adjustments */

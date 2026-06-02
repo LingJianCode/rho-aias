@@ -156,10 +156,16 @@ const handleSubmit = async () => {
       throw new Error('登录失败 - 未收到 Token')
     }
 
-    // 设置角色（将单一 role 转换为 roles 数组）
-    const userData = result.user || {}
-    if (userData.role && !userData.roles) {
-      userData.roles = [userData.role]
+    // 适配后端用户数据结构，映射为前端所需字段
+    const rawUser = result.user || {}
+    const userData = {
+      userId: rawUser.id,
+      userName: rawUser.username || rawUser.nickname,
+      nickname: rawUser.nickname,
+      email: rawUser.email,
+      role: rawUser.role,
+      roles: rawUser.role ? [rawUser.role] : [],
+      buttons: []
     }
 
     // 存储 token 和用户信息
