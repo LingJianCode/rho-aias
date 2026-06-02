@@ -28,10 +28,11 @@ export default ({ mode }: { mode: string }) => {
       port: Number(VITE_PORT),
       allowedHosts: true,
       proxy: {
-        '/api': {
-          target: VITE_API_PROXY_URL,
-          changeOrigin: true
-        }
+        [VITE_API_URL]: {
+          target: VITE_API_PROXY_URL || 'http://localhost:8080',
+          changeOrigin: true,
+          rewrite: (path: string) => path.replace(new RegExp(`^${VITE_API_URL}`), ''),
+        },
       },
       host: true
     },
