@@ -84,8 +84,8 @@ async function fetchLogs() {
       page: page.value,
       page_size: pageSize.value,
     })
-    logs.value = res.data.records || []
-    total.value = res.data.total || 0
+    logs.value = res.records || []
+    total.value = res.total || 0
   } catch {
     logs.value = []
     total.value = 0

@@ -111,8 +111,8 @@ async function fetchRecords() {
       page: page.value,
       page_size: pageSize.value,
     })
-    records.value = res.data.records || []
-    total.value = res.data.total || 0
+    records.value = res.records || []
+    total.value = res.total || 0
   } catch {
     records.value = []
     total.value = 0

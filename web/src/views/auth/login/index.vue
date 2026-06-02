@@ -151,9 +151,9 @@ onMounted(() => {
 async function refreshCaptcha() {
   try {
     const res = await fetchGetCaptcha()
-    if (res.data) {
-      captchaId.value = res.data.captcha_id || ''
-      captchaUrl.value = res.data.captcha_image || ''
+    if (res) {
+      captchaId.value = res.captcha_id || ''
+      captchaUrl.value = res.captcha_image || ''
       formData.captchaCode = ''
     }
   } catch (error) {

@@ -81,7 +81,7 @@ async function fetchKeys() {
   loading.value = true
   try {
     const res = await getApiKeys()
-    keys.value = res.data.keys || []
+    keys.value = res.keys || []
   } catch {
     keys.value = []
   } finally {

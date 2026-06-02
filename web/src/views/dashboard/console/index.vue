@@ -64,8 +64,8 @@ async function fetchBlockStatsAndTrend() {
   try {
     const { getHourlyTrend } = await import('@/api/blocklog')
     const res = await getHourlyTrend(24)
-    if (res.data?.hourly_data) {
-      blockTrend.value = res.data.hourly_data.map((item: any) => ({
+    if (res?.hourly_data) {
+      blockTrend.value = res.hourly_data.map((item: any) => ({
         date: item.hour,
         count: item.total,
       }))
@@ -79,8 +79,8 @@ async function fetchTopIPs() {
   try {
     const { getBlockedTopIPs } = await import('@/api/blocklog')
     const res = await getBlockedTopIPs(10)
-    if (res.data?.top_blocked_ips) {
-      topIPs.value = res.data.top_blocked_ips
+    if (res?.top_blocked_ips) {
+      topIPs.value = res.top_blocked_ips
     }
   } catch (error) {
     console.error('获取TOP IP失败:', error)

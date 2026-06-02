@@ -71,7 +71,7 @@ async function fetchData() {
   loading.value = true
   try {
     const res = await getWhitelist()
-    whitelist.value = res.data.rules || []
+    whitelist.value = res.rules || []
   } catch {
     whitelist.value = []
   } finally {

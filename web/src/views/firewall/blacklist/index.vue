@@ -157,7 +157,7 @@ async function fetchManualRules() {
   loading.value = true
   try {
     const res = await getBlacklist()
-    manualRules.value = res.data.rules || []
+    manualRules.value = res.rules || []
   } catch {
     manualRules.value = []
   } finally {
@@ -175,8 +175,8 @@ async function fetchBanRecords() {
       source: sourceType.value,
       status: 'active',
     })
-    banRecords.value = res.data.records
-    total.value = res.data.total
+    banRecords.value = res.records
+    total.value = res.total
   } catch {
     banRecords.value = []
     total.value = 0
