@@ -55,31 +55,6 @@
               </div>
             </ElFormItem>
 
-            <!-- 推拽验证 -->
-            <div class="relative pb-5 mt-6">
-              <div
-                class="relative z-[2] overflow-hidden select-none rounded-lg border border-transparent tad-300"
-                :class="{ '!border-[#FF4E4F]': !isPassing && isClickPass }"
-              >
-                <ArtDragVerify
-                  ref="dragVerify"
-                  v-model:value="isPassing"
-                  text="拖动滑块完成验证"
-                  textColor="var(--art-gray-700)"
-                  successText="验证通过"
-                  progressBarBg="var(--main-color)"
-                  :background="isDark ? '#26272F' : '#F1F1F4'"
-                  handlerBg="var(--default-box-color)"
-                />
-              </div>
-              <p
-                class="absolute top-0 z-[1] px-px mt-2 text-xs text-[#f56c6c] tad-300"
-                :class="{ 'translate-y-10': !isPassing && isClickPass }"
-              >
-                请完成滑块验证
-              </p>
-            </div>
-
             <div style="margin-top: 30px">
               <ElButton
                 class="w-full custom-height"
@@ -115,9 +90,6 @@ const { isDark } = storeToRefs(settingStore)
 const userStore = useUserStore()
 const router = useRouter()
 const route = useRoute()
-const dragVerify = ref()
-const isPassing = ref(false)
-const isClickPass = ref(false)
 
 const systemName = AppConfig.systemInfo.name
 const formRef = ref<FormInstance>()
@@ -135,8 +107,7 @@ const formData = reactive({
 const rules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, message: '密码至少6位', trigger: 'blur' }
+    { required: true, message: '请输入密码', trigger: 'blur' }
   ],
   captchaCode: [{ required: true, message: '请输入验证码', trigger: 'blur' }]
 }
@@ -169,12 +140,6 @@ const handleSubmit = async () => {
     // 表单验证
     const valid = await formRef.value.validate()
     if (!valid) return
-
-    // 拖拽验证
-    if (!isPassing.value) {
-      isClickPass.value = true
-      return
-    }
 
     loading.value = true
 
@@ -219,13 +184,7 @@ const handleSubmit = async () => {
     refreshCaptcha()
   } finally {
     loading.value = false
-    resetDragVerify()
   }
-}
-
-// 重置拖拽验证
-const resetDragVerify = () => {
-  dragVerify.value?.reset?.()
 }
 
 // 登录成功提示
