@@ -18,3 +18,7 @@ export function getBanRecords(params: { page: number; page_size: number; source?
 export function unblockBanRecord(id: number) {
   return http.post({ url: `/api/ban-records/${id}/unblock` })
 }
+
+export function getBanRecordStats() {
+  return http.get<{ total: number; active: number; expired: number; today_count: number }>({ url: '/api/ban-records/stats' })
+}
