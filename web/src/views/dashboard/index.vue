@@ -18,35 +18,36 @@
       </template>
     </div>
 
-    <!-- 阻断态势图 + TOP 被封 IP -->
-    <el-row :gutter="20">
-      <el-col :span="16">
-        <el-card shadow="never" class="art-card">
-          <template #header><div class="card-header"><span>阻断趋势</span></div></template>
-          <div ref="chartRef" style="height: 300px"></div>
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card shadow="never" class="art-card">
-          <template #header><div class="card-header"><span>TOP 阻断 IP</span></div></template>
-          <div v-if="topIPs.length" class="rank-list">
-            <div v-for="(item, index) in topIPs" :key="item.ip" class="rank-item">
-              <span class="rank-index" :class="{ 'top3': index < 3 }">{{ index + 1 }}</span>
-              <span class="rank-ip">{{ item.ip }}</span>
-              <span class="rank-value">{{ formatNumber(item.count) }}</span>
-              <el-progress
-                :percentage="getIPPercentage(item.count)"
-                :show-text="false"
-                :stroke-width="6"
-                :color="index === 0 ? '#409eff' : index === 1 ? '#67c23a' : index === 2 ? '#e6a23c' : '#909399'"
-                style="flex: 1; margin-left: 12px"
-              />
-            </div>
+    <!-- 阻断趋势 -->
+    <div class="chart-card">
+      <div class="card-title-row">
+        <span class="card-icon">📈</span>
+        <span class="card-title">阻断趋势</span>
+        <span class="card-subtitle">近24小时</span>
+      </div>
+      <div ref="chartRef" class="chart-container"></div>
+    </div>
+
+    <!-- TOP 阻断 IP -->
+    <div class="topip-card">
+      <div class="card-title-row">
+        <span class="card-icon">🎯</span>
+        <span class="card-title">TOP 阻断 IP</span>
+      </div>
+      <div v-if="topIPs.length" class="topip-grid">
+        <div v-for="(item, index) in topIPs" :key="item.ip" class="topip-item" :class="{ 'top3': index < 3 }">
+          <div class="topip-header">
+            <span class="topip-rank">{{ index + 1 }}</span>
+            <span class="topip-ip">{{ item.ip }}</span>
+            <span class="topip-count">{{ formatNumber(item.count) }}</span>
           </div>
-          <el-empty v-else description="暂无数据" :image-size="80" />
-        </el-card>
-      </el-col>
-    </el-row>
+          <div class="topip-bar-wrap">
+            <div class="topip-bar" :style="{ width: getIPPercentage(item.count) + '%' }"></div>
+          </div>
+        </div>
+      </div>
+      <el-empty v-else description="暂无数据" :image-size="60" />
+    </div>
   </div>
 </template>
 
@@ -112,12 +113,49 @@ function getIPPercentage(count: number): number {
 
 function updateChart() {
   if (!chart || !blockTrend.value.length) return
+  const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--el-color-primary').trim() || '#FF80CB'
   chart.setOption({
-    tooltip: { trigger: 'axis' },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    xAxis: { type: 'category', data: blockTrend.value.map((d) => d.date), axisLabel: { rotate: 30 } },
-    yAxis: { type: 'value' },
-    series: [{ type: 'line', smooth: true, areaStyle: { opacity: 0.3 }, data: blockTrend.value.map((d) => d.count) }],
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(255,255,255,0.95)',
+      borderColor: '#eee',
+      textStyle: { color: '#333', fontSize: 12 },
+      axisPointer: { type: 'cross', crossStyle: { color: '#999' } },
+      formatter: (params: any) => `<strong>${params[0].axisValue}</strong><br/>阻断数：<b style="color:${primaryColor}">${params[0].value}</b>`
+    },
+    grid: { left: '3%', right: '4%', bottom: '8%', top: '10%', containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: blockTrend.value.map((d) => d.date),
+      axisLabel: { rotate: 30, color: '#999', fontSize: 11 },
+      axisLine: { lineStyle: { color: '#e8e8e8' } },
+      axisTick: { show: false }
+    },
+    yAxis: {
+      type: 'value',
+      splitLine: { lineStyle: { color: '#f5f5f5', type: 'dashed' } },
+      axisLabel: { color: '#999', fontSize: 11 }
+    },
+    series: [{
+      type: 'line',
+      smooth: true,
+      symbol: 'circle',
+      symbolSize: 6,
+      showSymbol: false,
+      lineStyle: { width: 2.5, color: primaryColor },
+      itemStyle: { color: primaryColor },
+      areaStyle: {
+        color: {
+          type: 'linear',
+          x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: primaryColor + '40' },
+            { offset: 1, color: primaryColor + '08' }
+          ]
+        }
+      },
+      data: blockTrend.value.map((d) => d.count)
+    }]
   })
 }
 
@@ -138,6 +176,9 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 .dashboard-view {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 /* 指标行 */
@@ -150,7 +191,6 @@ onUnmounted(() => {
   border-radius: var(--el-border-radius-base);
   border: 1px solid var(--el-border-color-lighter);
   flex-wrap: wrap;
-  margin-bottom: 12px;
 }
 
 .group-label {
@@ -161,43 +201,139 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: 600;
+/* ====== 图表卡片 ====== */
+.chart-card,
+.topip-card {
+  background: var(--el-bg-color);
+  border-radius: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  padding: 20px 24px;
+  transition: box-shadow 0.3s;
+
+  &:hover {
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  }
 }
 
-.rank-list {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.rank-item {
+.card-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  &:last-child { border-bottom: none; }
+  margin-bottom: 16px;
 }
 
-.rank-index {
-  width: 22px; height: 22px; border-radius: 4px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 600;
-  background-color: var(--el-fill-color-light);
-  color: var(--el-text-color-secondary); flex-shrink: 0;
-  &.top3 { background-color: var(--el-color-primary); color: #fff; }
+.card-icon {
+  font-size: 18px;
 }
 
-.rank-value {
-  font-size: 14px; font-weight: 600;
-  color: var(--el-text-color-primary); min-width: 48px; text-align: right; flex-shrink: 0;
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
 
-.rank-ip {
-  font-size: 13px; font-family: monospace;
-  color: var(--el-text-color-primary); min-width: 100px; flex-shrink: 0;
+.card-subtitle {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  margin-left: auto;
+}
+
+.chart-container {
+  height: 280px;
+  width: 100%;
+}
+
+/* ====== TOP IP 网格 ====== */
+.topip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.topip-item {
+  background: var(--el-fill-color-extra-light);
+  border-radius: 10px;
+  padding: 14px 16px;
+  transition: all 0.25s ease;
+  border-left: 3px solid transparent;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    background: var(--el-fill-color-light);
+  }
+
+  &.top3:nth-child(1) { border-left-color: #FF80CB; }
+  &.top3:nth-child(2) { border-left-color: #B48DF3; }
+  &.top3:nth-child(3) { border-left-color: #38C0FC; }
+}
+
+.topip-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.topip-rank {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+
+  .top3:nth-child(1) &,
+  .topip-item.top3:nth-child(1) & {
+    background: linear-gradient(135deg, #FF80CB, #ff6eb5);
+    color: #fff;
+  }
+  .topip-item.top3:nth-child(2) & {
+    background: linear-gradient(135deg, #B48DF3, #9d73e8);
+    color: #fff;
+  }
+  .topip-item.top3:nth-child(3) & {
+    background: linear-gradient(135deg, #38C0FC, #1daaf5);
+    color: #fff;
+  }
+}
+
+.topip-ip {
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  color: var(--el-text-color-regular);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topip-count {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.topip-bar-wrap {
+  height: 6px;
+  background: var(--el-fill-color);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.topip-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--el-color-primary), var(--el-color-primary-light-3));
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  min-width: 4px;
 }
 </style>
