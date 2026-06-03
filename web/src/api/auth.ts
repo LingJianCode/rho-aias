@@ -22,4 +22,11 @@ export function fetchGetCaptcha() {
   })
 }
 
+/**
+ * 退出登录
+ */
+export function fetchLogout() {
+  return http.post<any>({ url: '/api/auth/logout' })
+}
+
 

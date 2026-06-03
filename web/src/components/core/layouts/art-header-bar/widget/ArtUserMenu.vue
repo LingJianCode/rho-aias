@@ -24,6 +24,12 @@
           <span class="block text-sm font-medium text-g-800 truncate">{{ userInfo.userName }}</span>
         </div>
       </div>
+      <div class="mt-3 pt-2 border-t border-[var(--default-border)]">
+        <div class="flex-c cursor-pointer hover:text-danger transition-colors" @click="handleLogout">
+          <span class="ri:logout-box-r-line mr-1.5"></span>
+          <span class="text-sm">退出登录</span>
+        </div>
+      </div>
     </template>
   </ElPopover>
 </template>
@@ -31,12 +37,24 @@
 <script setup lang="ts">
   import { useUserStore } from '@/store/modules/user'
   import avatarImg from '@/assets/images/user/avatar.webp'
+  import { fetchLogout } from '@/api/auth'
+  import { ElMessageBox } from 'element-plus'
 
   defineOptions({ name: 'ArtUserMenu' })
 
   const userStore = useUserStore()
 
   const { getUserInfo: userInfo } = storeToRefs(userStore)
+
+  async function handleLogout() {
+    try {
+      await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' })
+      await fetchLogout()
+      userStore.logOut()
+    } catch {
+      // User cancelled
+    }
+  }
 </script>
 
 <style scoped>
