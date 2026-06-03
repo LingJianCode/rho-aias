@@ -1,24 +1,21 @@
 <template>
   <div class="dashboard-view">
-    <!-- 紧凑指标条 -->
-    <div class="metric-bar">
-      <!-- 封禁统计分组 -->
-      <div class="metric-group">
-        <span class="group-label">封禁</span>
-        <MetricItem label="总数" :value="banStats.total" color="#409eff" />
-        <MetricItem label="生效" :value="banStats.active" color="#67c23a" />
-        <MetricItem label="过期" :value="banStats.expired" color="#909399" />
-        <MetricItem label="今日" :value="banStats.today_count" color="#e6a23c" />
-      </div>
-      <div class="metric-divider" />
-      <!-- 阻断统计分组 -->
-      <div class="metric-group">
-        <span class="group-label">阻断</span>
-        <MetricItem label="总计" :value="blockStats.total_blocked" color="#409eff" />
-        <template v-for="(value, key) in blockStats.by_rule_source" :key="key">
-          <MetricItem :label="key" :value="value" color="#67c23a" />
-        </template>
-      </div>
+    <!-- 封禁统计 -->
+    <div class="metric-row">
+      <span class="group-label">封禁</span>
+      <MetricItem label="总数" :value="banStats.total" color="#409eff" />
+      <MetricItem label="生效" :value="banStats.active" color="#67c23a" />
+      <MetricItem label="过期" :value="banStats.expired" color="#909399" />
+      <MetricItem label="今日" :value="banStats.today_count" color="#e6a23c" />
+    </div>
+
+    <!-- 阻断统计 -->
+    <div class="metric-row">
+      <span class="group-label">阻断</span>
+      <MetricItem label="总计" :value="blockStats.total_blocked" color="#409eff" />
+      <template v-for="(value, key) in blockStats.by_rule_source" :key="key">
+        <MetricItem :label="key" :value="value" color="#67c23a" />
+      </template>
     </div>
 
     <!-- 阻断态势图 + TOP 被封 IP -->
@@ -50,32 +47,6 @@
         </el-card>
       </el-col>
     </el-row>
-
-    <!-- 最近阻断记录 -->
-    <el-card shadow="never" class="art-card mt-5">
-      <template #header>
-        <div class="card-header">
-          <span>最近阻断记录</span>
-          <el-button type="primary" text @click="$router.push('/record/blocklog')">查看全部</el-button>
-        </div>
-      </template>
-      <el-table :data="recentBlocks" stripe size="small" max-height="300">
-        <el-table-column prop="timestamp" label="时间" width="180" />
-        <el-table-column prop="src_ip" label="源 IP" width="160">
-          <template #default="{ row }"><code>{{ row.src_ip }}</code></template>
-        </el-table-column>
-        <el-table-column prop="dst_ip" label="目标 IP" width="140" />
-        <el-table-column prop="dst_port" label="端口" width="80" />
-        <el-table-column label="来源" width="120">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.rule_source === 'failguard' ? '' : row.rule_source === 'waf' ? 'success' : 'warning'">
-              {{ row.rule_source }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="action" label="动作" width="80" />
-      </el-table>
-    </el-card>
   </div>
 </template>
 
@@ -85,7 +56,7 @@ import * as echarts from 'echarts'
 import MetricItem from './components/MetricItem.vue'
 import { formatNumber } from '@/utils/format'
 import { getBanRecordStats } from '@/api/ban-records'
-import { getBlockLogStats, getHourlyTrend, getBlockedTopIPs, getBlockLogs } from '@/api/blocklog'
+import { getBlockLogStats, getHourlyTrend, getBlockedTopIPs } from '@/api/blocklog'
 
 defineOptions({ name: 'Dashboard' })
 
@@ -93,14 +64,13 @@ const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
 
 const topIPs = ref<{ ip: string; count: number }[]>([])
-const recentBlocks = ref<any[]>([])
 const blockTrend = ref<{ date: string; count: number }[]>([])
 
 const banStats = reactive({ total: 0, active: 0, expired: 0, today_count: 0 })
 const blockStats = reactive({ total_blocked: 0, by_rule_source: {} as Record<string, number> })
 
 async function fetchDashboardData() {
-  await Promise.all([fetchBanStats(), fetchBlockStats(), fetchBlockTrend(), fetchTopIPs(), fetchRecentBlocks()])
+  await Promise.all([fetchBanStats(), fetchBlockStats(), fetchBlockTrend(), fetchTopIPs()])
   updateChart()
 }
 
@@ -133,15 +103,6 @@ async function fetchTopIPs() {
     const res = await getBlockedTopIPs(10)
     const data = res?.data ?? res
     if (data?.top_blocked_ips) topIPs.value = data.top_blocked_ips
-  } catch {}
-}
-
-async function fetchRecentBlocks() {
-  try {
-    const today = new Date().toISOString().slice(0, 10)
-    const res = await getBlockLogs({ date: today, page_size: 5 })
-    const data = res?.data ?? res
-    if (data?.records) recentBlocks.value = data.records.slice(0, 5)
   } catch {}
 }
 
@@ -179,24 +140,17 @@ onUnmounted(() => {
   padding: 16px;
 }
 
-/* 紧凑指标条 */
-.metric-bar {
+/* 指标行 */
+.metric-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 16px 20px;
+  padding: 14px 20px;
   background-color: var(--el-bg-color);
   border-radius: var(--el-border-radius-base);
   border: 1px solid var(--el-border-color-lighter);
   flex-wrap: wrap;
-  margin-bottom: 20px;
-}
-
-.metric-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  margin-bottom: 12px;
 }
 
 .group-label {
@@ -205,14 +159,6 @@ onUnmounted(() => {
   color: var(--el-text-color-secondary);
   padding-right: 4px;
   white-space: nowrap;
-}
-
-.metric-divider {
-  width: 1px;
-  height: 24px;
-  background-color: var(--el-border-color);
-  flex-shrink: 0;
-  margin: 0 8px;
 }
 
 .card-header {

@@ -123,7 +123,7 @@ const appConfig: SystemConfig = {
     '#60C041',
     '#38C0FC',
     '#F9901F',
-    '#FF80C8'
+    '#FF80CB'
   ] as const,
   // 顶部栏功能配置
   headerBar: headerBarConfig
