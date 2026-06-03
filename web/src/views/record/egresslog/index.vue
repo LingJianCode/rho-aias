@@ -39,17 +39,17 @@
 
       <!-- 日志表格 -->
       <el-table :data="logs" v-loading="loading" stripe size="small">
-        <el-table-column prop="timestamp" label="时间" width="180">
+        <el-table-column prop="timestamp" label="时间" min-width="180">
           <template #default="{ row }">{{ formatNanoTimestamp(row.timestamp) }}</template>
         </el-table-column>
         <el-table-column prop="dst_ip" label="目标 IP" min-width="140" />
-        <el-table-column prop="pkt_len" label="包大小" width="110">
+        <el-table-column prop="pkt_len" label="包大小" min-width="110">
           <template #default="{ row }">{{ formatBytes(row.pkt_len) }}</template>
         </el-table-column>
-        <el-table-column prop="tokens" label="令牌数" width="130">
+        <el-table-column prop="tokens" label="令牌数" min-width="130">
           <template #default="{ row }">{{ formatNumber(row.tokens) }}</template>
         </el-table-column>
-        <el-table-column prop="rate_bytes" label="限速速率" width="130">
+        <el-table-column prop="rate_bytes" label="限速速率" min-width="130">
           <template #default="{ row }">{{ formatRate(row.rate_bytes) }}</template>
         </el-table-column>
       </el-table>

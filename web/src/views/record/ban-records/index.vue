@@ -56,26 +56,26 @@
             {{ row.ip }}{{ row.cidr ? `/${row.cidr}` : '' }}
           </template>
         </el-table-column>
-        <el-table-column prop="source" label="来源" width="120">
+        <el-table-column prop="source" label="来源" min-width="120">
           <template #default="{ row }">
             <el-tag size="small">{{ row.source }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="reason" label="原因" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="created_at" label="封禁时间" width="180">
+        <el-table-column prop="created_at" label="封禁时间" min-width="180">
           <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column prop="expires_at" label="过期时间" width="180">
+        <el-table-column prop="expires_at" label="过期时间" min-width="180">
           <template #default="{ row }">{{ row.expires_at ? formatDateTime(row.expires_at) : '永久' }}</template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="80">
+        <el-table-column prop="status" label="状态" min-width="80">
           <template #default="{ row }">
             <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
               {{ row.status === 'active' ? '生效中' : '已过期' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100">
+        <el-table-column label="操作" min-width="100">
           <template #default="{ row }">
             <el-button
               v-if="(row as BanRecord).status === 'active'"
