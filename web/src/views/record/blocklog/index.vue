@@ -12,21 +12,46 @@
       </template>
 
       <!-- 查询条件 -->
-      <el-form :model="filter" inline class="filter-form">
-        <el-form-item label="日期">
-          <el-date-picker v-model="filter.date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" />
+      <el-form :inline="true" :model="filter" class="filter-form">
+        <el-form-item label="查询日期">
+          <el-date-picker v-model="filter.date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" style="width: 160px" />
         </el-form-item>
-        <el-form-item label="来源 IP">
-          <el-input v-model="filter.src_ip" placeholder="来源 IP" clearable style="width: 160px" />
+        <el-form-item label="小时范围">
+          <el-select v-model="filter.start_hour" placeholder="起始" style="width: 80px">
+            <el-option v-for="h in 24" :key="h - 1" :label="String(h - 1).padStart(2, '0')" :value="h - 1" />
+          </el-select>
+          <span style="margin: 0 4px">-</span>
+          <el-select v-model="filter.end_hour" placeholder="结束" style="width: 80px">
+            <el-option v-for="h in 24" :key="h - 1" :label="String(h - 1).padStart(2, '0')" :value="h - 1" />
+          </el-select>
         </el-form-item>
-        <el-form-item label="规则来源">
-          <el-select v-model="filter.rule_source" placeholder="全部" clearable style="width: 140px">
+        <el-form-item label="搜索 IP">
+          <el-input
+            v-model="filter.src_ip"
+            placeholder="输入 IP"
+            clearable
+            style="width: 180px"
+            @clear="handleSearch"
+            @keyup.enter="handleSearch"
+          />
+        </el-form-item>
+        <el-form-item label="匹配类型">
+          <el-select v-model="filter.match_type" placeholder="全部" clearable style="width: 140px" @change="handleSearch">
+            <el-option label="精确匹配" value="ip4_exact" />
+            <el-option label="CIDR 匹配" value="ip4_cidr" />
+            <el-option label="地域封禁" value="geo_block" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="来源">
+          <el-select v-model="filter.rule_source" placeholder="全部来源" clearable style="width: 140px" @change="handleSearch">
+            <el-option label="手动" value="manual" />
+            <el-option label="IPsum" value="ipsum" />
+            <el-option label="Spamhaus" value="spamhaus" />
             <el-option label="WAF" value="waf" />
-            <el-option label="FailGuard" value="failguard" />
+            <el-option label="DDoS" value="ddos" />
             <el-option label="异常检测" value="anomaly" />
+            <el-option label="FailGuard" value="failguard" />
             <el-option label="Rate Limit" value="rate_limit" />
-            <el-option label="GeoIP" value="geoblocking" />
-            <el-option label="手动黑名单" value="manual" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -49,13 +74,7 @@
             <el-tag size="small">{{ row.rule_source }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="action" label="动作" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.action === 'drop' ? 'danger' : 'warning'" size="small">
-              {{ row.action }}
-            </el-tag>
-          </template>
-        </el-table-column>
+
       </el-table>
 
       <!-- 分页 -->
@@ -90,7 +109,10 @@ const total = ref(0)
 const filter = reactive({
   date: new Date().toISOString().split('T')[0],
   src_ip: '',
+  match_type: '',
   rule_source: '',
+  start_hour: 0,
+  end_hour: 23,
 })
 
 async function fetchLogs() {
@@ -124,7 +146,10 @@ function handleSearch() {
 function handleReset() {
   filter.date = new Date().toISOString().split('T')[0]
   filter.src_ip = ''
+  filter.match_type = ''
   filter.rule_source = ''
+  filter.start_hour = 0
+  filter.end_hour = 23
   handleSearch()
 }
 

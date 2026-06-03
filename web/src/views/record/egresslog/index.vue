@@ -8,15 +8,28 @@
       </template>
 
       <!-- 查询条件 -->
-      <el-form :model="filter" inline class="filter-form">
-        <el-form-item label="日期">
-          <el-date-picker v-model="filter.date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" />
+      <el-form :inline="true" :model="filter" class="filter-form">
+        <el-form-item label="查询日期">
+          <el-date-picker v-model="filter.date" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" style="width: 160px" />
         </el-form-item>
-        <el-form-item label="来源 IP">
-          <el-input v-model="filter.src_ip" placeholder="来源 IP" clearable style="width: 160px" />
+        <el-form-item label="小时范围">
+          <el-select v-model="filter.start_hour" placeholder="起始" style="width: 80px">
+            <el-option v-for="h in 24" :key="h - 1" :label="String(h - 1).padStart(2, '0')" :value="h - 1" />
+          </el-select>
+          <span style="margin: 0 4px">-</span>
+          <el-select v-model="filter.end_hour" placeholder="结束" style="width: 80px">
+            <el-option v-for="h in 24" :key="h - 1" :label="String(h - 1).padStart(2, '0')" :value="h - 1" />
+          </el-select>
         </el-form-item>
         <el-form-item label="目标 IP">
-          <el-input v-model="filter.dst_ip" placeholder="目标 IP" clearable style="width: 160px" />
+          <el-input
+            v-model="filter.dst_ip"
+            placeholder="输入 IP"
+            clearable
+            style="width: 180px"
+            @clear="handleSearch"
+            @keyup.enter="handleSearch"
+          />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleSearch">查询</el-button>
@@ -68,8 +81,9 @@ const total = ref(0)
 
 const filter = reactive({
   date: new Date().toISOString().split('T')[0],
-  src_ip: '',
   dst_ip: '',
+  start_hour: 0,
+  end_hour: 23,
 })
 
 async function fetchLogs() {
@@ -97,8 +111,9 @@ function handleSearch() {
 
 function handleReset() {
   filter.date = new Date().toISOString().split('T')[0]
-  filter.src_ip = ''
   filter.dst_ip = ''
+  filter.start_hour = 0
+  filter.end_hour = 23
   handleSearch()
 }
 

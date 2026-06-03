@@ -12,20 +12,35 @@
       </template>
 
       <!-- 查询条件 -->
-      <el-form :model="filter" inline class="filter-form">
-        <el-form-item label="状态">
-          <el-select v-model="filter.status" clearable style="width: 120px">
-            <el-option label="生效中" value="active" />
-            <el-option label="已过期" value="expired" />
-            <el-option label="已解封" value="unblocked" />
-          </el-select>
+      <el-form :inline="true" :model="filter" class="filter-form">
+        <el-form-item label="时间范围">
+          <el-date-picker
+            v-model="timeRange"
+            type="datetimerange"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            format="YYYY-MM-DD HH:mm:ss"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            :shortcuts="timeShortcuts"
+            style="width: 360px"
+          />
         </el-form-item>
         <el-form-item label="来源">
-          <el-select v-model="filter.source" clearable style="width: 140px">
+          <el-select v-model="filter.source" placeholder="全部来源" clearable style="width: 140px">
             <el-option label="WAF" value="waf" />
             <el-option label="FailGuard" value="failguard" />
             <el-option label="异常检测" value="anomaly" />
             <el-option label="Rate Limit" value="rate_limit" />
+            <el-option label="手动添加" value="manual" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="filter.status" placeholder="全部状态" clearable style="width: 120px">
+            <el-option label="生效中" value="active" />
+            <el-option label="已过期" value="expired" />
+            <el-option label="重启解封" value="auto_unblock" />
+            <el-option label="手动解封" value="manual_unblock" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -103,18 +118,54 @@ const pageSize = ref(20)
 const total = ref(0)
 
 const filter = reactive({
-  status: '',
   source: '',
+  status: '',
 })
+
+const timeRange = ref<[string, string] | null>(null)
+
+const timeShortcuts = [
+  {
+    text: '今天',
+    value: () => {
+      const start = new Date()
+      start.setHours(0, 0, 0, 0)
+      return [start, new Date()]
+    },
+  },
+  {
+    text: '最近7天',
+    value: () => {
+      const end = new Date()
+      const start = new Date()
+      start.setTime(start.getTime() - 7 * 24 * 3600 * 1000)
+      return [start, end]
+    },
+  },
+  {
+    text: '最近30天',
+    value: () => {
+      const end = new Date()
+      const start = new Date()
+      start.setTime(start.getTime() - 30 * 24 * 3600 * 1000)
+      return [start, end]
+    },
+  },
+]
 
 async function fetchRecords() {
   loading.value = true
   try {
-    const res = await getBanRecords({
+    const params: Record<string, any> = {
       ...filter,
       page: page.value,
       page_size: pageSize.value,
-    })
+    }
+    if (timeRange.value && timeRange.value[0] && timeRange.value[1]) {
+      params.start_time = timeRange.value[0]
+      params.end_time = timeRange.value[1]
+    }
+    const res = await getBanRecords(params)
     records.value = res.records || []
     total.value = res.total || 0
   } catch {
@@ -128,8 +179,10 @@ async function fetchRecords() {
 function getStatusType(status: string): 'danger' | 'success' | 'warning' | 'info' {
   switch (status) {
     case 'active': return 'danger'
-    case 'expired': return 'info'
-    case 'unblocked': return 'success'
+    case 'expired':
+    case 'auto_unblock':
+    case 'manual_unblock':
+      return 'info'
     default: return 'info'
   }
 }
@@ -138,7 +191,8 @@ function getStatusLabel(status: string): string {
   switch (status) {
     case 'active': return '生效中'
     case 'expired': return '已过期'
-    case 'unblocked': return '已解封'
+    case 'auto_unblock': return '重启解封'
+    case 'manual_unblock': return '手动解封'
     default: return status
   }
 }
@@ -156,9 +210,11 @@ function handleSearch() {
 }
 
 function handleReset() {
+  timeRange.value = null
   filter.status = ''
   filter.source = ''
-  handleSearch()
+  page.value = 1
+  fetchRecords()
 }
 
 async function handleUnblock(row: BanRecord) {
