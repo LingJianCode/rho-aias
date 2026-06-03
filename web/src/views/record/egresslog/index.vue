@@ -27,7 +27,7 @@
       <!-- 日志表格 -->
       <el-table :data="logs" v-loading="loading" stripe size="small">
         <el-table-column prop="timestamp" label="时间" width="180">
-          <template #default="{ row }">{{ formatDateTime(row.timestamp) }}</template>
+          <template #default="{ row }">{{ formatNanoTimestamp(row.timestamp) }}</template>
         </el-table-column>
         <el-table-column prop="src_ip" label="来源 IP" min-width="140" />
         <el-table-column prop="dst_ip" label="目标 IP" min-width="140" />
@@ -56,7 +56,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { getEgressLogs } from '@/api/egresslog'
-import { formatDateTime, formatBytes } from '@/utils/format'
+import { formatNanoTimestamp, formatBytes } from '@/utils/format'
 
 defineOptions({ name: 'EgressLog' })
 
