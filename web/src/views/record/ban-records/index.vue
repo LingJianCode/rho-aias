@@ -89,7 +89,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import { getBanRecords, unblockBanRecord } from '@/api/ban-records'
 import { formatDateTime } from '@/utils/format'
 import type { BanRecord } from '@/types/api'
@@ -103,6 +103,11 @@ const pageSize = ref(20)
 const total = ref(0)
 
 const filter = reactive({
+  status: '',
+  source: '',
+})
+
+async function fetchRecords() {
   loading.value = true
   try {
     const res = await getBanRecords({
