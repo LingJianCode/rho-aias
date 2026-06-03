@@ -66,7 +66,7 @@
           <template #default="{ row }">{{ formatNanoTimestamp(row.timestamp) }}</template>
         </el-table-column>
         <el-table-column prop="src_ip" label="源 IP" min-width="140" />
-        <el-table-column prop="dst_port" label="目的 PORT" min-width="100" />
+        <el-table-column prop="dst_port" label="目的 PORT" min-width="50" />
         <el-table-column prop="match_type" label="匹配类型" width="100" />
         <el-table-column prop="rule_source" label="来源" width="100">
           <template #default="{ row }">
@@ -76,8 +76,8 @@
         <el-table-column prop="packet_size" label="包大小" width="100">
           <template #default="{ row }">{{ formatBytes(row.packet_size) }}</template>
         </el-table-column>
-        <el-table-column prop="dst_ip" label="目的 IP" min-width="140" />
-        <el-table-column prop="country_code" label="国家" width="100"/>
+        <el-table-column prop="dst_ip" label="目的 IP" min-width="50" />
+        <el-table-column prop="country_code" label="国家" width="50"/>
       </el-table>
 
       <!-- 分页 -->
