@@ -28,11 +28,14 @@ const formattedValue = computed(() => {
 .metric-item {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
+  gap: 6px;
+  padding: 6px 14px;
   border-radius: var(--el-border-radius-small);
   transition: background-color 0.2s;
   white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 
   &:hover {
     background-color: var(--el-fill-color-light);
@@ -49,13 +52,17 @@ const formattedValue = computed(() => {
 .label {
   font-size: 13px;
   color: var(--el-text-color-secondary);
+  -webkit-font-smoothing: antialiased;
 }
 
 .value {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--el-text-color-primary);
-  min-width: 36px;
+  min-width: 40px;
   text-align: right;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  transform: translateZ(0);
 }
 </style>
