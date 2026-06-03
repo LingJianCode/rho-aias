@@ -42,11 +42,15 @@
         <el-table-column prop="timestamp" label="时间" width="180">
           <template #default="{ row }">{{ formatNanoTimestamp(row.timestamp) }}</template>
         </el-table-column>
-        <el-table-column prop="src_ip" label="来源 IP" min-width="140" />
         <el-table-column prop="dst_ip" label="目标 IP" min-width="140" />
-        <el-table-column prop="dst_port" label="目标端口" width="90" />
-        <el-table-column prop="bytes" label="字节数" width="120">
-          <template #default="{ row }">{{ formatBytes(row.bytes) }}</template>
+        <el-table-column prop="pkt_len" label="包大小" width="110">
+          <template #default="{ row }">{{ formatBytes(row.pkt_len) }}</template>
+        </el-table-column>
+        <el-table-column prop="tokens" label="令牌数" width="130">
+          <template #default="{ row }">{{ formatNumber(row.tokens) }}</template>
+        </el-table-column>
+        <el-table-column prop="rate_bytes" label="限速速率" width="130">
+          <template #default="{ row }">{{ formatRate(row.rate_bytes) }}</template>
         </el-table-column>
       </el-table>
 
@@ -69,7 +73,13 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { getEgressLogs } from '@/api/egresslog'
-import { formatNanoTimestamp, formatBytes } from '@/utils/format'
+import { formatNanoTimestamp, formatBytes, formatNumber } from '@/utils/format'
+
+function formatRate(bytesPerSec: number): string {
+  if (!bytesPerSec) return '-'
+  const mbps = bytesPerSec * 8 / 1_000_000
+  return mbps.toFixed(1) + ' Mbps'
+}
 
 defineOptions({ name: 'EgressLog' })
 

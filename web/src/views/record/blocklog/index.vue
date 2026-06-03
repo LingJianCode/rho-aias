@@ -65,16 +65,18 @@
         <el-table-column prop="timestamp" label="时间" width="180">
           <template #default="{ row }">{{ formatNanoTimestamp(row.timestamp) }}</template>
         </el-table-column>
-        <el-table-column prop="src_ip" label="来源 IP" min-width="140" />
-        <el-table-column prop="dst_ip" label="目标 IP" min-width="140" />
-        <el-table-column prop="dst_port" label="目标端口" width="90" />
-        <el-table-column prop="protocol" label="协议" width="80" />
-        <el-table-column prop="rule_source" label="规则来源" width="120">
+        <el-table-column prop="src_ip" label="源 IP" min-width="140" />
+        <el-table-column prop="dst_port" label="目的 PORT" min-width="100" />
+        <el-table-column prop="match_type" label="匹配类型" width="100" />
+        <el-table-column prop="rule_source" label="来源" width="100">
           <template #default="{ row }">
             <el-tag size="small">{{ row.rule_source }}</el-tag>
           </template>
         </el-table-column>
-
+        <el-table-column prop="packet_size" label="包大小" width="100">
+          <template #default="{ row }">{{ formatBytes(row.packet_size) }}</template>
+        </el-table-column>
+        <el-table-column prop="dst_ip" label="目的 IP" min-width="140" />
       </el-table>
 
       <!-- 分页 -->
@@ -96,7 +98,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { getBlockLogs } from '@/api/blocklog'
-import { formatNanoTimestamp } from '@/utils/format'
+import { formatNanoTimestamp, formatBytes } from '@/utils/format'
 
 defineOptions({ name: 'BlockLog' })
 
