@@ -4,22 +4,6 @@
       <h2>封禁记录</h2>
     </div>
 
-    <!-- 统计卡片 -->
-    <el-row :gutter="12" class="stats-row">
-      <el-col :span="6">
-        <StatsCard label="总封禁数" :value="stats.total" :icon="Lock" icon-color="#409eff" />
-      </el-col>
-      <el-col :span="6">
-        <StatsCard label="生效中" :value="stats.active" :icon="CircleCheck" icon-color="#67c23a" />
-      </el-col>
-      <el-col :span="6">
-        <StatsCard label="已过期" :value="stats.expired" :icon="CircleClose" icon-color="#909399" />
-      </el-col>
-      <el-col :span="6">
-        <StatsCard label="今日新增" :value="stats.today_count" :icon="TrendCharts" icon-color="#e6a23c" />
-      </el-col>
-    </el-row>
-
     <el-card shadow="never" class="art-card">
       <template #header>
         <div class="card-header">
@@ -105,10 +89,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { Lock, CircleCheck, CircleClose, TrendCharts } from '@element-plus/icons-vue'
-import StatsCard from '@/components/StatsCard.vue'
 import { ElMessageBox } from 'element-plus'
-import { getBanRecords, unblockBanRecord, getBanRecordStats } from '@/api/ban-records'
+import { getBanRecords, unblockBanRecord } from '@/api/ban-records'
 import { formatDateTime } from '@/utils/format'
 import type { BanRecord } from '@/types/api'
 
@@ -121,27 +103,6 @@ const pageSize = ref(20)
 const total = ref(0)
 
 const filter = reactive({
-  status: '',
-  source: '',
-})
-
-const stats = reactive({
-  total: 0,
-  active: 0,
-  expired: 0,
-  today_count: 0,
-})
-
-async function fetchStats() {
-  try {
-    const res = await getBanRecordStats()
-    Object.assign(stats, res)
-  } catch {
-    // Error handled
-  }
-}
-
-async function fetchRecords() {
   loading.value = true
   try {
     const res = await getBanRecords({
@@ -201,14 +162,12 @@ async function handleUnblock(row: BanRecord) {
     await unblockBanRecord(row.id)
     ElMessage.success('解封成功')
     fetchRecords()
-    fetchStats()
   } catch {
     // User cancelled or error
   }
 }
 
 onMounted(() => {
-  fetchStats()
   fetchRecords()
 })
 </script>
@@ -217,10 +176,6 @@ onMounted(() => {
 .page-header {
   margin-bottom: 16px;
   h2 { margin: 0; }
-}
-
-.stats-row {
-  margin-bottom: 16px;
 }
 
 .card-header {

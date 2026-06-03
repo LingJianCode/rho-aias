@@ -4,9 +4,6 @@
       <template #header>
         <div class="card-header">
           <span>Egress 日志</span>
-          <el-button type="primary" @click="handleExport">
-            <Icon icon="ri:download-line" />导出
-          </el-button>
         </div>
       </template>
 
@@ -58,7 +55,6 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { Icon } from '@iconify/vue'
 import { getEgressLogs } from '@/api/egresslog'
 import { formatDateTime, formatBytes } from '@/utils/format'
 
@@ -104,10 +100,6 @@ function handleReset() {
   filter.src_ip = ''
   filter.dst_ip = ''
   handleSearch()
-}
-
-function handleExport() {
-  ElMessage.info('导出功能开发中')
 }
 
 onMounted(() => fetchLogs())

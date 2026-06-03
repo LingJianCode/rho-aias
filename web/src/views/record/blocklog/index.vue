@@ -4,25 +4,10 @@
       <h2>阻断日志</h2>
     </div>
 
-    <!-- 统计卡片 -->
-    <el-row :gutter="12" class="stats-row">
-      <el-col :span="5">
-        <StatsCard label="阻断总数" :value="stats.total_blocked" :icon="DataLine" icon-color="#409eff" />
-      </el-col>
-    </el-row>
-    <el-row :gutter="12" class="stats-row">
-      <el-col :span="5" v-for="(value, key) in stats.by_rule_source" :key="key">
-        <StatsCard :label="key" :value="value" :icon="Connection" icon-color="#67c23a" />
-      </el-col>
-    </el-row>
-
     <el-card shadow="never" class="art-card">
       <template #header>
         <div class="card-header">
           <span>阻断日志列表</span>
-          <el-button type="primary" @click="handleExport">
-            <Icon icon="ri:download-line" />导出
-          </el-button>
         </div>
       </template>
 
@@ -91,10 +76,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { DataLine, Connection } from '@element-plus/icons-vue'
-import StatsCard from '@/components/StatsCard.vue'
-import { Icon } from '@iconify/vue'
-import { getBlockLogs, getBlockLogStats } from '@/api/blocklog'
+import { getBlockLogs } from '@/api/blocklog'
 import { formatDateTime } from '@/utils/format'
 
 defineOptions({ name: 'BlockLog' })
@@ -110,20 +92,6 @@ const filter = reactive({
   src_ip: '',
   rule_source: '',
 })
-
-const stats = reactive({
-  total_blocked: 0,
-  by_rule_source: {} as Record<string, number>,
-})
-
-async function fetchStats() {
-  try {
-    const res = await getBlockLogStats()
-    Object.assign(stats, res)
-  } catch {
-    // Error handled
-  }
-}
 
 async function fetchLogs() {
   if (!filter.date) {
@@ -160,12 +128,7 @@ function handleReset() {
   handleSearch()
 }
 
-function handleExport() {
-  ElMessage.info('导出功能开发中')
-}
-
 onMounted(() => {
-  fetchStats()
   fetchLogs()
 })
 </script>
@@ -174,10 +137,6 @@ onMounted(() => {
 .page-header {
   margin-bottom: 16px;
   h2 { margin: 0; }
-}
-
-.stats-row {
-  margin-bottom: 12px;
 }
 
 .card-header {
