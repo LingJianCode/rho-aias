@@ -72,7 +72,7 @@
         <el-table-column prop="duration" label="时长" width="100">
           <template #default="{ row }">{{ formatDuration(row.duration) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="100" v-auth="'admin'">
+        <el-table-column label="操作" width="100">
           <template #default="{ row }">
             <el-button
               v-if="(row as BanRecord).status === 'active'"
