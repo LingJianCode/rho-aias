@@ -58,7 +58,14 @@
             class="box-border flex-c px-3.5 py-3.5 c-p last:border-b-0 hover:bg-g-200/60"
           >
             <div class="w-9 h-9">
-              <img :src="item.avatar" class="w-full h-full rounded-lg" />
+              <img
+                v-if="item.avatar"
+                :src="item.avatar"
+                class="w-full h-full rounded-lg"
+              />
+              <div v-else class="w-full h-full rounded-lg bg-gray-200 flex-cc">
+                <span class="text-xs text-gray-400">N</span>
+              </div>
             </div>
             <div class="w-[calc(100%-45px)] ml-3.5">
               <h4 class="text-xs font-normal leading-5.5">{{ item.title }}</h4>
