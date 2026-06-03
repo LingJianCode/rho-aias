@@ -15,13 +15,13 @@ export function deleteBlacklistRule(value: string) {
 
 // 白名单接口
 export function getWhitelist() {
-  return http.get<any>({ url: '/api/whitelist/rules' })
+  return http.get<any>({ url: '/api/manual/whitelist/rules' })
 }
 
 export function addWhitelistRule(data: { value: string; remark?: string }) {
-  return http.post({ url: '/api/whitelist/rules', data })
+  return http.post({ url: '/api/manual/whitelist/rules', data })
 }
 
 export function deleteWhitelistRule(value: string) {
-  return http.del({ url: `/api/whitelist/rules/${value}` })
+  return http.del({ url: `/api/manual/whitelist/rules/${value}` })
 }
