@@ -33,7 +33,8 @@ let isUnauthorizedErrorShown = false
 let unauthorizedTimer: NodeJS.Timeout | null = null
 
 /** 扩展 AxiosRequestConfig */
-interface ExtendedAxiosRequestConfig extends AxiosRequestConfig {
+interface ExtendedAxiosRequestConfig extends Omit<AxiosRequestConfig, 'showErrorMessage' | 'showSuccessMessage'> {
+  url: string
   showErrorMessage?: boolean
   showSuccessMessage?: boolean
 }
@@ -74,7 +75,7 @@ axiosInstance.interceptors.request.use(
 
     return request
   },
-  (error) => {
+  (error: unknown) => {
     showError(createHttpError($t('httpMsg.requestConfigError'), ApiStatus.error))
     return Promise.reject(error)
   }
