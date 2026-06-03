@@ -77,6 +77,7 @@
           <template #default="{ row }">{{ formatBytes(row.packet_size) }}</template>
         </el-table-column>
         <el-table-column prop="dst_ip" label="目的 IP" min-width="140" />
+        <el-table-column prop="country_code" label="国家" width="100"/>
       </el-table>
 
       <!-- 分页 -->
