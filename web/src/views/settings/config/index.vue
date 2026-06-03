@@ -1,155 +1,841 @@
 <template>
-  <div class="config-view">
-    <el-card shadow="never" class="art-card">
+  <div class="config-panel">
+    <div class="page-header">
+      <h2>防护策略配置</h2>
+    </div>
+    <el-alert
+      :type="saveStatus === 'success' ? 'success' : saveStatus === 'error' ? 'error' : 'info'"
+      :closable="false"
+      style="margin-bottom: 16px"
+    >
+      {{ saveMessage || '修改配置后即时生效，无需重启服务。各模块参数说明请参考文档。' }}
+    </el-alert>
+
+    <el-card>
       <template #header>
         <div class="card-header">
-          <span>防护策略配置</span>
-          <el-button type="primary" v-auth="'admin'" :loading="saving" @click="handleSave">
-            保存配置
-          </el-button>
+          <el-radio-group v-model="activeModule" @change="(val) => switchModule(val as ConfigModuleName)">
+            <el-radio-button v-for="mod in modules" :key="mod.key" :value="mod.key">
+              {{ mod.label }}
+            </el-radio-button>
+          </el-radio-group>
         </div>
       </template>
 
-      <el-tabs v-model="activeTab">
-        <!-- WAF 配置 -->
-        <el-tab-pane label="WAF 防护" name="waf">
-          <el-form :model="config.waf" label-width="160px">
-            <el-form-item label="启用 WAF">
-              <el-switch v-model="config.waf.enabled" />
+      <!-- 表单区域 -->
+      <div class="form-area" v-loading="loading">
+        <!-- FailGuard -->
+        <template v-if="activeModule === 'failguard'">
+          <h3>SSH 防爆破 (FailGuard)</h3>
+          <el-form :model="failguard" label-width="160px" style="max-width: 580px">
+            <el-form-item label="启用状态">
+              <el-switch v-model="failguard.enabled" />
             </el-form-item>
-            <el-form-item label="规则集">
-              <el-checkbox-group v-model="config.waf.rule_sets">
-                <el-checkbox label="sql_injection">SQL 注入</el-checkbox>
-                <el-checkbox label="xss">XSS 攻击</el-checkbox>
-                <el-checkbox label="path_traversal">路径遍历</el-checkbox>
-                <el-checkbox label="cmd_injection">命令注入</el-checkbox>
-              </el-checkbox-group>
+            <el-form-item label="监控端口列表">
+              <div style="display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap;">
+                <div v-for="(port, idx) in failguard.ssh_ports" :key="idx" style="display: flex; gap: 4px; margin-bottom: 4px;">
+                  <el-input-number v-model="failguard.ssh_ports[idx]" :min="1" :max="65535" :controls="false"
+                    style="width: 110px;" placeholder="端口号" />
+                  <el-button type="danger" size="small" plain @click="removePort('failguard', idx)">删除</el-button>
+                </div>
+                <el-button type="primary" size="small" plain @click="addPort('failguard')">+ 添加</el-button>
+              </div>
+              <div class="form-hint">监控的 SSH 端口列表，最多支持 16 个</div>
             </el-form-item>
-          </el-form>
-        </el-tab-pane>
-
-        <!-- FailGuard 配置 -->
-        <el-tab-pane label="FailGuard" name="failguard">
-          <el-form :model="config.failguard" label-width="160px">
-            <el-form-item label="启用 FailGuard">
-              <el-switch v-model="config.failguard.enabled" />
+            <el-form-item label="短连接阈值(秒)">
+              <el-input-number v-model="failguard.short_conn_seconds" :min="1" :max="60" />
+              <div class="form-hint">preauth 阶段低于此值的连接视为异常短连接</div>
             </el-form-item>
-            <el-form-item label="失败阈值（次）">
-              <el-input-number v-model="config.failguard.threshold" :min="1" :max="100" />
+            <el-form-item label="最大重试次数">
+              <el-input-number v-model="failguard.max_retry" :min="1" :max="1000" />
+              <div class="form-hint">超过此次数将触发封禁</div>
             </el-form-item>
-            <el-form-item label="时间窗口（秒）">
-              <el-input-number v-model="config.failguard.window" :min="10" :max="3600" />
+            <el-form-item label="检测时间窗口(秒)">
+              <el-input-number v-model="failguard.find_time" :min="1" :max="86400" />
+              <div class="form-hint">在此时间窗口内统计重试次数</div>
             </el-form-item>
-            <el-form-item label="封禁时长（秒）">
-              <el-input-number v-model="config.failguard.ban_duration" :min="60" :max="86400" />
+            <el-form-item label="封禁时长(秒)">
+              <el-input-number v-model="failguard.ban_duration" :min="1" :max="31536000" />
+              <div class="form-hint">触发封禁后的持续时间</div>
             </el-form-item>
-          </el-form>
-        </el-tab-pane>
-
-        <!-- 异常检测配置 -->
-        <el-tab-pane label="异常检测" name="anomaly">
-          <el-form :model="config.anomaly" label-width="160px">
-            <el-form-item label="启用异常检测">
-              <el-switch v-model="config.anomaly.enabled" />
+            <el-form-item label="检测模式">
+              <el-select v-model="failguard.mode" style="width: 100%">
+                <el-option value="normal" label="正常模式" />
+                <el-option value="aggressive" label="激进模式" />
+              </el-select>
+              <div class="form-hint">激进模式额外检测 preauth 阶段的短连接和异常退出</div>
             </el-form-item>
-            <el-form-item label="基线学习周期（小时）">
-              <el-input-number v-model="config.anomaly.learning_period" :min="1" :max="168" />
-            </el-form-item>
-          </el-form>
-        </el-tab-pane>
-
-        <!-- Rate Limit 配置 -->
-        <el-tab-pane label="Rate Limit" name="rate_limit">
-          <el-form :model="config.rate_limit" label-width="160px">
-            <el-form-item label="启用速率限制">
-              <el-switch v-model="config.rate_limit.enabled" />
-            </el-form-item>
-            <el-form-item label="每 IP 请求/分钟">
-              <el-input-number v-model="config.rate_limit.requests_per_minute" :min="10" :max="10000" />
+            <el-form-item>
+              <el-button type="primary" @click="prepareSave('failguard', failguard)" :loading="saving">保存</el-button>
             </el-form-item>
           </el-form>
-        </el-tab-pane>
+        </template>
 
-        <!-- GeoIP 配置 -->
-        <el-tab-pane label="GeoIP 封禁" name="geoblocking">
-          <el-form :model="config.geoblocking" label-width="160px">
-            <el-form-item label="启用 GeoIP">
-              <el-switch v-model="config.geoblocking.enabled" />
+        <!-- WAF -->
+        <template v-else-if="activeModule === 'waf'">
+          <h3>WAF 日志监控</h3>
+          <el-form :model="waf" label-width="140px" style="max-width: 480px">
+            <el-form-item label="启用状态">
+              <el-switch v-model="waf.enabled" />
             </el-form-item>
+            <el-form-item label="封禁时长(秒)">
+              <el-input-number v-model="waf.ban_duration" :min="1" :max="31536000" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="prepareSave('waf', waf)" :loading="saving">保存</el-button>
+            </el-form-item>
+          </el-form>
+        </template>
+
+        <!-- Rate Limit -->
+        <template v-else-if="activeModule === 'rate_limit'">
+          <h3>频率限制联动</h3>
+          <el-form :model="rate_limit" label-width="140px" style="max-width: 480px">
+            <el-form-item label="启用状态">
+              <el-switch v-model="rate_limit.enabled" />
+            </el-form-item>
+            <el-form-item label="封禁时长(秒)">
+              <el-input-number v-model="rate_limit.ban_duration" :min="1" :max="31536000" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="prepareSave('rate_limit', rate_limit)" :loading="saving">保存</el-button>
+            </el-form-item>
+          </el-form>
+        </template>
+
+        <!-- Anomaly Detection -->
+        <template v-else-if="activeModule === 'anomaly_detection'">
+          <h3>异常流量检测</h3>
+          <el-form :model="anomaly" label-width="160px" style="max-width: 600px">
+            <el-form-item label="启用状态">
+              <el-switch v-model="anomaly.enabled" />
+            </el-form-item>
+            <el-form-item label="最小包阈值">
+              <el-input-number v-model="anomaly.min_packets" :min="1" :max="100000" />
+              <div class="form-hint">低于此数量的连接将被忽略</div>
+            </el-form-item>
+            <el-form-item label="监控端口列表">
+              <div style="display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap;">
+                <div v-for="(port, idx) in anomaly.ports" :key="idx" style="display: flex; gap: 4px; margin-bottom: 4px;">
+                  <el-input-number v-model="anomaly.ports[idx]" :min="1" :max="65535" :controls="false"
+                    style="width: 110px;" placeholder="端口号" />
+                  <el-button type="danger" size="small" plain @click="removePort('anomaly', idx)">删除</el-button>
+                </div>
+                <el-button type="primary" size="small" plain @click="addPort('anomaly')">+ 添加</el-button>
+              </div>
+              <div class="form-hint">监控的端口列表，最多支持 16 个</div>
+            </el-form-item>
+            <el-divider content-position="left">IQR 基线参数</el-divider>
+            <el-form-item label="最小样本数">
+              <el-input-number v-model="baseline.min_sample_count" :min="1" :max="1000000" />
+              <div class="form-hint">不足时仅学习不检测</div>
+            </el-form-item>
+            <el-form-item label="IQR 倍数">
+              <el-input-number v-model="baseline.iqr_multiplier" :min="1" :max="10" :step="0.5" :precision="1" />
+              <div class="form-hint">阈值 = Q3 + k×IQR，默认 2.5</div>
+            </el-form-item>
+            <el-form-item label="最小PPS阈值">
+              <el-input-number v-model="baseline.min_threshold" :min="0" :max="10000000" />
+              <div class="form-hint">PPS 低于此值的 IP 豁免基线检测</div>
+            </el-form-item>
+            <el-form-item label="基线有效期(秒)">
+              <el-input-number v-model="baseline.max_age" :min="60" :max="604800" />
+              <div class="form-hint">过期自动重置以适应流量变化</div>
+            </el-form-item>
+            <el-form-item label="封禁时长(秒)">
+              <el-input-number v-model="baseline.block_duration" :min="1" :max="31536000" />
+            </el-form-item>
+            <el-divider content-position="left">攻击类型检测</el-divider>
+            <div v-for="(atk, key) in attacks" :key="key" style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 4px;">
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px">
+                <el-switch v-model="atk.enabled" />
+                <strong>{{ attackLabels[key as string] }}</strong>
+              </div>
+              <el-form :model="atk" label-width="120px" v-if="atk.enabled">
+                <el-form-item label="比例阈值">
+                  <el-input-number v-model="atk.ratio_threshold" :min="0" :max="1" :step="0.05" :precision="2" />
+                </el-form-item>
+                <el-form-item label="最小包数">
+                  <el-input-number v-model="atk.min_packets" :min="0" :max="1000000" />
+                </el-form-item>
+                <el-form-item label="封禁时长(秒)">
+                  <el-input-number v-model="atk.block_duration" :min="1" :max="31536000" />
+                </el-form-item>
+              </el-form>
+            </div>
+            <el-form-item>
+              <el-button type="primary" @click="prepareSave('anomaly_detection', { ...anomaly, baseline, attacks })" :loading="saving">保存</el-button>
+            </el-form-item>
+          </el-form>
+        </template>
+
+        <!-- Geo Blocking -->
+        <template v-else-if="activeModule === 'geo_blocking'">
+          <h3>地域封禁</h3>
+          <el-form :model="geo" label-width="140px" style="max-width: 640px">
+            <el-form-item label="启用状态">
+              <el-switch v-model="geo.enabled" />
+            </el-form-item>
+            <el-divider content-position="left">数据源配置</el-divider>
+            <div v-for="(src, name) in geo.sources" :key="name" style="margin-bottom: 20px; padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 4px;">
+              <h4 style="margin: 0 0 12px">{{ name }}</h4>
+              <el-form :model="src" label-width="80px">
+                <el-form-item label="启用">
+                  <el-switch v-model="src.enabled" />
+                </el-form-item>
+                <el-form-item label="调度周期">
+                  <el-input v-model="src.schedule" placeholder="如 0 * * * *" />
+                </el-form-item>
+                <el-form-item label="URL">
+                  <el-input v-model="src.url" placeholder="数据源 URL" />
+                </el-form-item>
+              </el-form>
+            </div>
             <el-form-item label="运行模式">
-              <el-radio-group v-model="config.geoblocking.mode">
-                <el-radio value="whitelist">白名单模式</el-radio>
-                <el-radio value="blacklist">黑名单模式</el-radio>
+              <el-radio-group v-model="geo.mode">
+                <el-radio value="whitelist">白名单模式（仅允许列表中的国家）</el-radio>
+                <el-radio value="blacklist">黑名单模式（禁止列表中的国家）</el-radio>
               </el-radio-group>
             </el-form-item>
+            <el-form-item label="国家/地区列表">
+              <el-select
+                v-model="geo.allowed_countries"
+                multiple
+                filterable
+                placeholder="选择国家"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="c in countryOptions"
+                  :key="c.code"
+                  :label="`${c.flag} ${c.name}`"
+                  :value="c.code"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="prepareSave('geo_blocking', geo)" :loading="saving">保存</el-button>
+            </el-form-item>
           </el-form>
-        </el-tab-pane>
-      </el-tabs>
+        </template>
+
+        <!-- Intel -->
+        <template v-else-if="activeModule === 'intel'">
+          <h3>威胁情报</h3>
+          <el-form :model="intel" label-width="140px" style="max-width: 640px">
+            <el-form-item label="启用状态">
+              <el-switch v-model="intel.enabled" />
+            </el-form-item>
+            <el-divider content-position="left">数据源配置</el-divider>
+            <div v-for="(src, name) in intel.sources" :key="name" style="margin-bottom: 20px; padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 4px;">
+              <h4 style="margin: 0 0 12px">{{ name }}</h4>
+              <el-form :model="src" label-width="80px">
+                <el-form-item label="启用">
+                  <el-switch v-model="src.enabled" />
+                </el-form-item>
+                <el-form-item label="调度周期">
+                  <el-input v-model="src.schedule" placeholder="如 0 * * * *" />
+                </el-form-item>
+                <el-form-item label="URL">
+                  <el-input v-model="src.url" placeholder="数据源 URL" />
+                </el-form-item>
+              </el-form>
+            </div>
+            <el-form-item>
+              <el-button type="primary" @click="prepareSave('intel', intel)" :loading="saving">保存</el-button>
+            </el-form-item>
+          </el-form>
+        </template>
+
+        <!-- XDP Events -->
+        <template v-else-if="activeModule === 'blocklog_events'">
+          <h3>XDP 事件上报</h3>
+          <el-form :model="blocklogEvents" label-width="140px" style="max-width: 480px">
+            <el-form-item label="启用状态">
+              <el-switch v-model="blocklogEvents.enabled" />
+            </el-form-item>
+            <el-form-item label="采样">
+              <el-slider v-model="blocklogEvents.sample_rate" :min="1" :max="10000" show-input input-size="small" />
+              <div class="form-hint">控制上报到后端的事件比例（每N个包采样一个，1000 表示 0.1% 的采样率），1为全部上报</div>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="prepareSave('blocklog_events', blocklogEvents)" :loading="saving">保存</el-button>
+            </el-form-item>
+          </el-form>
+        </template>
+
+        <!-- Egress Limit -->
+        <template v-else-if="activeModule === 'egress_limit'">
+          <h3>Egress 限速</h3>
+          <el-form :model="egressLimit" label-width="140px" style="max-width: 600px">
+            <el-form-item label="启用状态">
+              <el-switch v-model="egressLimit.enabled" />
+            </el-form-item>
+            <el-form-item label="限速速率">
+              <el-input-number v-model="egressLimit.rate_mbps" :min="0.1" :max="100000" :step="1" :precision="1" style="width: 200px" @change="onRateMbpsChange" />
+              <span style="margin-left: 8px; color: var(--el-text-color-secondary)">Mbps</span>
+            </el-form-item>
+            <el-form-item label="突发上限">
+              <el-input-number v-model="egressLimit.burst_bytes" :min="1500" :max="1073741824" :step="1024" style="width: 200px" />
+              <span style="margin-left: 8px; color: var(--el-text-color-secondary)">{{ formatBurstBytes(egressLimit.burst_bytes) }}</span>
+              <div class="form-hint formula-hint">
+                计算公式: <code>burst_bytes = rate_mbps × 1,000,000 ÷ 8 × 2s</code> = <code>rate_mbps × 250,000</code> (TCP 友好缓冲)
+              </div>
+            </el-form-item>
+            <el-divider content-position="left">丢包日志</el-divider>
+            <el-form-item label="丢包日志开关">
+              <el-switch v-model="egressLimit.drop_log_enabled" />
+            </el-form-item>
+            <el-form-item label="采样率">
+              <el-slider v-model="egressLimit.drop_log_sample_rate" :min="1" :max="10000" show-input input-size="small" />
+              <div class="form-hint">每 N 个被丢弃的包采样 1 个记录日志，1 为全部记录</div>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="prepareSave('egress_limit', egressLimit)" :loading="saving">保存</el-button>
+            </el-form-item>
+          </el-form>
+        </template>
+      </div>
     </el-card>
+
+    <!-- 变更确认对话框 -->
+    <el-dialog
+      v-model="confirmDialogVisible"
+      title="确认配置变更"
+      width="560px"
+      :close-on-click-modal="false"
+    >
+      <div class="confirm-content">
+        <p class="confirm-intro">以下配置项将被修改，<strong>变更即时生效</strong>：</p>
+        <div class="module-diff-header">{{ pendingModuleName }}</div>
+        <div class="diff-list" v-if="diffItems.length">
+          <div
+            v-for="(item, index) in diffItems"
+            :key="index"
+            class="diff-item"
+            :class="{ 'diff-danger': item.dangerous }"
+          >
+            <span class="diff-label">{{ item.label }}</span>
+            <span class="diff-old">{{ item.oldFormatted }}</span>
+            <span class="diff-arrow">→</span>
+            <span class="diff-new">{{ item.newFormatted }}</span>
+          </div>
+        </div>
+        <el-alert v-if="hasDangerousChange" type="warning" :closable="false" show-icon style="margin-top: 12px">
+          部分关键安全参数变更可能影响现有连接或防护策略，请确认操作。
+        </el-alert>
+      </div>
+      <template #footer>
+        <el-button @click="confirmDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmAndSave" :loading="saving">确认保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { getConfig, updateConfig } from '@/api/config'
+import { reactive, ref, onMounted } from 'vue'
+import { getModuleConfig, updateModuleConfig } from '@/api/config'
+import type { ConfigModuleName } from '@/types/api'
 
-defineOptions({ name: 'Config' })
+defineOptions({ name: 'ConfigPanel' })
 
+const loading = ref(false)
 const saving = ref(false)
-const activeTab = ref('waf')
-const config = reactive({
-  waf: {
-    enabled: true,
-    rule_sets: ['sql_injection', 'xss'],
-  },
+const activeModule = ref<ConfigModuleName>('failguard')
+const saveStatus = ref<'success' | 'error' | ''>('')
+const saveMessage = ref('')
+
+// 确认对话框状态
+const confirmDialogVisible = ref(false)
+const pendingModule = ref<ConfigModuleName | null>(null)
+const pendingData = ref<Record<string, unknown>>({})
+const pendingModuleName = ref('')
+const diffItems = ref<{ label: string; oldFormatted: string; newFormatted: string; dangerous: boolean }[]>([])
+const hasDangerousChange = ref(false)
+
+// 原始值快照（用于计算 diff）
+const originalSnapshot = ref<Record<string, Record<string, unknown>>>({})
+
+// 字段标签映射
+const fieldLabels: Record<string, Record<string, string>> = {
   failguard: {
-    enabled: true,
-    threshold: 5,
-    window: 60,
-    ban_duration: 3600,
+    enabled: '启用状态',
+    ssh_ports: '监控端口列表',
+    short_conn_seconds: '短连接阈值(秒)',
+    max_retry: '最大重试次数',
+    find_time: '检测时间窗口(秒)',
+    ban_duration: '封禁时长(秒)',
+    mode: '检测模式',
   },
-  anomaly: {
-    enabled: true,
-    learning_period: 24,
+  waf: {
+    enabled: '启用状态',
+    ban_duration: '封禁时长(秒)',
   },
   rate_limit: {
-    enabled: true,
-    requests_per_minute: 60,
+    enabled: '启用状态',
+    ban_duration: '封禁时长(秒)',
   },
-  geoblocking: {
-    enabled: false,
-    mode: 'blacklist',
+  anomaly_detection: {
+    enabled: '启用状态',
+    min_packets: '最小包阈值',
+    ports: '监控端口列表',
+    'baseline.min_sample_count': '最小样本数',
+    'baseline.iqr_multiplier': 'IQR 倍数',
+    'baseline.min_threshold': '最小PPS阈值',
+    'baseline.max_age': '基线有效期(秒)',
+    'baseline.block_duration': '基线封禁时长(秒)',
   },
-})
+  geo_blocking: {
+    enabled: '启用状态',
+    mode: '运行模式',
+    allowed_countries: '国家/地区列表',
+  },
+  intel: {
+    enabled: '启用状态',
+  },
+  blocklog_events: {
+    enabled: '启用状态',
+    sample_rate: '采样率(%)',
+  },
+  egress_limit: {
+    enabled: '启用状态',
+    rate_mbps: '限速速率(Mbps)',
+    burst_bytes: '突发上限(Bytes)',
+    drop_log_enabled: '丢包日志开关',
+    drop_log_sample_rate: '采样率',
+  },
+}
 
-async function fetchConfig() {
-  try {
-    const res = await getConfig()
-    Object.assign(config, res.data)
-  } catch {
-    // Error handled
+// 数据源子字段的通用标签（geo/intel 的 sources 内部共用）
+const sourceFieldLabels: Record<string, string> = {
+  enabled: '启用',
+  schedule: '调度周期',
+  url: 'URL',
+}
+
+// 危险操作判定：关闭已启用的核心模块
+function isDangerous(module: string, field: string, oldValue: unknown, newValue: unknown): boolean {
+  if (field === 'enabled') return oldValue === true && newValue === false
+  return false
+}
+
+// 格式化值用于显示
+function formatDiffValue(val: unknown): string {
+  if (val === undefined || val === null) return '-'
+  if (typeof val === 'boolean') return val ? '启用' : '禁用'
+  if (Array.isArray(val)) {
+    if (val.length === 0) return '(空)'
+    return (val as unknown[]).join(', ')
+  }
+  return String(val)
+}
+
+// 模式映射中文
+const modeLabels: Record<string, string> = {
+  normal: '正常模式',
+  aggressive: '激进模式',
+  whitelist: '白名单模式',
+  blacklist: '黑名单模式',
+}
+
+// 计算 diff
+function computeDiff(module: ConfigModuleName, currentData: Record<string, unknown>) {
+  const orig = originalSnapshot.value[module]
+  if (!orig) return []
+
+  const items: typeof diffItems.value = []
+  let dangerous = false
+
+  const labels = fieldLabels[module] || {}
+
+  // 遍历当前数据的所有字段
+  function compareFields(data: Record<string, unknown>, prefix = '') {
+    for (const [key, newValue] of Object.entries(data)) {
+      const fullKey = prefix ? `${prefix}.${key}` : key
+
+      if (typeof newValue === 'object' && newValue !== null && !Array.isArray(newValue)) {
+        // 嵌套对象递归比较
+        const nestedOrig = prefix ? getNested(orig, prefix) : orig
+        if (nestedOrig && typeof nestedOrig === 'object' && !Array.isArray(nestedOrig)) {
+          compareFields(newValue as Record<string, unknown>, fullKey)
+        }
+        continue
+      }
+
+      const oldVal = prefix ? getNested(orig, fullKey) : orig[key]
+
+      // 深度比较
+      if (!deepEqual(oldVal, newValue)) {
+        const label = labels[fullKey] || sourceFieldLabels[key] || key
+        let newFmt = formatDiffValue(newValue)
+        let oldFmt = formatDiffValue(oldVal)
+
+        // 特殊格式化
+        if (fullKey.endsWith('.mode')) {
+          oldFmt = modeLabels[String(oldVal)] || oldFmt
+          newFmt = modeLabels[String(newValue)] || newFmt
+        }
+
+        const d = isDangerous(String(module), String(key), oldVal, newValue)
+        if (d) dangerous = true
+
+        items.push({
+          label,
+          oldFormatted: oldFmt,
+          newFormatted: newFmt,
+          dangerous: d,
+        })
+      }
+    }
+  }
+
+  compareFields(currentData)
+  hasDangerousChange.value = dangerous
+  return items
+}
+
+function getNested(obj: Record<string, unknown>, path: string): unknown {
+  return path.split('.').reduce((acc: unknown, key) => {
+    if (acc && typeof acc === 'object' && !Array.isArray(acc)) {
+      return (acc as Record<string, unknown>)[key]
+    }
+    return undefined
+  }, obj)
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (typeof a !== typeof b) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const arrA = a as unknown[]
+    const arrB = b as unknown[]
+    return arrA.length === arrB.length && arrA.every((v, i) => deepEqual(v, arrB[i]))
+  }
+  if (typeof a === 'object') {
+    const ka = Object.keys(a).sort()
+    const kb = Object.keys(b).sort()
+    if (ka.length !== kb.length || ka.some((k, i) => k !== kb[i])) return false
+    return ka.every((k) => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]))
+  }
+  return false
+}
+
+// 快照当前模块的原始值
+function takeSnapshot(module: ConfigModuleName) {
+  switch (module) {
+    case 'failguard':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(failguard))
+      break
+    case 'waf':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(waf))
+      break
+    case 'rate_limit':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(rate_limit))
+      break
+    case 'anomaly_detection':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify({ ...anomaly, baseline, attacks }))
+      break
+    case 'geo_blocking':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(geo))
+      break
+    case 'intel':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(intel))
+      break
+    case 'blocklog_events':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(blocklogEvents))
+      break
+    case 'egress_limit':
+      originalSnapshot.value[module] = JSON.parse(JSON.stringify(egressLimit))
+      break
   }
 }
 
-async function handleSave() {
+const modules: { key: ConfigModuleName; label: string }[] = [
+  { key: 'failguard', label: 'SSH 防爆破' },
+  { key: 'waf', label: 'WAF 监控' },
+  { key: 'rate_limit', label: '频率限制' },
+  { key: 'anomaly_detection', label: '异常检测' },
+  { key: 'geo_blocking', label: '地域封禁' },
+  { key: 'intel', label: '威胁情报' },
+  { key: 'blocklog_events', label: 'XDP 上报' },
+  { key: 'egress_limit', label: 'Egress 限速' },
+]
+
+const failguard = reactive({ enabled: false, ssh_ports: [22], short_conn_seconds: 2, max_retry: 5, find_time: 600, ban_duration: 3600, mode: 'normal' as string })
+const waf = reactive({ enabled: false, ban_duration: 3600 })
+const rate_limit = reactive({ enabled: false, ban_duration: 3600 })
+const baseline = reactive({ min_sample_count: 60, iqr_multiplier: 2.5, min_threshold: 1000, max_age: 3600, block_duration: 60 })
+const anomaly = reactive({ enabled: false, min_packets: 200, ports: [80, 443, 8080, 8443, 53, 22] })
+const attacks = reactive({
+  syn_flood: { enabled: true, ratio_threshold: 0.5, min_packets: 200, block_duration: 60 },
+  udp_flood: { enabled: true, ratio_threshold: 0.8, min_packets: 200, block_duration: 60 },
+  icmp_flood: { enabled: true, ratio_threshold: 0.5, min_packets: 50, block_duration: 60 },
+  ack_flood: { enabled: true, ratio_threshold: 0.95, min_packets: 500, block_duration: 60 },
+})
+const attackLabels: Record<string, string> = {
+  syn_flood: 'SYN Flood',
+  udp_flood: 'UDP Flood',
+  icmp_flood: 'ICMP Flood',
+  ack_flood: 'ACK Flood',
+}
+const geo = reactive({ enabled: false, mode: 'whitelist' as string, allowed_countries: [] as string[], sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
+const intel = reactive({ enabled: false, sources: {} as Record<string, { enabled?: boolean; schedule?: string; url?: string }> })
+const blocklogEvents = reactive({ enabled: false, sample_rate: 100 })
+const egressLimit = reactive({ enabled: false, rate_mbps: 1.0, burst_bytes: 250000, drop_log_enabled: false, drop_log_sample_rate: 100 })
+
+function formatBurstBytes(bytes: number): string {
+  if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB'
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB'
+  if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB'
+  return bytes + ' B'
+}
+
+function onRateMbpsChange() {
+  egressLimit.burst_bytes = Math.round(egressLimit.rate_mbps * 250000)
+}
+
+const countryOptions = [
+  { code: 'CN', name: '中国', flag: '\u{1F1E8}\u{1F1F3}' }, { code: 'US', name: '美国', flag: '\u{1F1FA}\u{1F1F8}' },
+  { code: 'JP', name: '日本', flag: '\u{1F1EF}\u{1F1F5}' }, { code: 'KR', name: '韩国', flag: '\u{1F1F0}\u{1F1F7}' },
+  { code: 'RU', name: '俄罗斯', flag: '\u{1F1F7}\u{1F1FA}' }, { code: 'DE', name: '德国', flag: '\u{1F1E9}\u{1F1EA}' },
+  { code: 'GB', name: '英国', flag: '\u{1F1EC}\u{1F1E7}' }, { code: 'FR', name: '法国', flag: '\u{1F1EB}\u{1F1F7}' },
+  { code: 'BR', name: '巴西', flag: '\u{1F1E7}\u{1F1F7}' }, { code: 'IN', name: '印度', flag: '\u{1F1EE}\u{1F1F3}' },
+  { code: 'AU', name: '澳大利亚', flag: '\u{1F1E6}\u{1F1FA}' }, { code: 'CA', name: '加拿大', flag: '\u{1F1E8}\u{1F1E6}' },
+]
+
+function switchModule(key: ConfigModuleName) {
+  activeModule.value = key
+  loadModuleConfig(key)
+}
+
+async function loadModuleConfig(module: ConfigModuleName) {
+  loading.value = true
+  try {
+    const res = await getModuleConfig(module)
+    const data = res as Record<string, unknown>
+    if (!data) return
+
+    if (module === 'failguard') Object.assign(failguard, data)
+    else if (module === 'waf') Object.assign(waf, data)
+    else if (module === 'rate_limit') Object.assign(rate_limit, data)
+    else if (module === 'anomaly_detection') {
+      Object.assign(anomaly, { enabled: data.enabled, min_packets: data.min_packets, ports: data.ports })
+      if ((data as any).baseline) Object.assign(baseline, (data as any).baseline)
+      if ((data as any).attacks) Object.assign(attacks, (data as any).attacks)
+    }
+    else if (module === 'geo_blocking') Object.assign(geo, { enabled: data.enabled, mode: data.mode || 'whitelist', allowed_countries: (data as any).allowed_countries || [], sources: (data as any).sources || {} })
+    else if (module === 'intel') Object.assign(intel, { enabled: data.enabled, sources: (data as any).sources || {} })
+    else if (module === 'blocklog_events') Object.assign(blocklogEvents, { enabled: data.enabled, sample_rate: (data as any).sample_rate ?? 100 })
+    else if (module === 'egress_limit') {
+      Object.assign(egressLimit, {
+        enabled: data.enabled ?? false,
+        rate_mbps: (data as any).rate_mbps ?? 1.0,
+        burst_bytes: (data as any).burst_bytes ?? 250000,
+        drop_log_enabled: (data as any).drop_log_enabled ?? false,
+        drop_log_sample_rate: (data as any).drop_log_sample_rate ?? 100,
+      })
+    }
+
+    // 加载完成后快照原始值
+    takeSnapshot(module)
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 点击保存按钮 → 计算弹窗 */
+function prepareSave(module: ConfigModuleName, data: Record<string, unknown>) {
+  // failguard 提交前去重 ssh_ports
+  if (module === 'failguard' && Array.isArray(data.ssh_ports)) {
+    const seen = new Set<number>()
+    data.ssh_ports = (data.ssh_ports as number[]).filter((p: number) => {
+      if (seen.has(p)) return false
+      seen.add(p)
+      return true
+    })
+  }
+
+  // anomaly_detection 提交前去重 ports
+  if (module === 'anomaly_detection' && Array.isArray(data.ports)) {
+    const seen = new Set<number>()
+    data.ports = (data.ports as number[]).filter((p: number) => {
+      if (seen.has(p)) return false
+      seen.add(p)
+      return true
+    })
+  }
+
+  const diff = computeDiff(module, data)
+
+  if (diff.length === 0) {
+    ElMessage.info('没有检测到配置变更')
+    return
+  }
+
+  pendingModule.value = module
+  pendingData.value = data
+  pendingModuleName.value = modules.find(m => m.key === module)?.label || module
+  diffItems.value = diff
+  confirmDialogVisible.value = true
+}
+
+/** 对话框确认 → 执行实际保存 */
+async function confirmAndSave() {
+  const module = pendingModule.value
+  const data = pendingData.value
+  if (!module) return
+
   saving.value = true
   try {
-    await updateConfig(config)
-    ElMessage.success('配置保存成功')
+    await updateModuleConfig(module, data)
+    ElMessage.success(`${pendingModuleName.value} 配置已保存`)
+    saveStatus.value = 'success'
+    saveMessage.value = '配置已保存，变更即时生效'
+    confirmDialogVisible.value = false
+    // 更新快照为最新值
+    takeSnapshot(module)
   } catch {
-    // Error handled
+    saveStatus.value = 'error'
+    saveMessage.value = '保存失败，请检查输入或权限'
   } finally {
     saving.value = false
   }
 }
 
-onMounted(() => fetchConfig())
+/** 端口列表管理 */
+function addPort(module: string) {
+  let target: { ports?: number[]; ssh_ports?: number[] } | null = null
+  if (module === 'failguard') target = failguard
+  else if (module === 'anomaly') target = anomaly
+  const field = module === 'failguard' ? 'ssh_ports' : 'ports'
+  const list = (target?.[field] as number[]) ?? []
+
+  if (!target) return
+  if (list.length >= 16) ElMessage.warning('最多支持 16 个端口')
+  else list.push(1)
+}
+
+function removePort(module: string, index: number) {
+  let target: { ports?: number[]; ssh_ports?: number[] } | null = null
+  if (module === 'failguard') target = failguard
+  else if (module === 'anomaly') target = anomaly
+  const field = module === 'failguard' ? 'ssh_ports' : 'ports'
+  const list = (target?.[field] as number[]) ?? []
+
+  if (!target || !list) return
+  list.splice(index, 1)
+}
+
+onMounted(() => loadModuleConfig(activeModule.value))
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
+.page-header {
+  margin-bottom: 20px;
+  h2 { margin: 0; }
+}
+
 .card-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+}
+
+.form-area {
+  min-height: 300px;
+
+  h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--el-border-color-lighter);
+  }
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
+}
+
+.formula-hint {
+  code {
+    background: var(--el-fill-color-light);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+    color: var(--el-color-primary);
+  }
+
+  strong {
+    color: var(--el-color-success);
+  }
+}
+
+/* ---- 确认对话框样式 ---- */
+.confirm-intro {
+  color: var(--el-text-color-regular);
+  margin: 0 0 12px;
+}
+
+.module-diff-header {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--el-color-primary);
+  padding: 8px 12px;
+  background: var(--el-color-primary-light-9);
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+.diff-list {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.diff-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+
+  &:not(:last-child) {
+    border-bottom: 1px solid var(--el-border-color-extra-light);
+  }
+
+  &.diff-danger {
+    .diff-label, .diff-new { color: var(--el-color-danger); }
+    .diff-new { font-weight: 600; }
+  }
+}
+
+.diff-label {
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  min-width: 110px;
+  flex-shrink: 0;
+}
+
+.diff-old {
+  color: var(--el-text-color-placeholder);
+  text-decoration: line-through;
+  min-width: 60px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.diff-arrow {
+  color: var(--el-text-color-placeholder);
+  flex-shrink: 0;
+}
+
+.diff-new {
+  color: var(--el-color-success);
+  font-weight: 500;
+  word-break: break-all;
 }
 </style>
