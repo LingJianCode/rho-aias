@@ -183,9 +183,6 @@
       toggleIfDifferent(settingStore.showMenuButton, config.showMenuButton, () =>
         settingStore.setButton()
       )
-      toggleIfDifferent(settingStore.showFastEnter, config.showFastEnter, () =>
-        settingStore.setFastEnter()
-      )
       toggleIfDifferent(settingStore.showRefreshButton, config.showRefreshButton, () =>
         settingStore.setShowRefreshButton()
       )
@@ -199,7 +196,6 @@
 
       // 界面显示（直接设置类方法）
       settingStore.setWorkTab(config.showWorkTab)
-      settingStore.setShowFestivalText(config.showFestivalText)
       settingStore.setWatermarkVisible(config.watermarkVisible)
 
       // 功能设置
@@ -217,10 +213,6 @@
       settingStore.setTabStyle(config.tabStyle)
       settingStore.setCustomRadius(config.customRadius)
       settingStore.setContainerWidth(config.containerWidth)
-
-      // 节日相关
-      settingStore.setFestivalDate(config.festivalDate)
-      settingStore.setholidayFireworksLoaded(config.holidayFireworksLoaded)
 
       location.reload()
     } catch (error) {
