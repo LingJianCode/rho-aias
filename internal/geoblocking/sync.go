@@ -33,6 +33,12 @@ func (s *Syncer) SyncToKernel(data *GeoIPData, config *GeoConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// 防御性检查：模块禁用时不执行同步（防止竞态条件覆盖禁用状态）
+	if !config.Enabled {
+		logger.Info("[GeoSyncer] Module disabled, skipping kernel sync")
+		return nil
+	}
+
 	// 1. 获取当前内核中的所有 GeoIP 规则
 	currentRules, err := s.xdp.GetGeoIPRules()
 	if err != nil {
@@ -159,6 +165,12 @@ func (s *Syncer) batchDelete(rules []string) error {
 func (s *Syncer) LoadAll(data *GeoIPData, config *GeoConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// 防御性检查：模块禁用时不执行加载（防止竞态条件覆盖禁用状态）
+	if !config.Enabled {
+		logger.Info("[GeoSyncer] Module disabled, skipping kernel load")
+		return nil
+	}
 
 	// 直接批量添加，跳过差异计算
 	if len(data.IPv4CIDR) > 0 {

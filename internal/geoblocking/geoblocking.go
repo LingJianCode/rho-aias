@@ -561,11 +561,18 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, periodic boo
 	logger.Infof("[GeoBlocking] [%s] Source config updated: enabled=%v, periodic=%v, schedule=%s, url=%s",
 		sourceID, enabled, periodic, schedule, url)
 
-	// 启用时立即拉取一次数据
+	// 仅在模块启用时立即拉取数据（避免禁用状态下被源配置更新触发重新加载）
 	go func() {
 		m.mu.RLock()
+		moduleEnabled := m.config.Enabled
 		srcCfg := m.config.Sources[sourceID]
 		m.mu.RUnlock()
+
+		if !moduleEnabled {
+			logger.Infof("[GeoBlocking] [%s] Module disabled, skipping immediate fetch", sourceID)
+			return
+		}
+
 		if err := m.updateSource(SourceID(sourceID), srcCfg); err != nil {
 			logger.Errorf("[GeoBlocking] [%s] Immediate fetch after config change failed: %v", sourceID, err)
 		}
