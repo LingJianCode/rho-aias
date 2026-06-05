@@ -2,10 +2,12 @@
 package geoblocking
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rho-aias/internal/config"
@@ -32,8 +34,9 @@ type Manager struct {
 	mu         sync.RWMutex              // 读写锁
 
 	// 状态管理
-	status       *Status                    // 模块状态
-	sourceStatus map[SourceID]*SourceStatus // 各 GeoIP 源状态
+	status        *Status                    // 模块状态
+	sourceStatus  map[SourceID]*SourceStatus // 各 GeoIP 源状态
+	moduleEnabled *atomic.Bool               // 模块总开关原子引用（与 Syncer 共享）
 
 	// 数据库支持和并发控制（使用公共组件）
 	db            *gorm.DB                  // 数据库连接
@@ -45,18 +48,22 @@ type Manager struct {
 
 // NewManager 创建新的 GeoIP 管理器
 func NewManager(cfg *config.GeoBlockingConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Manager {
+	enabled := &atomic.Bool{}
+	enabled.Store(cfg.Enabled)
+
 	return &Manager{
 		config:        cfg,
 		xdp:           xdp,
 		fetcher:       feed.NewFetcher(600 * time.Second),
 		parser:        NewParser(),
 		rawFileDir:    cfg.PersistenceDir,
-		syncer:        NewSyncer(xdp, cfg.BatchSize),
+		syncer:        NewSyncer(xdp, cfg.BatchSize, enabled),
 		done:          make(chan struct{}),
 		sourceStatus:  make(map[SourceID]*SourceStatus),
 		db:            db,
 		sourceMutexes: feed.NewMutexPool[SourceID](),
 		mmdbReader:    NewMMDBReader(),
+		moduleEnabled: enabled,
 		status: &Status{
 			Enabled:          cfg.Enabled,
 			Mode:             cfg.Mode,
@@ -204,6 +211,12 @@ func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error 
 	}
 	if err := m.syncer.SyncToKernel(parsed, geoConfig); err != nil {
 		duration := time.Since(startTime).Milliseconds()
+		// 模块禁用时 SyncToKernel 返回 ErrModuleDisabled，记录为 skipped 而非 failed
+		if errors.Is(err, ErrModuleDisabled) {
+			logger.Warnf("[GeoBlocking] [%s] Sync skipped: module disabled", sourceID)
+			_ = feed.RecordStatus(m.db, feed.SourceTypeGeoBlocking, string(sourceID), string(sourceID), "skipped", 0, "module disabled", duration)
+			return err
+		}
 		_ = feed.RecordStatus(m.db, feed.SourceTypeGeoBlocking, string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
@@ -458,6 +471,11 @@ func (m *Manager) TriggerUpdate() error {
 func (m *Manager) UpdateConfig(enabled bool, mode string, countries []string) error {
 	wasEnabled := m.config.Enabled
 
+	// 立即更新原子开关，确保 Syncer 的防御性检查能感知到状态变更
+	if m.moduleEnabled != nil {
+		m.moduleEnabled.Store(enabled)
+	}
+
 	m.mu.Lock()
 	m.config.Enabled = enabled
 	m.status.Enabled = enabled
@@ -465,6 +483,15 @@ func (m *Manager) UpdateConfig(enabled bool, mode string, countries []string) er
 	m.status.AllowedCountries = countries
 	m.config.Mode = mode
 	m.config.AllowedCountries = countries
+
+	// 管理 Cron 调度器的生命周期
+	if m.cron != nil {
+		if !enabled && wasEnabled {
+			// 禁用模块：暂停 Cron 调度，避免触发无谓的网络请求和内核操作
+			m.cron.Stop()
+			logger.Info("[GeoBlocking] Cron scheduler stopped (module disabled)")
+		}
+	}
 	m.mu.Unlock()
 
 	// 更新内核配置总开关（enabled/mode）
@@ -474,7 +501,13 @@ func (m *Manager) UpdateConfig(enabled bool, mode string, countries []string) er
 
 	switch {
 	case enabled && !wasEnabled:
-		// 从禁用→启用：立即拉取数据并同步到 eBPF map
+		// 从禁用→启用：恢复 Cron 并立即拉取数据
+		m.mu.Lock()
+		if m.cron != nil {
+			m.cron.Start()
+			logger.Info("[GeoBlocking] Cron scheduler resumed (module enabled)")
+		}
+		m.mu.Unlock()
 		go func() {
 			logger.Info("[GeoBlocking] Immediate fetch triggered by config enable")
 			m.updateAllSources()

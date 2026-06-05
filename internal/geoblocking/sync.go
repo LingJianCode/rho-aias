@@ -2,41 +2,58 @@
 package geoblocking
 
 import (
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
 )
 
+// ErrModuleDisabled 模块已禁用，操作被跳过
+var ErrModuleDisabled = errors.New("module disabled, operation skipped")
+
 // Syncer GeoIP 原子同步器
 // 负责将 GeoIP 数据安全地同步到内核 eBPF map
 type Syncer struct {
-	xdp       *ebpfs.Xdp // XDP eBPF 程序接口
-	batchSize int         // 批量操作大小
-	mu        sync.Mutex // 互斥锁，保证并发安全
+	xdp       *ebpfs.Xdp   // XDP eBPF 程序接口
+	batchSize int           // 批量操作大小
+	enabled   *atomic.Bool  // 模块总开关（原子引用，与 Manager 共享）
+	mu        sync.Mutex    // 互斥锁，保证并发安全
 }
 
 // NewSyncer 创建新的 GeoIP 同步器
 // xdp: XDP eBPF 程序接口
 // batchSize: 批量操作的大小限制
-func NewSyncer(xdp *ebpfs.Xdp, batchSize int) *Syncer {
+// enabled: 模块总开关原子引用（与 Manager 共享，用于防御性检查）
+func NewSyncer(xdp *ebpfs.Xdp, batchSize int, enabled *atomic.Bool) *Syncer {
+	if batchSize <= 0 {
+		batchSize = 256
+	}
 	return &Syncer{
 		xdp:       xdp,
 		batchSize: batchSize,
+		enabled:   enabled,
 	}
 }
 
 // SyncToKernel 同步 GeoIP 数据到内核 eBPF map（增量更新）
 // 通过计算当前规则与新数据的差异，实现平滑更新
 func (s *Syncer) SyncToKernel(data *GeoIPData, config *GeoConfig) error {
+	// 第一层防御：实时原子检查（在 Lock 前，尽早退出，防止禁用后仍排队等待锁）
+	if s.enabled != nil && !s.enabled.Load() {
+		logger.Warnf("[GeoSyncer] SyncToKernel called but module is disabled, skipping")
+		return ErrModuleDisabled
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 防御性检查：模块禁用时不执行同步（防止竞态条件覆盖禁用状态）
+	// 第二层防御：快照检查（在 Lock 后，防御 Lock 前到 Lock 之间的竞态窗口）
 	if !config.Enabled {
-		logger.Info("[GeoSyncer] Module disabled, skipping kernel sync")
-		return nil
+		logger.Info("[GeoSyncer] Module disabled (snapshot), skipping kernel sync")
+		return ErrModuleDisabled
 	}
 
 	// 1. 获取当前内核中的所有 GeoIP 规则
@@ -163,13 +180,19 @@ func (s *Syncer) batchDelete(rules []string) error {
 // 跳过差异计算，直接批量添加
 // 适用于：启动时从缓存加载
 func (s *Syncer) LoadAll(data *GeoIPData, config *GeoConfig) error {
+	// 第一层防御：实时原子检查（在 Lock 前，尽早退出）
+	if s.enabled != nil && !s.enabled.Load() {
+		logger.Warnf("[GeoSyncer] LoadAll called but module is disabled, skipping")
+		return ErrModuleDisabled
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 防御性检查：模块禁用时不执行加载（防止竞态条件覆盖禁用状态）
+	// 第二层防御：快照检查（在 Lock 后，防御 Lock 前到 Lock 之间的竞态窗口）
 	if !config.Enabled {
-		logger.Info("[GeoSyncer] Module disabled, skipping kernel load")
-		return nil
+		logger.Info("[GeoSyncer] Module disabled (snapshot), skipping kernel load")
+		return ErrModuleDisabled
 	}
 
 	// 直接批量添加，跳过差异计算
