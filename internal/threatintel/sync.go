@@ -2,6 +2,7 @@
 package threatintel
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -9,6 +10,9 @@ import (
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
 )
+
+// ErrModuleDisabled 模块已禁用，操作被跳过
+var ErrModuleDisabled = errors.New("module disabled, operation skipped")
 
 // Syncer 威胁情报原子同步器
 // 负责将威胁情报数据安全地同步到内核 eBPF map，确保拦截不中断
@@ -24,6 +28,9 @@ type Syncer struct {
 // batchSize: 批量操作的大小限制
 // enabled: 模块总开关原子引用（与 Manager 共享，用于防御性检查）
 func NewSyncer(xdp *ebpfs.Xdp, batchSize int, enabled *atomic.Bool) *Syncer {
+	if batchSize <= 0 {
+		batchSize = 256
+	}
 	return &Syncer{
 		xdp:       xdp,
 		batchSize: batchSize,
@@ -35,10 +42,10 @@ func NewSyncer(xdp *ebpfs.Xdp, batchSize int, enabled *atomic.Bool) *Syncer {
 // 通过计算当前规则与新数据的差异，实现无拦截空窗期的平滑更新
 // sourceMask: 来源掩码，标识规则的来源
 func (s *Syncer) SyncToKernel(data *IntelData, sourceMask uint32) error {
-	// 防御性检查：模块已禁用时直接返回，避免无效内核操作
+	// 防御性检查：模块已禁用时返回可区分错误，避免调用方误判为"成功"
 	if s.enabled != nil && !s.enabled.Load() {
 		logger.Warnf("[IntelSyncer] SyncToKernel called but module is disabled, skipping (sourceMask=0x%x)", sourceMask)
-		return nil
+		return ErrModuleDisabled
 	}
 
 	s.mu.Lock()
@@ -176,10 +183,10 @@ func (s *Syncer) batchDelete(rules []string) error {
 // 跳过 GetRule() 和差异计算，直接批量添加
 // 适用于：启动时从缓存加载，或确定需要覆盖所有规则的场景
 func (s *Syncer) LoadAll(data *IntelData, sourceMask uint32) error {
-	// 防御性检查：模块已禁用时直接返回，避免无效内核操作
+	// 防御性检查：模块已禁用时返回可区分错误，避免调用方误判为"成功"
 	if s.enabled != nil && !s.enabled.Load() {
 		logger.Warnf("[IntelSyncer] LoadAll called but module is disabled, skipping (sourceMask=0x%x)", sourceMask)
-		return nil
+		return ErrModuleDisabled
 	}
 
 	s.mu.Lock()

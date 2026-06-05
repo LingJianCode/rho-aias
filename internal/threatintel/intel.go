@@ -2,6 +2,7 @@
 package threatintel
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -193,6 +194,12 @@ func (m *Manager) updateSource(sourceID SourceID, src config.IntelSource) error 
 	sourceMask := sourceIDToMask(sourceID)
 	if err := m.syncer.SyncToKernel(parsed, sourceMask); err != nil {
 		duration := time.Since(startTime).Milliseconds()
+		// 模块禁用时 SyncToKernel 返回 ErrModuleDisabled，记录为 skipped 而非 failed
+		if errors.Is(err, ErrModuleDisabled) {
+			logger.Warnf("[ThreatIntel] [%s] Sync skipped: module disabled", sourceID)
+			_ = feed.RecordStatus(m.db, feed.SourceTypeIntel, string(sourceID), string(sourceID), "skipped", 0, "module disabled", duration)
+			return err
+		}
 		_ = feed.RecordStatus(m.db, feed.SourceTypeIntel, string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
@@ -492,21 +499,35 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule str
 
 // UpdateConfig 热更新情报模块总开关
 func (m *Manager) UpdateConfig(enabled bool) {
-	wasEnabled := m.config.Enabled
-
 	m.mu.Lock()
+	wasEnabled := m.config.Enabled
 	m.config.Enabled = enabled
 	m.status.Enabled = enabled
 	// 同步原子引用，确保 Syncer 的防御性检查能感知到状态变更
 	if m.moduleEnabled != nil {
 		m.moduleEnabled.Store(enabled)
 	}
+
+	// 管理 Cron 调度器的生命周期
+	if m.cron != nil {
+		if !enabled && wasEnabled {
+			// 禁用模块：暂停 Cron 调度，避免触发无谓的网络请求和内核操作
+			m.cron.Stop()
+			logger.Info("[ThreatIntel] Cron scheduler stopped (module disabled)")
+		}
+	}
 	m.mu.Unlock()
 
 	// 状态切换时的即时操作
 	switch {
 	case enabled && !wasEnabled:
-		// 从禁用→启用：立即拉取数据并同步到 eBPF map
+		// 从禁用→启用：恢复 Cron 并立即拉取数据
+		m.mu.Lock()
+		if m.cron != nil {
+			m.cron.Start()
+			logger.Info("[ThreatIntel] Cron scheduler resumed (module enabled)")
+		}
+		m.mu.Unlock()
 		go func() {
 			logger.Info("[ThreatIntel] Immediate fetch triggered by config enable")
 			m.updateAllSources()
