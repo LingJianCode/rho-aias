@@ -492,15 +492,37 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule str
 
 // UpdateConfig 热更新情报模块总开关
 func (m *Manager) UpdateConfig(enabled bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	wasEnabled := m.config.Enabled
 
+	m.mu.Lock()
 	m.config.Enabled = enabled
 	m.status.Enabled = enabled
 	// 同步原子引用，确保 Syncer 的防御性检查能感知到状态变更
 	if m.moduleEnabled != nil {
 		m.moduleEnabled.Store(enabled)
 	}
+	m.mu.Unlock()
+
+	// 状态切换时的即时操作
+	switch {
+	case enabled && !wasEnabled:
+		// 从禁用→启用：立即拉取数据并同步到 eBPF map
+		go func() {
+			logger.Info("[ThreatIntel] Immediate fetch triggered by config enable")
+			m.updateAllSources()
+		}()
+	case !enabled && wasEnabled:
+		// 从启用→禁用：立即清理所有规则并从 eBPF map 中移除
+		go func() {
+			logger.Info("[ThreatIntel] Immediate cleanup triggered by config disable")
+			if err := m.syncer.RemoveAll(); err != nil {
+				logger.Errorf("[ThreatIntel] Cleanup failed: %v", err)
+			} else {
+				logger.Info("[ThreatIntel] Cleanup completed, all rules removed from eBPF")
+			}
+		}()
+	}
+
 	logger.Infof("[ThreatIntel] Config updated: enabled=%v", enabled)
 }
 

@@ -203,13 +203,8 @@ func (s *Syncer) LoadAll(data *IntelData, sourceMask uint32) error {
 
 // RemoveBySourceMask 按来源掩码从内核 eBPF map 中移除规则
 // 用于数据源禁用时立即清理该源的所有恶意 IP
+// 注意：此为清理操作，即使模块已禁用也需执行，否则规则会残留在内核中
 func (s *Syncer) RemoveBySourceMask(sourceMask uint32) error {
-	// 防御性检查：模块已禁用时直接返回，避免无效内核操作
-	if s.enabled != nil && !s.enabled.Load() {
-		logger.Warnf("[IntelSyncer] RemoveBySourceMask called but module is disabled, skipping (sourceMask=0x%x)", sourceMask)
-		return nil
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -259,5 +254,36 @@ func (s *Syncer) RemoveBySourceMask(sourceMask uint32) error {
 		logger.Infof("[IntelSyncer] No rules found for source mask 0x%x, nothing to clean", sourceMask)
 	}
 
+	return nil
+}
+
+// RemoveAll 从内核 eBPF map 中移除所有威胁情报规则
+// 用于模块禁用时立即清理所有恶意 IP 规则
+func (s *Syncer) RemoveAll() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. 获取当前内核中的所有规则
+	currentRules, err := s.xdp.GetRule()
+	if err != nil {
+		return fmt.Errorf("get current rules failed: %w", err)
+	}
+
+	if len(currentRules) == 0 {
+		logger.Info("[IntelSyncer] No rules in kernel, nothing to clean")
+		return nil
+	}
+
+	// 2. 批量删除所有规则
+	var allKeys []string
+	for _, r := range currentRules {
+		allKeys = append(allKeys, r.Key)
+	}
+
+	if err := s.batchDelete(allKeys); err != nil {
+		return fmt.Errorf("batch delete all rules failed: %w", err)
+	}
+
+	logger.Infof("[IntelSyncer] Removed %d rules from kernel (module disabled)", len(allKeys))
 	return nil
 }
