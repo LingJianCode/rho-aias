@@ -163,7 +163,7 @@ func (m *Manager) updateAllSources() {
 func (m *Manager) updateSource(sourceID SourceID, src config.IntelSource) error {
 	mu := m.sourceMutexes.Get(sourceID)
 	if !mu.TryLock() {
-		logger.Warnf("[ThreatIntel] [%s] Update skipped - already in progress", sourceID)
+		logger.Infof("[ThreatIntel] [%s] Update skipped - already in progress", sourceID)
 		return fmt.Errorf("update already in progress")
 	}
 	defer mu.Unlock()
@@ -471,7 +471,7 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule str
 			if moduleEnabled {
 				logger.Infof("[ThreatIntel] [%s] Immediate fetch triggered by config change", sourceID)
 				if err := m.updateSource(SourceID(sourceID), src); err != nil {
-					logger.Errorf("[ThreatIntel] [%s] Immediate fetch failed: %v", sourceID, err)
+					logger.Infof("[ThreatIntel] [%s] Immediate fetch skipped: %v", sourceID, err)
 					m.updateSourceStatus(SourceID(sourceID), false, 0, err.Error())
 				} else {
 					logger.Infof("[ThreatIntel] [%s] Immediate fetch completed, rules synced to eBPF", sourceID)

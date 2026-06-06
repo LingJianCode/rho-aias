@@ -176,7 +176,7 @@ func (m *Manager) updateAllSources() {
 func (m *Manager) updateSource(sourceID SourceID, src config.GeoIPSource) error {
 	mu := m.sourceMutexes.Get(sourceID)
 	if !mu.TryLock() {
-		logger.Warnf("[GeoBlocking] [%s] Update skipped - already in progress", sourceID)
+		logger.Infof("[GeoBlocking] [%s] Update skipped - already in progress", sourceID)
 		return fmt.Errorf("update already in progress")
 	}
 	defer mu.Unlock()
@@ -607,7 +607,7 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, periodic boo
 		}
 
 		if err := m.updateSource(SourceID(sourceID), srcCfg); err != nil {
-			logger.Errorf("[GeoBlocking] [%s] Immediate fetch after config change failed: %v", sourceID, err)
+			logger.Infof("[GeoBlocking] [%s] Immediate fetch skipped: %v", sourceID, err)
 		}
 	}()
 
