@@ -24,10 +24,21 @@ func InitProtectedNets(logFunc func(format string, args ...interface{})) []*net.
 		cidr   string
 		reason string
 	}{
+		// 通用 link-local 元数据（覆盖 AWS / GCP / Oracle Cloud / 青云 等）
 		{"169.254.0.0/16", "cloud metadata (link-local)"},
-		{"100.100.0.0/16", "Alibaba Cloud internal DNS"},
-		{"183.60.83.19", "Tencent Cloud internal DNS"},
-		{"183.60.82.98", "Tencent Cloud internal DNS"},
+		// Alibaba Cloud
+		{"100.100.0.0/16", "Alibaba Cloud internal DNS/NTP/metadata"},
+		// Tencent Cloud
+		{"183.60.83.19/32", "Tencent Cloud internal DNS"},
+		{"183.60.82.98/32", "Tencent Cloud internal DNS"},
+		// Azure（内部 DNS / WireServer / 许可证激活，封禁会导致 VM DNS 失效）
+		{"168.63.129.16/32", "Azure internal DNS / WireServer"},
+		// 华为云（各区域内网 DNS 均在 100.125.0.0/16 内，如 100.125.1.250 / 100.125.17.250 等）
+		{"100.125.0.0/16", "Huawei Cloud internal DNS/NTP"},
+		// 火山引擎（内网服务网段）
+		{"100.96.0.0/11", "Volcano Engine internal services"},
+		// 京东云（内网服务网段，与 RFC 6598 CGN 段重叠）
+		{"100.64.0.0/10", "JD Cloud / CGN internal services"},
 	}
 	for _, cn := range cloudNets {
 		_, ipNet, err := net.ParseCIDR(cn.cidr)
