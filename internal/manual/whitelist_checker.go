@@ -26,6 +26,8 @@ func InitProtectedNets(logFunc func(format string, args ...interface{})) []*net.
 	}{
 		{"169.254.0.0/16", "cloud metadata (link-local)"},
 		{"100.100.0.0/16", "Alibaba Cloud internal DNS"},
+		{"183.60.83.19", "Tencent Cloud internal DNS"},
+		{"183.60.82.98", "Tencent Cloud internal DNS"},
 	}
 	for _, cn := range cloudNets {
 		_, ipNet, err := net.ParseCIDR(cn.cidr)
