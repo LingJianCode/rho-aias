@@ -11,7 +11,7 @@ export function addBlacklistRule(data: { value: string; remark?: string }) {
 }
 
 export function deleteBlacklistRule(value: string) {
-  return http.del<void>({ url: `/api/manual/blacklist/rules/${value}` })
+  return http.del<void>({ url: '/api/manual/blacklist/rules', data: { value } })
 }
 
 // 白名单接口
@@ -24,5 +24,5 @@ export function addWhitelistRule(data: { value: string; remark?: string }) {
 }
 
 export function deleteWhitelistRule(value: string) {
-  return http.del<void>({ url: `/api/manual/whitelist/rules/${value}` })
+  return http.del<void>({ url: '/api/manual/whitelist/rules', data: { value } })
 }

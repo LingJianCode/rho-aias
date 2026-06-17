@@ -29,7 +29,7 @@
           <el-table-column prop="added_at" label="添加时间" width="180">
             <template #default="{ row }">{{ row.added_at ? formatDateTime(row.added_at) : '-' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="100" v-auth="'admin'">
+          <el-table-column label="操作" width="100">
             <template #default="{ row }">
               <el-button type="danger" link @click="handleDelete(row as ManualRuleItem)">删除</el-button>
             </template>
@@ -54,7 +54,7 @@
           <el-table-column prop="duration" label="封禁时长" width="120">
             <template #default="{ row }">{{ formatDuration(row.duration) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="100" v-auth="'admin'">
+          <el-table-column label="操作" width="100">
             <template #default="{ row }">
               <el-button type="danger" link @click="handleUnblock(row as BanRecord)">解封</el-button>
             </template>

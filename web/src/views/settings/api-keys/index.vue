@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <span>API Keys 管理</span>
-          <el-button type="primary" v-auth="'admin'" @click="showAddDialog = true">
+          <el-button type="primary" @click="showAddDialog = true">
             <Icon icon="ri:add-line" />生成 Key
           </el-button>
         </div>
@@ -27,7 +27,7 @@
         <el-table-column prop="expires_at" label="过期时间" width="180">
           <template #default="{ row }">{{ row.expires_at ? formatDateTime(row.expires_at) : '永不过期' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="100" v-auth="'admin'">
+        <el-table-column label="操作" width="100">
           <template #default="{ row }">
             <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
           </template>
