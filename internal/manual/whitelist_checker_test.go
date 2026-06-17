@@ -47,13 +47,21 @@ func TestWhitelistChecker_ProtectedCloudNets(t *testing.T) {
 		ip    string
 		match bool
 	}{
-		// 腾讯云/AWS/Azure 元数据服务
-		{"cloud metadata 169.254.0.23", "169.254.0.23", true},
+		// 通用 metadata 端点（精确 169.254.169.254/32，不再覆盖整个 /16）
 		{"cloud metadata 169.254.169.254", "169.254.169.254", true},
-		{"cloud metadata 169.254.0.1", "169.254.0.1", true},
+		{"cloud metadata 169.254.0.23 (outside /32)", "169.254.0.23", false},
+		{"cloud metadata 169.254.0.1 (outside /32)", "169.254.0.1", false},
 		// 阿里云内网 DNS
 		{"Alibaba DNS 100.100.2.136", "100.100.2.136", true},
 		{"Alibaba DNS 100.100.2.138", "100.100.2.138", true},
+		// 火山引擎（metadata: 100.96.0.96, DNS: 100.96.0.2 / 100.96.0.3）
+		{"Volcano metadata 100.96.0.96", "100.96.0.96", true},
+		{"Volcano DNS 100.96.0.2", "100.96.0.2", true},
+		{"Volcano DNS 100.96.0.3", "100.96.0.3", true},
+		{"Volcano out of /16 100.97.0.1", "100.97.0.1", false},
+		// 京东云（已移除 100.64.0.0/10 的 CGNAT 段，无公开文档支撑）
+		{"JD Cloud / CGNAT 100.64.0.1", "100.64.0.1", false},
+		{"Alibaba range boundary 100.100.100.100", "100.100.100.100", true},
 		// 不在保护范围内
 		{"non-protected 10.0.0.1", "10.0.0.1", false},
 		{"non-protected 172.16.0.1", "172.16.0.1", false},
