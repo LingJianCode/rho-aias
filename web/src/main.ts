@@ -9,11 +9,14 @@ import './utils/sys/console.ts'                     // 控制台输出内容
 import { setupGlobDirectives } from './directives'
 import { setupErrorHandle } from './utils/sys/error-handle'
 
-document.addEventListener(
-  'touchstart',
-  function () {},
-  { passive: false }
-)
+// 移动端触摸事件优化：仅在触屏设备上注册 passive: false 监听
+if ('ontouchstart' in window) {
+  document.addEventListener(
+    'touchstart',
+    function () {},
+    { passive: false }
+  )
+}
 
 const app = createApp(App)
 initStore(app)

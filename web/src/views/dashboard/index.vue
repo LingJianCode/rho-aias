@@ -79,14 +79,18 @@ async function fetchBanStats() {
   try {
     const res = await getBanRecordStats()
     Object.assign(banStats, res)
-  } catch {}
+  } catch (err) {
+    console.error('[Dashboard] 获取封禁统计失败:', err)
+  }
 }
 
 async function fetchBlockStats() {
   try {
     const res = await getBlockLogStats()
     Object.assign(blockStats, res)
-  } catch {}
+  } catch (err) {
+    console.error('[Dashboard] 获取阻断统计失败:', err)
+  }
 }
 
 async function fetchBlockTrend() {
@@ -94,9 +98,11 @@ async function fetchBlockTrend() {
     const res = await getHourlyTrend(24)
     const data = res?.data ?? res
     if (data?.hourly_data) {
-      blockTrend.value = data.hourly_data.map((item: any) => ({ date: item.hour, count: item.total }))
+      blockTrend.value = data.hourly_data.map((item: { hour: string; total: number }) => ({ date: item.hour, count: item.total }))
     }
-  } catch {}
+  } catch (err) {
+    console.error('[Dashboard] 获取阻断趋势失败:', err)
+  }
 }
 
 async function fetchTopIPs() {
@@ -104,7 +110,9 @@ async function fetchTopIPs() {
     const res = await getBlockedTopIPs(10)
     const data = res?.data ?? res
     if (data?.top_blocked_ips) topIPs.value = data.top_blocked_ips
-  } catch {}
+  } catch (err) {
+    console.error('[Dashboard] 获取 TOP IP 失败:', err)
+  }
 }
 
 function getIPPercentage(count: number): number {

@@ -1,4 +1,5 @@
 import http from '@/utils/http'
+import type { EgressLogListResponse } from '@/types/api'
 
 export interface EgressLogFilter {
   date: string
@@ -12,5 +13,5 @@ export interface EgressLogFilter {
 }
 
 export function getEgressLogs(params: EgressLogFilter) {
-  return http.get<any>({ url: '/api/egresslog/records', params })
+  return http.get<EgressLogListResponse>({ url: '/api/egresslog/records', params })
 }

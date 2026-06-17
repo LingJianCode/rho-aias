@@ -1,6 +1,5 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import path from 'path'
 import { fileURLToPath } from 'url'
 import vueDevTools from 'vite-plugin-vue-devtools'
 import viteCompression from 'vite-plugin-compression'
@@ -9,12 +8,11 @@ import AutoImport from 'unplugin-auto-import/vite'
 import ElementPlus from 'unplugin-element-plus/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import tailwindcss from '@tailwindcss/vite'
-// import { visualizer } from 'rollup-plugin-visualizer'
 
 export default ({ mode }: { mode: string }) => {
   const root = process.cwd()
   const env = loadEnv(mode, root)
-  const { VITE_VERSION, VITE_PORT, VITE_BASE_URL, VITE_API_URL, VITE_API_PROXY_URL } = env
+  const { VITE_VERSION, VITE_PORT, VITE_BASE_URL, VITE_API_URL, VITE_API_PROXY_URL, VITE_DROP_CONSOLE } = env
 
   console.log(`🚀 API_URL = ${VITE_API_URL}`)
   console.log(`🚀 VERSION = ${VITE_VERSION}`)
@@ -26,7 +24,7 @@ export default ({ mode }: { mode: string }) => {
     base: VITE_BASE_URL,
     server: {
       port: Number(VITE_PORT),
-      allowedHosts: true,
+      allowedHosts: ['localhost', '127.0.0.1'],
       proxy: {
         [VITE_API_URL]: {
           target: VITE_API_PROXY_URL || 'http://localhost:8080',
@@ -55,10 +53,9 @@ export default ({ mode }: { mode: string }) => {
       minify: 'terser',
       terserOptions: {
         compress: {
-          // 生产环境去除 console
-          drop_console: true,
-          // 生产环境去除 debugger
-          drop_debugger: true
+          // 根据环境变量决定是否去除 console 和 debugger
+          drop_console: VITE_DROP_CONSOLE === 'true',
+          drop_debugger: VITE_DROP_CONSOLE === 'true'
         }
       },
       dynamicImportVarsOptions: {
@@ -68,7 +65,19 @@ export default ({ mode }: { mode: string }) => {
       },
       rollupOptions: {
         output: {
-          manualChunks: undefined
+          // 分包策略：将大型 vendor 库拆分为独立 chunk，提升缓存利用率
+          manualChunks(id: string) {
+            if (id.includes('node_modules')) {
+              // Element Plus 拆分为独立 chunk
+              if (id.includes('element-plus')) return 'vendor-element-plus'
+              // ECharts 拆分为独立 chunk
+              if (id.includes('echarts')) return 'vendor-echarts'
+              // Vue 生态拆分为独立 chunk
+              if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router') || id.includes('@vueuse')) return 'vendor-vue'
+              // 其他依赖
+              return 'vendor'
+            }
+          }
         }
       }
     },
@@ -105,13 +114,6 @@ export default ({ mode }: { mode: string }) => {
         deleteOriginFile: false // 压缩后是否删除原文件
       }),
       vueDevTools()
-      // 打包分析
-      // visualizer({
-      //   open: true,
-      //   gzipSize: true,
-      //   brotliSize: true,
-      //   filename: 'dist/stats.html' // 分析图生成的文件名及路径
-      // }),
     ],
     // 依赖预构建：避免运行时重复请求与转换，提升首次加载速度
     optimizeDeps: {
@@ -151,8 +153,4 @@ export default ({ mode }: { mode: string }) => {
       }
     }
   })
-}
-
-function resolvePath(paths: string) {
-  return path.resolve(__dirname, paths)
 }

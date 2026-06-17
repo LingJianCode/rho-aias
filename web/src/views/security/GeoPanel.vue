@@ -131,7 +131,9 @@ async function fetchStatus() {
   loading.value = true
   try {
     const res = await getGeoBlockingStatus()
-    status.value = res as any
+    status.value = res as GeoBlockingStatus
+  } catch (err) {
+    console.error('[GeoPanel] 获取地域封禁状态失败:', err)
   } finally {
     loading.value = false
   }

@@ -42,7 +42,7 @@ export const SETTING_DEFAULT_CONFIG = {
   /** 菜单风格 */
   menuThemeType: MenuThemeEnum.DESIGN,
   /** 系统主题颜色 */
-  systemThemeColor: AppConfig.systemMainColor[6],
+  systemThemeColor: AppConfig.systemMainColor.at(-1) || AppConfig.systemMainColor[0],
   /** 是否显示菜单按钮 */
   showMenuButton: true,
   /** 是否显示刷新按钮 */
@@ -91,7 +91,7 @@ export function getSettingDefaults() {
  * 重置为默认设置
  * @param currentSettings 当前设置对象
  */
-export function resetToDefaults(currentSettings: Record<string, any>) {
+export function resetToDefaults(currentSettings: Partial<typeof SETTING_DEFAULT_CONFIG>) {
   const defaults = getSettingDefaults()
   Object.keys(defaults).forEach((key) => {
     if (key in currentSettings) {

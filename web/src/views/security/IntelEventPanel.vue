@@ -109,8 +109,10 @@ async function fetchData() {
       getIntelStatus(),
       getBlockLogEventStatus(),
     ])
-    intelStatus.value = intelRes as any
-    eventStatus.value = eventRes as any
+    intelStatus.value = intelRes as IntelStatus
+    eventStatus.value = eventRes
+  } catch (err) {
+    console.error('[IntelEventPanel] 获取数据失败:', err)
   } finally {
     loading.value = false
   }

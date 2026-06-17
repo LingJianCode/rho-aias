@@ -1,4 +1,5 @@
 import http from '@/utils/http'
+import type { AuditLogsResponse } from '@/types/api'
 
 export interface AuditLog {
   id: number
@@ -13,5 +14,5 @@ export interface AuditLog {
 }
 
 export function getAuditLogs(params: { page: number; page_size: number; action?: string; user_id?: number }) {
-  return http.get<any>({ url: '/api/audit/logs', params })
+  return http.get<AuditLogsResponse>({ url: '/api/audit/logs', params })
 }

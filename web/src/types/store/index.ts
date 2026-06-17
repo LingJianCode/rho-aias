@@ -25,6 +25,7 @@
 
 import { MenuThemeEnum, SystemThemeEnum } from '@/enums/appEnum'
 import { LocationQueryRaw } from 'vue-router'
+import type { AppRouteRecord } from '@/types/router'
 
 // 系统主题样式（light | dark）
 export interface SystemThemeType {
@@ -137,7 +138,7 @@ export interface WorkTabState {
 // 菜单Store状态
 export interface MenuState {
   /** 菜单列表 */
-  menuList: any[]
+  menuList: AppRouteRecord[]
   /** 菜单是否已加载 */
   isLoaded: boolean
   /** 菜单是否折叠 */

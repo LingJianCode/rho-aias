@@ -1,9 +1,10 @@
 <!doctype html>
-<html>
+<html lang="zh-CN">
   <head>
     <title>Rho Aias</title>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#5D87FF" />
     <meta
       name="description"
       content="Rho Aias"
@@ -34,13 +35,14 @@
             document.documentElement.classList.add('dark')
           }
         } catch (e) {
-          console.warn('Failed to apply initial theme:', e)
+          // 主题初始化失败，静默处理
         }
       })()
     </script>
   </head>
 
   <body>
+    <noscript>请启用 JavaScript 以运行此应用。</noscript>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

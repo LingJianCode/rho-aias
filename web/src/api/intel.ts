@@ -1,16 +1,10 @@
 import http from '@/utils/http'
-
-export interface IntelStatus {
-  enabled: boolean
-  last_update: string
-  total_rules: number
-  sources: Record<string, any>
-}
+import type { IntelStatus } from '@/types/api'
 
 export function getIntelStatus() {
   return http.get<IntelStatus>({ url: '/api/intel/status' })
 }
 
 export function triggerIntelUpdate() {
-  return http.post({ url: '/api/intel/update' })
+  return http.post<void>({ url: '/api/intel/update' })
 }

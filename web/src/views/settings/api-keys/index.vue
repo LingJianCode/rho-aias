@@ -58,16 +58,18 @@ import { ref, reactive, onMounted } from 'vue'
 import { type FormInstance, type FormRules, ElMessageBox } from 'element-plus'
 import { Icon } from '@iconify/vue'
 import { getApiKeys, createApiKey, deleteApiKey } from '@/api/api-keys'
+import type { ApiKey } from '@/api/api-keys'
+import type { CreateApiKeyResponse } from '@/types/api'
 import { formatDateTime } from '@/utils/format'
 
 defineOptions({ name: 'ApiKeys' })
 
 const loading = ref(false)
-const keys = ref<any[]>([])
+const keys = ref<ApiKey[]>([])
 
 const showAddDialog = ref(false)
 const formRef = ref<FormInstance>()
-const form = reactive({ name: '', expires_at: '' as any })
+const form = reactive({ name: '', expires_at: '' })
 const formRules: FormRules = {
   name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
 }
@@ -99,7 +101,8 @@ async function handleAdd() {
       expires_at: form.expires_at || undefined,
     })
     ElMessage.success('API Key 生成成功，请及时保存完整 Key')
-    ElMessageBox.alert((res as any)?.key || 'Key 已生成', 'API Key', {
+    const keyValue = (res as CreateApiKeyResponse)?.key || 'Key 已生成'
+    ElMessageBox.alert(`<pre style="word-break:break-all;white-space:pre-wrap;margin:0;font-family:monospace">${keyValue}</pre>`, 'API Key', {
       confirmButtonText: '我已保存',
       dangerouslyUseHTMLString: true,
     })

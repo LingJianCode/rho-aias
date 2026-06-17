@@ -26,8 +26,21 @@ declare module 'qrcode.vue' {
     foreground?: string
     renderAs?: RenderAs
   }
-  const QrcodeVue: any
+  import type { DefineComponent } from 'vue'
+  const QrcodeVue: DefineComponent<QRCodeProps>
   export default QrcodeVue
+}
+
+// Vite 环境变量类型声明
+interface ImportMetaEnv {
+  readonly VITE_API_URL: string
+  readonly VITE_API_PROXY_URL?: string
+  readonly VITE_BASE_URL: string
+  readonly VITE_VERSION: string
+  readonly VITE_PORT: string
+  readonly VITE_DROP_CONSOLE: string
+  readonly VITE_ACCESS_MODE: string
+  readonly VITE_WITH_CREDENTIALS?: string
 }
 
 // 全局变量声明
