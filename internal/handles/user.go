@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"rho-aias/internal/logger"
 	"rho-aias/internal/middleware"
 	"rho-aias/internal/models"
 	"rho-aias/internal/response"
@@ -19,6 +20,7 @@ type UserHandle struct {
 	auditService *services.AuditService
 	enforcer     interface {
 		AssignRoleToUser(userID uint, role string) error
+		RemoveUserRoles(userID uint) error
 	}
 }
 
@@ -28,6 +30,7 @@ func NewUserHandle(
 	auditService *services.AuditService,
 	enforcer interface {
 		AssignRoleToUser(userID uint, role string) error
+		RemoveUserRoles(userID uint) error
 	},
 ) *UserHandle {
 	return &UserHandle{
@@ -74,13 +77,15 @@ func (h *UserHandle) CreateUser(c *gin.Context) {
 			response.Conflict(c, response.CodeUsernameExists, "username already exists")
 			return
 		}
-		response.InternalError(c, err.Error())
+		logger.Errorf("CreateUser failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
 	// 分配角色
 	if err := h.enforcer.AssignRoleToUser(user.ID, req.Role); err != nil {
 		// 记录错误但不影响用户创建
+		logger.Errorf("AssignRoleToUser failed for user %d: %v", user.ID, err)
 		response.InternalError(c, "failed to assign role")
 		return
 	}
@@ -116,7 +121,8 @@ func (h *UserHandle) CreateUser(c *gin.Context) {
 func (h *UserHandle) ListUsers(c *gin.Context) {
 	users, err := h.userService.ListUsers()
 	if err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("ListUsers failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -172,6 +178,7 @@ func (h *UserHandle) UpdateUser(c *gin.Context) {
 		updates["role"] = req.Role
 		// 更新 Casbin 角色
 		if err := h.enforcer.AssignRoleToUser(uint(userID), req.Role); err != nil {
+			logger.Errorf("AssignRoleToUser failed for user %d: %v", uint(userID), err)
 			response.InternalError(c, "failed to update role")
 			return
 		}
@@ -181,7 +188,8 @@ func (h *UserHandle) UpdateUser(c *gin.Context) {
 	}
 
 	if err := h.userService.UpdateUser(uint(userID), updates); err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("UpdateUser failed for user %d: %v", uint(userID), err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -229,8 +237,15 @@ func (h *UserHandle) DeleteUser(c *gin.Context) {
 		return
 	}
 
+	// 清理 Casbin 角色分配
+	if err := h.enforcer.RemoveUserRoles(uint(userID)); err != nil {
+		logger.Warnf("RemoveUserRoles failed for user %d: %v", uint(userID), err)
+		// 继续删除用户，Casbin 策略残留不影响用户删除本身
+	}
+
 	if err := h.userService.DeleteUser(uint(userID)); err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("DeleteUser failed for user %d: %v", uint(userID), err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -272,7 +287,8 @@ func (h *UserHandle) GetUser(c *gin.Context) {
 			response.Fail(c, http.StatusNotFound, response.CodeUserNotFound, "user not found")
 			return
 		}
-		response.InternalError(c, err.Error())
+		logger.Errorf("GetUser failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 

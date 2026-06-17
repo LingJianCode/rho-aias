@@ -12,6 +12,7 @@ import (
 	"rho-aias/internal/logger"
 	"rho-aias/utils"
 	"sync"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -190,7 +191,17 @@ func (x *Xdp) MonitorBlockLogEvents() {
 		default:
 		}
 
-		record, err := x.reader.Read()
+		x.closeMu.Lock()
+		reader := x.reader
+		x.closeMu.Unlock()
+
+		if reader == nil {
+			// restart is in progress, wait briefly and retry
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		record, err := reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				logger.Warn("[XDP] Ringbuf reader closed, trying to restart eBPF")
@@ -395,7 +406,16 @@ type AnomalyEventCallback func(srcIP string, protocol uint8, tcpFlags uint8, pkt
 func (x *Xdp) MonitorAnomalyEvents(callback AnomalyEventCallback, extraDone <-chan struct{}) {
 	logger.Info("[XDP] MonitorAnomalyEvents started")
 
-	reader, err := ringbuf.NewReader(x.objects.AnomalyEvents)
+	x.closeMu.Lock()
+	objs := x.objects
+	x.closeMu.Unlock()
+
+	if objs == nil {
+		logger.Warn("[XDP] MonitorAnomalyEvents: eBPF objects are nil")
+		return
+	}
+
+	reader, err := ringbuf.NewReader(objs.AnomalyEvents)
 	if err != nil {
 		logger.Errorf("[XDP] Failed to create anomaly events reader: %v", err)
 		return

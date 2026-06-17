@@ -2,6 +2,7 @@ package handles
 
 import (
 	"rho-aias/internal/manual"
+	"rho-aias/internal/logger"
 	"rho-aias/internal/response"
 	"rho-aias/utils"
 	"strings"
@@ -31,7 +32,8 @@ func NewBlacklistHandle(mgr *manual.BlacklistManager) *BlacklistHandle {
 func (m *BlacklistHandle) AddBlacklistRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "参数错误: "+err.Error())
+		logger.Errorf("AddBlacklistRule bind failed: %v", err)
+		response.BadRequest(c, "invalid request")
 		return
 	}
 
@@ -49,7 +51,8 @@ func (m *BlacklistHandle) AddBlacklistRule(c *gin.Context) {
 		case manual.ErrRuleConflict:
 			response.Conflict(c, response.CodeRuleConflict, err.Error())
 		default:
-			response.InternalError(c, err.Error())
+			logger.Errorf("AddBlacklistRule failed: %v", err)
+			response.InternalError(c, "internal server error")
 		}
 		return
 	}
@@ -61,12 +64,14 @@ func (m *BlacklistHandle) AddBlacklistRule(c *gin.Context) {
 func (m *BlacklistHandle) DelBlacklistRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "参数错误: "+err.Error())
+		logger.Errorf("AddBlacklistRule bind failed: %v", err)
+		response.BadRequest(c, "invalid request")
 		return
 	}
 
 	if err := m.mgr.DeleteRule(req.Value); err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("DelBlacklistRule failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -83,7 +88,8 @@ func (m *BlacklistHandle) ListBlacklistRules(c *gin.Context) {
 
 	entries, err := m.mgr.ListRules()
 	if err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("ListBlacklistRules failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -122,7 +128,8 @@ func NewWhitelistHandle(mgr *manual.WhitelistManager) *WhitelistHandle {
 func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "参数错误: "+err.Error())
+		logger.Errorf("DelBlacklistRule bind failed: %v", err)
+		response.BadRequest(c, "invalid request")
 		return
 	}
 
@@ -134,7 +141,8 @@ func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {
 	}
 
 	if err := w.mgr.AddRule(value, req.Remark); err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("AddWhitelistRule failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -145,7 +153,8 @@ func (w *WhitelistHandle) AddWhitelistRule(c *gin.Context) {
 func (w *WhitelistHandle) DelWhitelistRule(c *gin.Context) {
 	var req rule
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "参数错误: "+err.Error())
+		logger.Errorf("DelWhitelistRule bind failed: %v", err)
+		response.BadRequest(c, "invalid request")
 		return
 	}
 
@@ -154,7 +163,8 @@ func (w *WhitelistHandle) DelWhitelistRule(c *gin.Context) {
 		case manual.ErrProtectedNet:
 			response.Forbidden(c, err.Error())
 		default:
-			response.InternalError(c, err.Error())
+			logger.Errorf("DelWhitelistRule failed: %v", err)
+			response.InternalError(c, "internal server error")
 		}
 		return
 	}
@@ -173,7 +183,8 @@ func (w *WhitelistHandle) ListWhitelistRules(c *gin.Context) {
 
 	entries, err := w.mgr.ListRules()
 	if err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("ListWhitelistRules failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 

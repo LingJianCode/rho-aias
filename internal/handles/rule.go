@@ -2,6 +2,7 @@ package handles
 
 import (
 	"rho-aias/internal/ebpfs"
+	"rho-aias/internal/logger"
 	"rho-aias/internal/response"
 
 	"github.com/gin-gonic/gin"
@@ -24,7 +25,8 @@ func NewRuleQueryHandle(xdp *ebpfs.Xdp) *RuleQueryHandle {
 func (h *RuleQueryHandle) GetRules(c *gin.Context) {
 	res, err := h.xdp.GetRule()
 	if err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("GetRules failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 

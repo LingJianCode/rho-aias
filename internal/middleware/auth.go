@@ -9,6 +9,7 @@ import (
 
 	"rho-aias/internal/auth/jwt"
 	"rho-aias/internal/casbin"
+	"rho-aias/internal/logger"
 	"rho-aias/internal/response"
 	"rho-aias/internal/services"
 
@@ -106,6 +107,7 @@ func CasbinMiddleware(enforcer *casbin.Enforcer, obj string, act string) gin.Han
 		// 执行权限校验
 		allowed, err := enforcer.Enforce(sub, obj, act)
 		if err != nil {
+			logger.Errorf("Casbin enforce failed: %v", err)
 			response.InternalError(c, "failed to check permission")
 			c.Abort()
 			return

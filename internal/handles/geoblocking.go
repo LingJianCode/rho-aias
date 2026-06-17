@@ -31,7 +31,8 @@ func (h *GeoBlockingHandle) TriggerUpdate(c *gin.Context) {
 	logger.Info("[API] Geo-Blocking manual update triggered")
 
 	if err := h.manager.TriggerUpdate(); err != nil {
-		response.InternalError(c, "Update failed: "+err.Error())
+		logger.Errorf("GeoBlocking TriggerUpdate failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 

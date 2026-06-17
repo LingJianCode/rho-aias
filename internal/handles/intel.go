@@ -31,7 +31,8 @@ func (h *IntelHandle) TriggerUpdate(c *gin.Context) {
 	logger.Info("[API] Manual update triggered")
 
 	if err := h.manager.TriggerUpdate(); err != nil {
-		response.InternalError(c, "Update failed: "+err.Error())
+		logger.Errorf("Intel TriggerUpdate failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 

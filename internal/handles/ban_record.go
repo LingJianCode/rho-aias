@@ -6,6 +6,7 @@ import (
 
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/models"
+	"rho-aias/internal/logger"
 	"rho-aias/internal/response"
 	"rho-aias/internal/services"
 
@@ -34,7 +35,8 @@ func (h *BanRecordHandle) GetBanRecords(c *gin.Context) {
 
 	records, total, err := h.service.QueryRecords(filter)
 	if err != nil {
-		response.InternalError(c, "Failed to query ban records: "+err.Error())
+		logger.Errorf("QueryRecords failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -51,7 +53,8 @@ func (h *BanRecordHandle) GetBanRecords(c *gin.Context) {
 func (h *BanRecordHandle) GetBanStats(c *gin.Context) {
 	stats, err := h.service.GetBanStats()
 	if err != nil {
-		response.InternalError(c, "Failed to get ban stats: "+err.Error())
+		logger.Errorf("GetBanStats failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -68,7 +71,8 @@ func (h *BanRecordHandle) GetTopBannedIPs(c *gin.Context) {
 
 	topIPs, err := h.service.GetTopBannedIPs(limit)
 	if err != nil {
-		response.InternalError(c, "Failed to get top banned IPs: "+err.Error())
+		logger.Errorf("GetTopBannedIPs failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -122,7 +126,8 @@ func (h *BanRecordHandle) UnbanBanRecord(c *gin.Context) {
 	if ok && h.xdp != nil {
 		_, _, _, err := h.xdp.UpdateRuleSourceMask(record.IP, sourceMask)
 		if err != nil {
-			response.InternalError(c, "Failed to remove IP from eBPF map: "+err.Error())
+			logger.Errorf("Remove IP from eBPF map failed: %v", err)
+			response.InternalError(c, "internal server error")
 			return
 		}
 		// 注意：即使 eBPF map 中不存在该规则，也继续更新数据库状态
@@ -130,7 +135,8 @@ func (h *BanRecordHandle) UnbanBanRecord(c *gin.Context) {
 
 	// 更新数据库状态为手动解封
 	if err := h.service.UpdateStatusByID(uint(id), models.BanStatusManualUnblock); err != nil {
-		response.InternalError(c, "Failed to update ban record status: "+err.Error())
+		logger.Errorf("UpdateBanRecordStatus failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 

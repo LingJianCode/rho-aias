@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"rho-aias/internal/logger"
 	"rho-aias/internal/response"
 	"rho-aias/internal/services"
 
@@ -48,7 +49,8 @@ func (h *AuditHandle) ListAuditLogs(c *gin.Context) {
 
 	resp, err := h.auditService.ListLogs(req)
 	if err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("ListAuditLogs failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -103,7 +105,8 @@ func (h *AuditHandle) CleanAuditLogs(c *gin.Context) {
 	}
 
 	if err := h.auditService.CleanOldLogs(req.RetentionDays); err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("ListAuditLogs failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 

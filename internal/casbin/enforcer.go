@@ -119,6 +119,15 @@ func (e *Enforcer) AssignRoleToUser(userID uint, role string) error {
 	return nil
 }
 
+// RemoveUserRoles 删除用户的所有角色分配
+func (e *Enforcer) RemoveUserRoles(userID uint) error {
+	subject := fmt.Sprintf("user:%d", userID)
+	if _, err := e.DeleteRolesForUser(subject); err != nil {
+		return fmt.Errorf("failed to delete user roles: %w", err)
+	}
+	return nil
+}
+
 // GetUserRole 获取用户角色
 func (e *Enforcer) GetUserRole(userID uint) string {
 	subject := fmt.Sprintf("user:%d", userID)
