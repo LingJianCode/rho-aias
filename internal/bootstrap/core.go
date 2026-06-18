@@ -35,7 +35,7 @@ func InitCore(cfg *config.Config, dbConn *gorm.DB) *CoreDependencies {
 	whitelistCache := manual.NewCache(cfg.Manual.PersistenceDir)
 
 	blacklistManager := manual.NewBlacklistManager(xdp, blacklistCache, whitelistChecker)
-	whitelistManager := manual.NewWhitelistManager(xdp, whitelistCache, whitelistChecker)
+	whitelistManager := manual.NewWhitelistManager(xdp, tcEgress, whitelistCache, whitelistChecker)
 
 	var blockLogMgr *blocklog.Manager
 	{
@@ -97,6 +97,9 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 		} else {
 			logger.Infof("[Whitelist] Added protected net %s to eBPF whitelist", ipNet.String())
 		}
+		if err := c.TcEgress.AddWhitelistRule(ipNet.String()); err != nil {
+			logger.Warnf("[Whitelist] Failed to add protected net %s to TC egress whitelist: %v", ipNet.String(), err)
+		}
 	}
 
 	// 加载手动阻断规则
@@ -134,6 +137,9 @@ func (c *CoreDependencies) LoadCachedRules(cfg *config.Config) {
 					logger.Warnf("[Whitelist] Failed to add whitelist rule %s: %v", entry.Value, err)
 				} else {
 					loaded++
+				}
+				if err := c.TcEgress.AddWhitelistRule(entry.Value); err != nil {
+					logger.Warnf("[Whitelist] Failed to add whitelist rule %s to TC egress: %v", entry.Value, err)
 				}
 			}
 			logger.Infof("[Whitelist] Loaded %d/%d rules from cache", loaded, whitelistData.RuleCount())
