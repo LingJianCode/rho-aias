@@ -156,18 +156,20 @@ func (m *BlacklistManager) removeRuleFromCache(value string) error {
 
 // WhitelistManager 白名单业务管理器（与 HTTP 无关）
 type WhitelistManager struct {
-	xdp     *ebpfs.Xdp
-	cache   *Cache
-	checker *WhitelistChecker
-	mu      sync.Mutex
+	xdp      *ebpfs.Xdp
+	tcEgress *ebpfs.TcEgress // TC egress 限速白名单同步
+	cache    *Cache
+	checker  *WhitelistChecker
+	mu       sync.Mutex
 }
 
 // NewWhitelistManager 创建白名单管理器
-func NewWhitelistManager(xdp *ebpfs.Xdp, cache *Cache, checker *WhitelistChecker) *WhitelistManager {
+func NewWhitelistManager(xdp *ebpfs.Xdp, tcEgress *ebpfs.TcEgress, cache *Cache, checker *WhitelistChecker) *WhitelistManager {
 	return &WhitelistManager{
-		xdp:     xdp,
-		cache:   cache,
-		checker: checker,
+		xdp:      xdp,
+		tcEgress: tcEgress, // TC egress 限速白名单同步
+		cache:    cache,
+		checker:  checker,
 	}
 }
 
@@ -177,10 +179,17 @@ func (m *WhitelistManager) Cache() *Cache { return m.cache }
 // Checker 返回白名单检查器
 func (m *WhitelistManager) Checker() *WhitelistChecker { return m.checker }
 
-// AddRule 添加白名单规则（eBPF + 缓存 + 同步检查器）
+// AddRule 添加白名单规则（eBPF + TC egress + 缓存 + 同步检查器）
 func (m *WhitelistManager) AddRule(value, remark string) error {
 	if err := m.xdp.AddWhitelistRule(value); err != nil {
 		return err
+	}
+
+	// 同步到 TC egress 白名单
+	if m.tcEgress != nil {
+		if err := m.tcEgress.AddWhitelistRule(value); err != nil {
+			logger.Warnf("[Whitelist] Failed to sync rule to TC egress: %v", err)
+		}
 	}
 
 	if m.cache != nil {
@@ -196,7 +205,7 @@ func (m *WhitelistManager) AddRule(value, remark string) error {
 	return nil
 }
 
-// DeleteRule 删除白名单规则（eBPF + 缓存 + 同步检查器）
+// DeleteRule 删除白名单规则（eBPF + TC egress + 缓存 + 同步检查器）
 func (m *WhitelistManager) DeleteRule(value string) error {
 	// 内置保护网段检查
 	if IsProtectedNet(value) {
@@ -205,6 +214,13 @@ func (m *WhitelistManager) DeleteRule(value string) error {
 
 	if err := m.xdp.DeleteWhitelistRule(value); err != nil {
 		return err
+	}
+
+	// 同步删除 TC egress 白名单
+	if m.tcEgress != nil {
+		if err := m.tcEgress.DeleteWhitelistRule(value); err != nil {
+			logger.Warnf("[Whitelist] Failed to sync rule deletion to TC egress: %v", err)
+		}
 	}
 
 	if m.cache != nil {
