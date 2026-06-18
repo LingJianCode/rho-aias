@@ -1,9 +1,6 @@
-// API 通用响应类型
-export interface ApiResponse<T = unknown> {
-  code: number
-  message: string
-  data: T
-}
+// API 通用响应类型（请使用 @/types/common/response 中的 BaseResponse）
+// 此类型已废弃，保留仅用于向后兼容
+export { BaseResponse as ApiResponse } from './common/response'
 
 // 分页请求参数
 export interface PaginationParams {
@@ -171,13 +168,7 @@ export interface GeoBlockingStatus {
   allowed_countries: string[]
   last_update: string
   total_rules: number
-  sources: Record<string, {
-    enabled: boolean
-    last_update: string
-    success: boolean
-    rule_count: number
-    error: string
-  }>
+  sources: Record<string, IntelSourceDetail>
 }
 
 // ============================================
@@ -191,7 +182,7 @@ export interface ApiKey {
   permissions: string
   user_id: number
   last_used_at?: string
-  expires_at?: string
+  expires_at: string
   active: boolean
   created_at: string
 }

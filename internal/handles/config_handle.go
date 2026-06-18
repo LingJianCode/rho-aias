@@ -80,7 +80,8 @@ func (h *ConfigHandle) GetAllConfig(c *gin.Context) {
 
 	records, err := h.configService.GetAll()
 	if err != nil {
-		response.InternalError(c, "Failed to load config from DB: "+err.Error())
+		logger.Errorf("Failed to load config from DB: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -117,7 +118,8 @@ func (h *ConfigHandle) GetModuleConfig(c *gin.Context) {
 
 	record, err := h.configService.Get(module)
 	if err != nil {
-		response.InternalError(c, "Failed to load config: "+err.Error())
+		logger.Errorf("Failed to load config: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 	if record == nil {
@@ -127,7 +129,8 @@ func (h *ConfigHandle) GetModuleConfig(c *gin.Context) {
 
 	var data interface{}
 	if err := json.Unmarshal([]byte(record.Value), &data); err != nil {
-		response.InternalError(c, "Failed to parse config: "+err.Error())
+		logger.Errorf("Failed to parse config: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -155,17 +158,20 @@ func (h *ConfigHandle) UpdateModuleConfig(c *gin.Context) {
 	}
 
 	if err := h.applyConfig(module, raw); err != nil {
-		response.InternalError(c, "Failed to apply config: "+err.Error())
+		logger.Errorf("Failed to apply config: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
 	value, err := h.getMergedConfig(module)
 	if err != nil {
-		response.InternalError(c, "Failed to get merged config for persistence: "+err.Error())
+		logger.Errorf("Failed to get merged config: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 	if err := h.configService.Set(module, value); err != nil {
-		response.InternalError(c, "Failed to persist config: "+err.Error())
+		logger.Errorf("Failed to persist config: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 

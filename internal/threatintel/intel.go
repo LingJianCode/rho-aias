@@ -2,10 +2,12 @@
 package threatintel
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rho-aias/internal/config"
@@ -33,9 +35,10 @@ type Manager struct {
 	mu         sync.RWMutex              // 读写锁
 
 	// 状态管理
-	status       *Status                    // 模块状态
-	lastUpdate   time.Time                  // 最后更新时间
-	sourceStatus map[SourceID]*SourceStatus // 各情报源状态
+	status         *Status                    // 模块状态
+	lastUpdate     time.Time                  // 最后更新时间
+	sourceStatus   map[SourceID]*SourceStatus // 各情报源状态
+	moduleEnabled  *atomic.Bool               // 模块总开关原子引用（与 Syncer 共享）
 
 	// 数据库支持和并发控制（使用公共组件）
 	db            *gorm.DB                  // 数据库连接
@@ -44,13 +47,16 @@ type Manager struct {
 
 // NewManager 创建新的威胁情报管理器
 func NewManager(cfg *config.IntelConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Manager {
+	enabled := &atomic.Bool{}
+	enabled.Store(cfg.Enabled)
+
 	return &Manager{
 		config:        cfg,
 		xdp:           xdp,
 		fetcher:       feed.NewFetcher(600 * time.Second),
 		parser:        NewParser(),
 		rawFileDir:    cfg.PersistenceDir,
-		syncer:        NewSyncer(xdp, cfg.BatchSize),
+		syncer:        NewSyncer(xdp, cfg.BatchSize, enabled),
 		done:          make(chan struct{}),
 		sourceStatus:  make(map[SourceID]*SourceStatus),
 		db:            db,
@@ -59,6 +65,7 @@ func NewManager(cfg *config.IntelConfig, xdp *ebpfs.Xdp, db *gorm.DB) *Manager {
 			Enabled: cfg.Enabled,
 			Sources: make(map[SourceID]SourceStatus),
 		},
+		moduleEnabled: enabled,
 	}
 }
 
@@ -156,7 +163,7 @@ func (m *Manager) updateAllSources() {
 func (m *Manager) updateSource(sourceID SourceID, src config.IntelSource) error {
 	mu := m.sourceMutexes.Get(sourceID)
 	if !mu.TryLock() {
-		logger.Warnf("[ThreatIntel] [%s] Update skipped - already in progress", sourceID)
+		logger.Infof("[ThreatIntel] [%s] Update skipped - already in progress", sourceID)
 		return fmt.Errorf("update already in progress")
 	}
 	defer mu.Unlock()
@@ -187,6 +194,12 @@ func (m *Manager) updateSource(sourceID SourceID, src config.IntelSource) error 
 	sourceMask := sourceIDToMask(sourceID)
 	if err := m.syncer.SyncToKernel(parsed, sourceMask); err != nil {
 		duration := time.Since(startTime).Milliseconds()
+		// 模块禁用时 SyncToKernel 返回 ErrModuleDisabled，记录为 skipped 而非 failed
+		if errors.Is(err, ErrModuleDisabled) {
+			logger.Warnf("[ThreatIntel] [%s] Sync skipped: module disabled", sourceID)
+			_ = feed.RecordStatus(m.db, feed.SourceTypeIntel, string(sourceID), string(sourceID), "skipped", 0, "module disabled", duration)
+			return err
+		}
 		_ = feed.RecordStatus(m.db, feed.SourceTypeIntel, string(sourceID), string(sourceID), "failed", 0, err.Error(), duration)
 		return err
 	}
@@ -446,19 +459,25 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule str
 			}
 		}
 	}
+	// 在锁内捕获模块总开关状态，避免锁外读取造成数据竞争
+	moduleEnabled := m.config.Enabled
 	m.mu.Unlock()
 
-	// 状态切换时的即时操作
+	// 状态切换时的即时操作（仅在模块总开关启用时执行）
 	switch {
 	case enabled && !wasEnabled:
 		// 从禁用→启用：立即拉取一次数据并同步到 eBPF map
 		go func() {
-			logger.Infof("[ThreatIntel] [%s] Immediate fetch triggered by config change", sourceID)
-			if err := m.updateSource(SourceID(sourceID), src); err != nil {
-				logger.Errorf("[ThreatIntel] [%s] Immediate fetch failed: %v", sourceID, err)
-				m.updateSourceStatus(SourceID(sourceID), false, 0, err.Error())
+			if moduleEnabled {
+				logger.Infof("[ThreatIntel] [%s] Immediate fetch triggered by config change", sourceID)
+				if err := m.updateSource(SourceID(sourceID), src); err != nil {
+					logger.Infof("[ThreatIntel] [%s] Immediate fetch skipped: %v", sourceID, err)
+					m.updateSourceStatus(SourceID(sourceID), false, 0, err.Error())
+				} else {
+					logger.Infof("[ThreatIntel] [%s] Immediate fetch completed, rules synced to eBPF", sourceID)
+				}
 			} else {
-				logger.Infof("[ThreatIntel] [%s] Immediate fetch completed, rules synced to eBPF", sourceID)
+				logger.Warnf("[ThreatIntel] [%s] Source enabled but module is disabled, skipping immediate fetch", sourceID)
 			}
 		}()
 	case !enabled && wasEnabled:
@@ -481,10 +500,50 @@ func (m *Manager) UpdateSourceConfig(sourceID string, enabled bool, schedule str
 // UpdateConfig 热更新情报模块总开关
 func (m *Manager) UpdateConfig(enabled bool) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	wasEnabled := m.config.Enabled
 	m.config.Enabled = enabled
 	m.status.Enabled = enabled
+	// 同步原子引用，确保 Syncer 的防御性检查能感知到状态变更
+	if m.moduleEnabled != nil {
+		m.moduleEnabled.Store(enabled)
+	}
+
+	// 管理 Cron 调度器的生命周期
+	if m.cron != nil {
+		if !enabled && wasEnabled {
+			// 禁用模块：暂停 Cron 调度，避免触发无谓的网络请求和内核操作
+			m.cron.Stop()
+			logger.Info("[ThreatIntel] Cron scheduler stopped (module disabled)")
+		}
+	}
+	m.mu.Unlock()
+
+	// 状态切换时的即时操作
+	switch {
+	case enabled && !wasEnabled:
+		// 从禁用→启用：恢复 Cron 并立即拉取数据
+		m.mu.Lock()
+		if m.cron != nil {
+			m.cron.Start()
+			logger.Info("[ThreatIntel] Cron scheduler resumed (module enabled)")
+		}
+		m.mu.Unlock()
+		go func() {
+			logger.Info("[ThreatIntel] Immediate fetch triggered by config enable")
+			m.updateAllSources()
+		}()
+	case !enabled && wasEnabled:
+		// 从启用→禁用：立即清理所有规则并从 eBPF map 中移除
+		go func() {
+			logger.Info("[ThreatIntel] Immediate cleanup triggered by config disable")
+			if err := m.syncer.RemoveAll(); err != nil {
+				logger.Errorf("[ThreatIntel] Cleanup failed: %v", err)
+			} else {
+				logger.Info("[ThreatIntel] Cleanup completed, all rules removed from eBPF")
+			}
+		}()
+	}
+
 	logger.Infof("[ThreatIntel] Config updated: enabled=%v", enabled)
 }
 

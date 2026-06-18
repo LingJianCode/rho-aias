@@ -1,23 +1,26 @@
-import request from './request'
-import type { ApiResponse } from '@/types/api'
+import http from '@/utils/http'
+import type { ConfigModuleName } from '@/types/api'
 
-export interface GetAllConfigResponse {
-  [module: string]: Record<string, unknown>
+export interface SystemConfig {
+  [key: string]: unknown
 }
 
-export function getAllConfig(): Promise<ApiResponse<GetAllConfigResponse>> {
-  return request.get('/api/config').then((res) => res.data)
+/** 获取全部配置（兼容旧接口） */
+export function getConfig() {
+  return http.get<SystemConfig>({ url: '/api/config' })
 }
 
-export function getModuleConfig(module: string): Promise<ApiResponse<Record<string, unknown>>> {
-  return request.get(`/api/config/${module}`).then((res) => res.data)
+/** 更新全部配置（兼容旧接口） */
+export function updateConfig(data: Partial<SystemConfig>) {
+  return http.put({ url: '/api/config', data })
 }
 
-export interface UpdateConfigParams {
-  module: string
-  data: Record<string, unknown>
+/** 获取指定模块的配置 */
+export function getModuleConfig(module: ConfigModuleName) {
+  return http.get<Record<string, unknown>>({ url: `/api/config/${module}` })
 }
 
-export function updateModuleConfig(module: string, data: Record<string, unknown>): Promise<ApiResponse<void>> {
-  return request.put(`/api/config/${module}`, data).then((res) => res.data)
+/** 更新指定模块的配置 */
+export function updateModuleConfig(module: ConfigModuleName, data: Record<string, unknown>) {
+  return http.put({ url: `/api/config/${module}`, data })
 }

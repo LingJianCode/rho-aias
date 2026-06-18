@@ -1,9 +1,9 @@
 <template>
-  <el-card v-loading="loading" class="status-panel">
+  <el-card v-loading="loading" shadow="never" class="art-card">
     <template #header>
       <div class="panel-header">
         <div class="panel-title">
-          <el-icon><Monitor /></el-icon>
+          <Icon icon="ri:shield-check-line" class="mr-1" />
           <span>威胁情报 & 事件上报</span>
         </div>
         <el-button type="primary" size="small" @click="handleRefresh" :loading="refreshing">
@@ -74,12 +74,13 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-
-import { Monitor } from '@element-plus/icons-vue'
+import { Icon } from '@iconify/vue'
 import { getIntelStatus, triggerIntelUpdate } from '@/api/intel'
 import { getBlockLogEventStatus } from '@/api/blocklog'
 import { formatDateTime, formatNumber, formatRelativeTime } from '@/utils/format'
 import type { IntelStatus, BlockLogEventStatus } from '@/types/api'
+
+defineOptions({ name: 'IntelEventPanel' })
 
 const loading = ref(false)
 const refreshing = ref(false)
@@ -108,8 +109,10 @@ async function fetchData() {
       getIntelStatus(),
       getBlockLogEventStatus(),
     ])
-    intelStatus.value = intelRes.data
-    eventStatus.value = eventRes.data
+    intelStatus.value = intelRes as IntelStatus
+    eventStatus.value = eventRes
+  } catch (err) {
+    console.error('[IntelEventPanel] 获取数据失败:', err)
   } finally {
     loading.value = false
   }
@@ -131,7 +134,7 @@ async function handleRefresh() {
 onMounted(() => fetchData())
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .panel-header {
   display: flex;
   align-items: center;

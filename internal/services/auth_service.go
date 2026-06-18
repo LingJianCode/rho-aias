@@ -86,7 +86,26 @@ func (s *AuthService) ValidateToken(tokenString string) (*jwt.Claims, error) {
 	return s.jwtService.ValidateToken(tokenString)
 }
 
-// RefreshToken 刷新 token
+// RefreshToken 刷新 token（验证用户状态后再签发新 token）
 func (s *AuthService) RefreshToken(tokenString string) (string, error) {
-	return s.jwtService.RefreshToken(tokenString)
+	// 先验证 token 签名和过期时间
+	claims, err := s.jwtService.ValidateToken(tokenString)
+	if err != nil {
+		return "", err
+	}
+
+	// 查询用户状态：确保用户未被停用或软删除
+	var user models.User
+	if err := s.db.First(&user, claims.UserID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", ErrUserNotFound
+		}
+		return "", err
+	}
+	if !user.Active {
+		return "", ErrUserInactive
+	}
+
+	// 签发新 token
+	return s.jwtService.GenerateToken(claims.UserID, claims.Username, claims.Role)
 }

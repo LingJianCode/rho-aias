@@ -26,3 +26,5 @@ dist
 
 .codex
 fail2ban-ebpf
+.pnpm-store
+web_backup_20260601_135112

@@ -1,9 +1,9 @@
 <template>
-  <el-card v-loading="loading" class="status-panel">
+  <el-card v-loading="loading" shadow="never" class="art-card">
     <template #header>
       <div class="panel-header">
         <div class="panel-title">
-          <el-icon><Location /></el-icon>
+          <Icon icon="ri:global-line" class="mr-1" />
           <span>地域封禁状态</span>
         </div>
         <el-button type="primary" size="small" @click="handleUpdate" :loading="updating">
@@ -84,11 +84,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-
-import { Location } from '@element-plus/icons-vue'
+import { Icon } from '@iconify/vue'
 import { getGeoBlockingStatus, triggerGeoBlockingUpdate } from '@/api/geoblocking'
 import { formatDateTime, formatNumber } from '@/utils/format'
 import type { GeoBlockingStatus } from '@/types/api'
+
+defineOptions({ name: 'GeoPanel' })
 
 const loading = ref(false)
 const updating = ref(false)
@@ -130,7 +131,9 @@ async function fetchStatus() {
   loading.value = true
   try {
     const res = await getGeoBlockingStatus()
-    status.value = res.data
+    status.value = res as GeoBlockingStatus
+  } catch (err) {
+    console.error('[GeoPanel] 获取地域封禁状态失败:', err)
   } finally {
     loading.value = false
   }
@@ -152,7 +155,7 @@ async function handleUpdate() {
 onMounted(() => fetchStatus())
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .panel-header {
   display: flex;
   align-items: center;

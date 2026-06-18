@@ -273,26 +273,28 @@ func (s *BanRecordService) GetTopBannedIPs(limit int) ([]TopIPStat, error) {
 // UpsertActiveBan 插入或忽略：如果同一 IP+来源已存在 active 记录则跳过
 // 使用事务避免 TOCTOU 竞态条件，确保 Count + Create 的原子性
 func (s *BanRecordService) UpsertActiveBan(ip, source, reason string, duration int) error {
-	var count int64
-	if err := s.db.Model(&models.BanRecord{}).
-		Where("ip = ? AND source = ? AND status = ?", ip, source, models.BanStatusActive).
-		Count(&count).Error; err != nil {
-		return fmt.Errorf("failed to count active ban records: %w", err)
-	}
-	if count > 0 {
-		return nil
-	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&models.BanRecord{}).
+			Where("ip = ? AND source = ? AND status = ?", ip, source, models.BanStatusActive).
+			Count(&count).Error; err != nil {
+			return fmt.Errorf("failed to count active ban records: %w", err)
+		}
+		if count > 0 {
+			return nil
+		}
 
-	now := time.Now()
-	return s.db.Create(&models.BanRecord{
-		IP:        ip,
-		Source:    source,
-		Reason:    reason,
-		Duration:  duration,
-		Status:    models.BanStatusActive,
-		CreatedAt: now,
-		ExpiresAt: now.Add(time.Duration(duration) * time.Second),
-	}).Error
+		now := time.Now()
+		return tx.Create(&models.BanRecord{
+			IP:        ip,
+			Source:    source,
+			Reason:    reason,
+			Duration:  duration,
+			Status:    models.BanStatusActive,
+			CreatedAt: now,
+			ExpiresAt: now.Add(time.Duration(duration) * time.Second),
+		}).Error
+	})
 }
 
 // GetRecordByID 根据 ID 获取封禁记录

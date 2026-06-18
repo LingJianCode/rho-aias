@@ -1,4 +1,3 @@
-
 interface UseConfirmOptions {
   title?: string
   message?: string

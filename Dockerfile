@@ -7,17 +7,14 @@ FROM node:24-alpine AS frontend-builder
 
 WORKDIR /web
 
-# 复制前端依赖定义文件（利用 Docker 缓存层）
-COPY web/package.json web/package-lock.json ./
-
-# 安装依赖
-RUN npm install --registry=https://registry.npmmirror.com
-
 # 复制前端源码
 COPY web/ ./
 
+# 安装 pnpm 并安装依赖
+RUN corepack enable && pnpm install --registry=https://registry.npmmirror.com
+
 # 构建前端产物到 dist 目录
-RUN npm run build
+RUN pnpm run build
 
 
 # ============================================================

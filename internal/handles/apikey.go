@@ -8,6 +8,7 @@ import (
 
 	"rho-aias/internal/middleware"
 	"rho-aias/internal/models"
+	"rho-aias/internal/logger"
 	"rho-aias/internal/response"
 	"rho-aias/internal/services"
 
@@ -46,7 +47,8 @@ func (h *APIKeyHandle) CreateAPIKey(c *gin.Context) {
 
 	resp, err := h.apiKeyService.CreateAPIKey(userID, req)
 	if err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("CreateAPIKey failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -79,7 +81,8 @@ func (h *APIKeyHandle) ListAPIKeys(c *gin.Context) {
 
 	keys, err := h.apiKeyService.ListAPIKeys(userID)
 	if err != nil {
-		response.InternalError(c, err.Error())
+		logger.Errorf("ListAPIKeys failed: %v", err)
+		response.InternalError(c, "internal server error")
 		return
 	}
 
@@ -107,7 +110,8 @@ func (h *APIKeyHandle) RevokeAPIKey(c *gin.Context) {
 		if errors.Is(err, services.ErrAPIKeyNotFound) {
 			response.Fail(c, http.StatusNotFound, response.CodeRecordNotFound, err.Error())
 		} else {
-			response.InternalError(c, err.Error())
+			logger.Errorf("RevokeAPIKey failed: %v", err)
+			response.InternalError(c, "internal server error")
 		}
 		return
 	}

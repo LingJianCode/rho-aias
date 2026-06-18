@@ -119,11 +119,15 @@ func (m *EBPFMonitor) IsRunning() bool {
 
 // UpdateRuntimeConfig 运行时动态更新全部运行时参数（mode + short_conn_ns）
 func (m *EBPFMonitor) UpdateRuntimeConfig(shortConnSeconds int, mode string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.monitor.UpdateRuntimeConfig(shortConnSeconds, mode)
 }
 
 // UpdatePorts 运行时动态更新监控端口列表
 func (m *EBPFMonitor) UpdatePorts(ports []uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.monitor.UpdatePorts(ports)
 }
 

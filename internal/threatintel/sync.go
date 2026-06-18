@@ -2,28 +2,39 @@
 package threatintel
 
 import (
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
 )
 
+// ErrModuleDisabled 模块已禁用，操作被跳过
+var ErrModuleDisabled = errors.New("module disabled, operation skipped")
+
 // Syncer 威胁情报原子同步器
 // 负责将威胁情报数据安全地同步到内核 eBPF map，确保拦截不中断
 type Syncer struct {
-	xdp       *ebpfs.Xdp // XDP eBPF 程序接口
-	batchSize int        // 批量操作大小
-	mu        sync.Mutex // 互斥锁，保证并发安全
+	xdp       *ebpfs.Xdp      // XDP eBPF 程序接口
+	batchSize int             // 批量操作大小
+	enabled   *atomic.Bool    // 模块总开关（原子引用，与 Manager 共享）
+	mu        sync.Mutex      // 互斥锁，保证并发安全
 }
 
 // NewSyncer 创建新的威胁情报同步器
 // xdp: XDP eBPF 程序接口
 // batchSize: 批量操作的大小限制
-func NewSyncer(xdp *ebpfs.Xdp, batchSize int) *Syncer {
+// enabled: 模块总开关原子引用（与 Manager 共享，用于防御性检查）
+func NewSyncer(xdp *ebpfs.Xdp, batchSize int, enabled *atomic.Bool) *Syncer {
+	if batchSize <= 0 {
+		batchSize = 256
+	}
 	return &Syncer{
 		xdp:       xdp,
 		batchSize: batchSize,
+		enabled:   enabled,
 	}
 }
 
@@ -31,6 +42,12 @@ func NewSyncer(xdp *ebpfs.Xdp, batchSize int) *Syncer {
 // 通过计算当前规则与新数据的差异，实现无拦截空窗期的平滑更新
 // sourceMask: 来源掩码，标识规则的来源
 func (s *Syncer) SyncToKernel(data *IntelData, sourceMask uint32) error {
+	// 防御性检查：模块已禁用时返回可区分错误，避免调用方误判为"成功"
+	if s.enabled != nil && !s.enabled.Load() {
+		logger.Warnf("[IntelSyncer] SyncToKernel called but module is disabled, skipping (sourceMask=0x%x)", sourceMask)
+		return ErrModuleDisabled
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -166,6 +183,12 @@ func (s *Syncer) batchDelete(rules []string) error {
 // 跳过 GetRule() 和差异计算，直接批量添加
 // 适用于：启动时从缓存加载，或确定需要覆盖所有规则的场景
 func (s *Syncer) LoadAll(data *IntelData, sourceMask uint32) error {
+	// 防御性检查：模块已禁用时返回可区分错误，避免调用方误判为"成功"
+	if s.enabled != nil && !s.enabled.Load() {
+		logger.Warnf("[IntelSyncer] LoadAll called but module is disabled, skipping (sourceMask=0x%x)", sourceMask)
+		return ErrModuleDisabled
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -187,6 +210,7 @@ func (s *Syncer) LoadAll(data *IntelData, sourceMask uint32) error {
 
 // RemoveBySourceMask 按来源掩码从内核 eBPF map 中移除规则
 // 用于数据源禁用时立即清理该源的所有恶意 IP
+// 注意：此为清理操作，即使模块已禁用也需执行，否则规则会残留在内核中
 func (s *Syncer) RemoveBySourceMask(sourceMask uint32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -237,5 +261,36 @@ func (s *Syncer) RemoveBySourceMask(sourceMask uint32) error {
 		logger.Infof("[IntelSyncer] No rules found for source mask 0x%x, nothing to clean", sourceMask)
 	}
 
+	return nil
+}
+
+// RemoveAll 从内核 eBPF map 中移除所有威胁情报规则
+// 用于模块禁用时立即清理所有恶意 IP 规则
+func (s *Syncer) RemoveAll() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. 获取当前内核中的所有规则
+	currentRules, err := s.xdp.GetRule()
+	if err != nil {
+		return fmt.Errorf("get current rules failed: %w", err)
+	}
+
+	if len(currentRules) == 0 {
+		logger.Info("[IntelSyncer] No rules in kernel, nothing to clean")
+		return nil
+	}
+
+	// 2. 批量删除所有规则
+	var allKeys []string
+	for _, r := range currentRules {
+		allKeys = append(allKeys, r.Key)
+	}
+
+	if err := s.batchDelete(allKeys); err != nil {
+		return fmt.Errorf("batch delete all rules failed: %w", err)
+	}
+
+	logger.Infof("[IntelSyncer] Removed %d rules from kernel (module disabled)", len(allKeys))
 	return nil
 }

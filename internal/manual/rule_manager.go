@@ -1,6 +1,7 @@
 package manual
 
 import (
+	"errors"
 	"os"
 	"rho-aias/internal/ebpfs"
 	"rho-aias/internal/logger"
@@ -88,7 +89,7 @@ func (m *BlacklistManager) ListRules() ([]RuleEntry, error) {
 
 	cacheData, err := m.cache.LoadData(CacheFileBlacklist)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err

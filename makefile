@@ -23,7 +23,7 @@ vmlinux.h:
 # 前端构建：Vue + Vite 打包，产物复制到 internal/frontend/dist（供 go:embed 引用）
 frontend:
 	@echo "==> Building Frontend (Vue + Vite)"
-	cd $(WEB_DIR) && npm install && npm run build
+	cd $(WEB_DIR) && pnpm install && pnpm run build
 	@echo "==> Copying dist contents to internal/frontend/dist"
 	rm -rf internal/frontend/dist
 	mkdir -p internal/frontend/dist

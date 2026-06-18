@@ -58,8 +58,9 @@ type LogWatcher struct {
 	cancel       context.CancelFunc // 当前 cancel 函数（每次 Start 重建）
 	watcher      *fsnotify.Watcher
 	filePos      map[string]int64
-	offsetStore  *OffsetStore
-	watchedFiles map[string]struct{} // 需要监听的目标文件路径列表
+	offsetStore     *OffsetStore
+	stopOffsetSave  context.CancelFunc // 停止 offsetStore 定时保存
+	watchedFiles    map[string]struct{} // 需要监听的目标文件路径列表
 
 	// LineHandler 由外部模块注入，负责解析日志行并决定是否封禁
 	lineHandler LineHandler
@@ -159,7 +160,7 @@ func (w *LogWatcher) Start() error {
 
 	// 启动定时保存偏移量（每 5 秒）
 	if w.offsetStore != nil {
-		w.offsetStore.StartPeriodicSave(5 * time.Second)
+		w.stopOffsetSave = w.offsetStore.StartPeriodicSave(5 * time.Second)
 	}
 
 	w.started = true
@@ -181,6 +182,10 @@ func (w *LogWatcher) Stop() {
 	}
 
 	if w.offsetStore != nil {
+		if w.stopOffsetSave != nil {
+			w.stopOffsetSave()
+			w.stopOffsetSave = nil
+		}
 		w.offsetStore.Save()
 	}
 	logger.Infof("[%s] Log watcher stopped", w.LogTag)

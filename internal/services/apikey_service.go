@@ -226,6 +226,19 @@ func (s *APIKeyService) ValidateAPIKey(key string) (*models.APIKey, error) {
 		return nil, fmt.Errorf("failed to validate api key: %w", err)
 	}
 
+	// 验证所属用户是否激活且未被软删除
+	// GORM 默认 scope 会自动添加 deleted_at IS NULL，软删除用户会返回 ErrRecordNotFound
+	var user models.User
+	if err := s.db.First(&user, apiKey.UserID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("invalid api key")
+		}
+		return nil, fmt.Errorf("failed to validate api key owner: %w", err)
+	}
+	if !user.Active {
+		return nil, errors.New("invalid api key")
+	}
+
 	// 检查过期时间
 	if apiKey.ExpiresAt != nil && time.Now().After(*apiKey.ExpiresAt) {
 		return nil, errors.New("api key has expired")

@@ -61,7 +61,7 @@ func Serve(urlPrefix string, fs ServeFileSystem) gin.HandlerFunc {
 	}
 }
 
-//go:embed dist/*
+//go:embed all:dist
 var distFS embed.FS
 
 func RegisterFrontend(r *gin.Engine) {
