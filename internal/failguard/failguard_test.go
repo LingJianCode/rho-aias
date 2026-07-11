@@ -191,26 +191,13 @@ func TestBanManager_RegisterFailure_AlreadyBanned(t *testing.T) {
 	}
 }
 
-func TestBanManager_ForceBan(t *testing.T) {
-	bm := NewBanManager(5, 600, 3600, nil)
-	ip := uint32(0xC0A80101)
-
-	expAt := bm.ForceBan(ip)
-	if expAt.IsZero() {
-		t.Error("ForceBan should return non-zero expiry for non-permanent ban")
-	}
-	if !bm.IsBanned(ip) {
-		t.Error("ForceBan should mark IP as banned")
-	}
-}
-
 func TestBanManager_IsBanned_PerIP(t *testing.T) {
 	bm := NewBanManager(1, 600, 3600, nil)
 
 	ip1 := uint32(0x01010101)
 	ip2 := uint32(0x02020202)
 
-	bm.ForceBan(ip1)
+	bm.RegisterFailure(ip1)
 
 	if !bm.IsBanned(ip1) {
 		t.Error("ip1 should be banned")
@@ -222,7 +209,7 @@ func TestBanManager_IsBanned_PerIP(t *testing.T) {
 
 func TestBanManager_IsBannedByString(t *testing.T) {
 	bm := NewBanManager(1, 600, 3600, nil)
-	bm.ForceBan(uint32(0x8318366A)) // 106.54.24.131 内存 [6A,36,18,83](BE) → LE读为 0x8318366A
+	bm.RegisterFailure(uint32(0x8318366A)) // 106.54.24.131 内存 [6A,36,18,83](BE) → LE读为 0x8318366A
 
 	if !bm.IsBannedByString("106.54.24.131") {
 		t.Error("106.54.24.131 should be banned")
@@ -236,11 +223,11 @@ func TestBanManager_IsBannedByString(t *testing.T) {
 }
 
 func TestBanManager_Expired(t *testing.T) {
-	bm := NewBanManager(5, 600, 1, nil)
+	bm := NewBanManager(1, 600, 1, nil)
 	// 10.0.0.2 内存大端 [0A,00,00,02] → LE反序列化为 0x0200000A
 	ip := uint32(0x0200000A)
 
-	bm.ForceBan(ip)
+	bm.RegisterFailure(ip)
 
 	expired := bm.Expired()
 	if len(expired) != 0 {
@@ -263,8 +250,8 @@ func TestBanManager_GetBannedIPs(t *testing.T) {
 	ip1 := uint32(0x01010101)
 	ip2 := uint32(0x02020202)
 
-	bm.ForceBan(ip1)
-	bm.ForceBan(ip2)
+	bm.RegisterFailure(ip1)
+	bm.RegisterFailure(ip2)
 
 	ips := bm.GetBannedIPs()
 	if len(ips) != 2 {
@@ -305,6 +292,89 @@ func TestBanManager_Concurrent(t *testing.T) {
 	_ = bm.IsBanned(uint32(1))
 	if count == 0 {
 		t.Log("Note: no bans triggered (threshold may not have been reached)")
+	}
+}
+
+// ============================================
+// handlePreauthShortConn 行为测试
+// ============================================
+
+// TestHandlePreauthShortConn_RespectsMaxRetry 验证 preauth 异常计入滑动窗口而非直接封禁
+// 期望：preauth 异常与 PAM 认证失败共用 max_retry 阈值，未达阈值不封禁
+func TestHandlePreauthShortConn_RespectsMaxRetry(t *testing.T) {
+	// 构造 EBPFMonitor（handlePreauthShortConn 仅依赖 banMgr/xdpMgr/filter/cfg，不需 eBPF SshMonitor）
+	xdpMgr := newMockEBPFManager()
+	banMgr := NewBanManager(3, 600, 3600, nil) // threshold=3
+	filter := NewBanFilter(nil)               // nil checker = 不在白名单，应当封禁
+
+	m := &EBPFMonitor{
+		cfg:    &config.FailGuardConfig{BanDuration: 3600},
+		xdpMgr: xdpMgr,
+		banMgr: banMgr,
+		filter: filter,
+	}
+
+	// preauth 异常事件（RemoteIP/PID 非零才会被处理）
+	event := SSHEvent{
+		Type:     EventPreauthShortConn,
+		PID:      1234,
+		RemoteIP: 0x6A382483,
+	}
+
+	// 第 1 次 preauth 异常：未达阈值 3，不应封禁
+	m.handlePreauthShortConn(event)
+	if len(xdpMgr.addedIPs) != 0 {
+		t.Errorf("1st preauth anomaly should not ban, but XDP got: %v", xdpMgr.addedIPs)
+	}
+	if banMgr.IsBanned(event.RemoteIP) {
+		t.Error("1st preauth anomaly should not ban")
+	}
+
+	// 第 2 次 preauth 异常：仍未达阈值，不应封禁
+	m.handlePreauthShortConn(event)
+	if len(xdpMgr.addedIPs) != 0 {
+		t.Errorf("2nd preauth anomaly should not ban, but XDP got: %v", xdpMgr.addedIPs)
+	}
+
+	// 第 3 次 preauth 异常：达到阈值 3，应封禁
+	m.handlePreauthShortConn(event)
+	if len(xdpMgr.addedIPs) != 1 {
+		t.Errorf("3rd preauth anomaly should ban, XDP got: %v", xdpMgr.addedIPs)
+	}
+	if !banMgr.IsBanned(event.RemoteIP) {
+		t.Error("3rd preauth anomaly should trigger ban")
+	}
+}
+
+// TestHandlePreauthShortConn_SharesCounterWithAuthFailure 验证 preauth 异常与 PAM 认证失败共用同一计数器
+func TestHandlePreauthShortConn_SharesCounterWithAuthFailure(t *testing.T) {
+	xdpMgr := newMockEBPFManager()
+	banMgr := NewBanManager(2, 600, 3600, nil) // threshold=2
+	filter := NewBanFilter(nil)
+
+	m := &EBPFMonitor{
+		cfg:    &config.FailGuardConfig{BanDuration: 3600},
+		xdpMgr: xdpMgr,
+		banMgr: banMgr,
+		filter: filter,
+	}
+
+	ip := uint32(0x0A000001)
+	authEvent := SSHEvent{Type: EventAuthResult, PID: 1, RemoteIP: ip, RetCode: 1} // PAM 失败
+	preauthEvent := SSHEvent{Type: EventPreauthShortConn, PID: 2, RemoteIP: ip}
+
+	// 1 次 PAM 认证失败 + 1 次 preauth 异常 = 共 2 次，应触发封禁
+	m.handleAuthResult(authEvent)
+	if len(xdpMgr.addedIPs) != 0 {
+		t.Errorf("1st auth failure should not ban, XDP got: %v", xdpMgr.addedIPs)
+	}
+
+	m.handlePreauthShortConn(preauthEvent)
+	if len(xdpMgr.addedIPs) != 1 {
+		t.Errorf("preauth anomaly after 1 auth failure should trigger ban (shared counter), XDP got: %v", xdpMgr.addedIPs)
+	}
+	if !banMgr.IsBanned(ip) {
+		t.Error("shared counter: 1 auth fail + 1 preauth = threshold 2, should ban")
 	}
 }
 

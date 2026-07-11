@@ -260,9 +260,14 @@ func (m *EBPFMonitor) handlePreauthShortConn(e SSHEvent) {
 		return
 	}
 
-	// preauth 异常直接强制封禁（不经过滑动窗口计数）
-	logger.Debugf("[FailGuard] Force-banning %s for SSH preauth anomaly", ipStr)
-	expiresAt := m.banMgr.ForceBan(e.RemoteIP)
+	// 注册 preauth 异常失败，检查是否达到阈值（与 PAM 认证失败共用滑动窗口计数）
+	shouldBan, expiresAt := m.banMgr.RegisterFailure(e.RemoteIP)
+	if !shouldBan {
+		logger.Debugf("[FailGuard] Preauth anomaly count++ for %s (not yet banned)", ipStr)
+		return
+	}
+
+	// 达到阈值 → 执行封禁
 	m.executeBan(ipStr, expiresAt, "SSH preauth anomaly")
 }
 

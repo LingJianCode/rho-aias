@@ -112,7 +112,7 @@ failguard:
   ssh_ports:                        # 监控的 SSH 端口列表
     - 22
   short_conn_seconds: 2             # preauth 短连接阈值（秒），低于此值的连接视为异常
-  max_retry: 5                      # 触发封禁的失败次数阈值（PAM 认证失败计数）
+  max_retry: 3                      # 触发封禁的失败次数阈值（PAM 认证失败 + preauth 异常短连接共用计数）
   find_time: 600                    # 滑动窗口时长（秒，默认10分钟）
   ban_duration: 60                  # 封禁时长（秒）
   mode: aggressive

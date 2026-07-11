@@ -79,25 +79,6 @@ func (m *BanManager) RegisterFailure(ip uint32) (shouldBan bool, expiresAt time.
 	return true, expiresAt
 }
 
-// ForceBan 强制封禁指定 IP（用于 preauth 异常等直接触发场景）
-func (m *BanManager) ForceBan(ip uint32) time.Time {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	now := time.Now()
-	ipStr := FormatRemoteIP(ip)
-
-	var expiresAt time.Time
-	if m.duration > 0 {
-		expiresAt = now.Add(m.duration)
-	}
-	m.banned[ip] = expiresAt
-	delete(m.attempts, ip)
-
-	logger.Debugf("[FailGuard] ForceBan: ip=%s until=%v", ipStr, expiresAt.Format("2006-01-02 15:04:05"))
-	return expiresAt
-}
-
 // Expired 清理已过期的封禁记录，返回被清理的 IP 列表（字符串格式）
 func (m *BanManager) Expired() []string {
 	m.mu.Lock()
