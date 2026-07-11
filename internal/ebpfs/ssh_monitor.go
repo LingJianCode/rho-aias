@@ -101,29 +101,23 @@ func (s *SshMonitor) UpdatePorts(ports []uint16) error {
 	return s.putPorts(ports)
 }
 
-// AttachProbes 附加所有 kprobe/tracepoint/fexit 探针
+// AttachProbes 附加所有 kretprobe/tracepoint/uretprobe 探针
 func (s *SshMonitor) AttachProbes() error {
 	if s.objects == nil {
 		return errors.New("objects not loaded")
 	}
 	s.links = make([]link.Link, 0, 4)
 
-	// A1. fexit/inet_csk_accept（优先）
-	if l, err := link.AttachTracing(link.TracingOptions{
-		Program: s.objects.HandleAcceptFexit,
-	}); err == nil {
-		s.links = append(s.links, l)
-		logger.Debug("[FailGuard] Attached fexit/inet_csk_accept")
-	} else {
-		// A2. 回退到 kretprobe
-		logger.Warnf("[FailGuard] fexit/inet_csk_accept failed (%v), fallback to kretprobe", err)
-		l2, err := link.Kretprobe("inet_csk_accept", s.objects.HandleAcceptKretprobe, &link.KprobeOptions{})
-		if err != nil {
-			return fmt.Errorf("kretprobe/inet_csk_accept also failed: %w", err)
-		}
-		s.links = append(s.links, l2)
-		logger.Info("[FailGuard] Attached kretprobe/inet_csk_accept")
+	// A. kretprobe/inet_csk_accept
+	// inet_csk_accept 的输入参数签名在 6.12 内核发生断裂式变化，fexit 无法
+	// 跨版本统一匹配。本处理函数仅使用返回值 newsk (struct sock*)，返回值类型
+	// 跨所有内核版本不变，因此 kretprobe 天然兼容 6.1 ~ 7.1+。
+	l, err := link.Kretprobe("inet_csk_accept", s.objects.HandleAcceptKretprobe, &link.KprobeOptions{})
+	if err != nil {
+		return fmt.Errorf("kretprobe/inet_csk_accept: %w", err)
 	}
+	s.links = append(s.links, l)
+	logger.Info("[FailGuard] Attached kretprobe/inet_csk_accept")
 
 	// B. tracepoint sched_process_fork
 	lFork, err := link.Tracepoint("sched", "sched_process_fork", s.objects.HandleFork, nil)

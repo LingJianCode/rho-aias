@@ -1,8 +1,6 @@
 services:
   caddy:
-    build:
-      context: ./caddy
-      dockerfile: Dockerfile
+    image: docker.cnb.cool/makecnbgreatagain/rho-aias/rho-aias-caddy:latest
     container_name: caddy
     environment:
       - TZ=Asia/Shanghai
