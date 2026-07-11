@@ -60,34 +60,11 @@ struct {
 	__uint(max_entries, 1024 * 1024);
 } events SEC(".maps");
 
-// --- A1. 记录新连接 (fexit 版本，优先使用) ---
-SEC("fexit/inet_csk_accept")
-int BPF_PROG(handle_accept_fexit, struct sock *sk, struct sockaddr *addr,
-             int addr_len, int flags, struct sock *newsk) {
-    if (!newsk) {
-        return 0;
-    }
-
-    __u16 lport = BPF_CORE_READ(newsk, __sk_common.skc_num);
-
-    if (!bpf_map_lookup_elem(&monitored_ports, &lport)) {
-        return 0;
-    }
-
-    __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    __u32 daddr = BPF_CORE_READ(newsk, __sk_common.skc_daddr);
-    struct pid_ctx conn_ctx = {
-        .remote_ip = daddr,
-        .start_ns = bpf_ktime_get_ns(),
-        .auth_attempted = 0,
-    };
-
-    bpf_map_update_elem(&pid_ctx_map, &pid, &conn_ctx, BPF_ANY);
-
-    return 0;
-}
-
-// --- A2. 记录新连接 (kretprobe 兼容版本) ---
+// --- A. 记录新连接 (kretprobe，跨版本兼容) ---
+// 注：inet_csk_accept 的输入参数签名在 6.12 内核发生断裂式变化
+// (旧版 4 参数 → 新版 2 参数 struct proto_accept_arg*)，fexit 无法跨版本
+// 统一匹配。本处理函数仅使用返回值 newsk (struct sock*)，该返回值类型
+// 跨所有内核版本不变，因此 kretprobe 天然兼容 6.1 ~ 7.1+，无需 CO-RE 探测。
 SEC("kretprobe/inet_csk_accept")
 int BPF_KRETPROBE(handle_accept_kretprobe, struct sock *newsk) {
     if (!newsk) {
