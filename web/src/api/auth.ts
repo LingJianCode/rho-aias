@@ -30,4 +30,16 @@ export function fetchLogout() {
   return http.post<void>({ url: '/api/auth/logout' })
 }
 
+/**
+ * 修改密码
+ * @param params 修改密码参数
+ */
+export function fetchChangePassword(params: { old_password: string; new_password: string }) {
+  return http.put<void>({
+    url: '/api/auth/password',
+    data: params,
+    showSuccessMessage: true
+  })
+}
+
 

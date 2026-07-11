@@ -27,11 +27,11 @@
         <el-table-column prop="expires_at" label="过期时间" width="180">
           <template #default="{ row }">{{ row.expires_at ? formatDateTime(row.expires_at) : '永不过期' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="100">
+        <!-- <el-table-column label="操作" width="100">
           <template #default="{ row }">
             <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
           </template>
-        </el-table-column>
+        </el-table-column> -->
       </el-table>
     </el-card>
 
