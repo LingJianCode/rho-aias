@@ -24,11 +24,11 @@
         <el-table-column prop="last_login" label="最后登录" width="180">
           <template #default="{ row }">{{ row.last_login ? formatDateTime(row.last_login) : '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <!-- <el-table-column label="操作" width="200">
           <template #default="{ row }">
             <el-button link @click="handleEdit(row)">编辑</el-button>
             <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
-          </template>
+          </template> -->
         </el-table-column>
       </el-table>
 
