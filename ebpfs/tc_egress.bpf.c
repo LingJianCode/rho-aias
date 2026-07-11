@@ -125,6 +125,36 @@ struct {
 } egress_drop_events SEC(".maps");
 
 // ==========================================
+// 3.6 Egress 白名单 Maps (目标 IP 豁免)
+// 复用 common.h 的 block_value，与 XDP 白名单数据格式一致
+// ==========================================
+
+/* LPM (Longest Prefix Match) Trie key for IPv4 CIDR matching
+ * Used with BPF_MAP_TYPE_LPM_TRIE map
+ */
+struct ipv4_trie_key {
+    __u32 prefixlen;        // CIDR prefix length
+    __be32 addr;            // IPv4 address
+};
+
+// 精确 IP 白名单
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __be32);                    // 目标 IP (网络字节序)
+    __type(value, struct block_value);
+    __uint(max_entries, 10000);
+} egress_whitelist_ipv4_list SEC(".maps");
+
+// CIDR 白名单
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __type(key, struct ipv4_trie_key);      // prefixlen + addr
+    __type(value, struct block_value);
+    __uint(max_entries, 5000);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} egress_whitelist_ipv4_cidr_trie SEC(".maps");
+
+// ==========================================
 // 4. 协议类型常量
 // ==========================================
 #ifndef IPPROTO_TCP
@@ -180,8 +210,25 @@ int egress_limit(struct __sk_buff *skb)
         return TC_ACT_OK;
     }
 
-    // --- 3. 查表与懒加载初始化 ---
     __u32 daddr = iph->daddr;
+
+    // --- 2.5 Egress 白名单检查 (目标 IP 豁免) ---
+    // 检查 dst_ip 是否在白名单中，命中则直接放行，不占令牌
+    struct block_value *wl_val = bpf_map_lookup_elem(&egress_whitelist_ipv4_list, &daddr);
+    if (wl_val && wl_val->source_mask != 0) {
+        return TC_ACT_OK;
+    }
+
+    struct ipv4_trie_key wl_trie_key = {
+        .prefixlen = 32,
+        .addr = daddr,
+    };
+    wl_val = bpf_map_lookup_elem(&egress_whitelist_ipv4_cidr_trie, &wl_trie_key);
+    if (wl_val && wl_val->source_mask != 0) {
+        return TC_ACT_OK;
+    }
+
+    // --- 3. 查表与懒加载初始化 ---
     struct flow_limit_state *val = bpf_map_lookup_elem(&egress_limits, &daddr);
 
     if (!val) {

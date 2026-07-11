@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -14,6 +15,7 @@ import (
 	"rho-aias/internal/config"
 	"rho-aias/internal/kernel"
 	"rho-aias/internal/logger"
+	"rho-aias/utils"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -593,5 +595,71 @@ func (t *TcEgress) doCleanup() {
 
 	if deleted > 0 {
 		logger.Debugf("[TcEgress] Cleaned up %d expired flow entries", deleted)
+	}
+}
+
+// AddWhitelistRule 添加白名单规则到 TC egress map
+// 与 XDP 白名单使用相同的编码格式：BlockValue{SourceMask: 0xFFFFFFFF}
+// 支持 IPv4 精确地址和 IPv4 CIDR
+func (t *TcEgress) AddWhitelistRule(value string) error {
+	t.mapMu.Lock()
+	defer t.mapMu.Unlock()
+
+	if t.objects == nil {
+		return errors.New("eBPF objects not initialized")
+	}
+
+	value = strings.TrimSpace(value)
+	b, iptype, err := utils.ParseValueToBytes(value)
+	if err != nil {
+		return fmt.Errorf("invalid whitelist value %s: %w", value, err)
+	}
+
+	blockValue := NewBlockValue(0xFFFFFFFF)
+
+	switch iptype {
+	case utils.IPTypeIPv4:
+		if t.objects.EgressWhitelistIpv4List == nil {
+			return errors.New("egress whitelist ipv4 list map not initialized")
+		}
+		return t.objects.EgressWhitelistIpv4List.Put(b, blockValue)
+	case utils.IPTypeIPV4CIDR:
+		if t.objects.EgressWhitelistIpv4CidrTrie == nil {
+			return errors.New("egress whitelist ipv4 cidr trie map not initialized")
+		}
+		return t.objects.EgressWhitelistIpv4CidrTrie.Put(b, blockValue)
+	default:
+		return fmt.Errorf("unsupported IP type for egress whitelist: %v", iptype)
+	}
+}
+
+// DeleteWhitelistRule 从 TC egress map 中删除白名单规则
+func (t *TcEgress) DeleteWhitelistRule(value string) error {
+	t.mapMu.Lock()
+	defer t.mapMu.Unlock()
+
+	if t.objects == nil {
+		return errors.New("eBPF objects not initialized")
+	}
+
+	value = strings.TrimSpace(value)
+	b, iptype, err := utils.ParseValueToBytes(value)
+	if err != nil {
+		return fmt.Errorf("invalid whitelist value %s: %w", value, err)
+	}
+
+	switch iptype {
+	case utils.IPTypeIPv4:
+		if t.objects.EgressWhitelistIpv4List == nil {
+			return errors.New("egress whitelist ipv4 list map not initialized")
+		}
+		return t.objects.EgressWhitelistIpv4List.Delete(b)
+	case utils.IPTypeIPV4CIDR:
+		if t.objects.EgressWhitelistIpv4CidrTrie == nil {
+			return errors.New("egress whitelist ipv4 cidr trie map not initialized")
+		}
+		return t.objects.EgressWhitelistIpv4CidrTrie.Delete(b)
+	default:
+		return fmt.Errorf("unsupported IP type for egress whitelist: %v", iptype)
 	}
 }
