@@ -108,7 +108,7 @@ rate_limit:
 # 架构: inet_csk_accept(fexit/kretprobe) → sched_process_fork → pam_authenticate(uretprobe) → sched_process_exit
 # 白名单统一由 manual 模块管理，此处不再单独配置 ignore_ips
 failguard:
-  enabled: true                    # 是否启用 SSH 防爆破
+  enabled: false                    # 是否启用 SSH 防爆破
   ssh_ports:                        # 监控的 SSH 端口列表
     - 22
   short_conn_seconds: 2             # preauth 短连接阈值（秒），低于此值的连接视为异常
