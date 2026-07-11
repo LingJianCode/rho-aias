@@ -119,14 +119,17 @@ func (h *UserHandle) CreateUser(c *gin.Context) {
 // @Failure 401 {object} map[string]string
 // @Router /api/users [get]
 func (h *UserHandle) ListUsers(c *gin.Context) {
-	users, err := h.userService.ListUsers()
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	users, total, err := h.userService.ListUsers(page, pageSize)
 	if err != nil {
 		logger.Errorf("ListUsers failed: %v", err)
 		response.InternalError(c, "internal server error")
 		return
 	}
 
-	response.OK(c, gin.H{"users": users})
+	response.OK(c, gin.H{"users": users, "total": total})
 }
 
 // UpdateUserRequest 更新用户请求

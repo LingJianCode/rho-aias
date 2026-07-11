@@ -96,7 +96,7 @@ async function fetchUsers() {
   loading.value = true
   try {
     const res = await getUsers({ page: page.value, page_size: pageSize.value })
-    users.value = res.records || []
+    users.value = res.users || []
     total.value = res.total || 0
   } catch {
     users.value = []

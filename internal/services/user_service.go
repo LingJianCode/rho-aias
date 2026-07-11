@@ -87,13 +87,28 @@ func (s *UserService) GetUserByUsername(username string) (*models.User, error) {
 	return &user, nil
 }
 
-// ListUsers 列出所有用户
-func (s *UserService) ListUsers() ([]models.User, error) {
+// ListUsers 列出用户（支持分页）
+// page 为 1 起始的页码，pageSize 为每页条数
+func (s *UserService) ListUsers(page, pageSize int) ([]models.User, int64, error) {
 	var users []models.User
-	if err := s.db.Find(&users).Error; err != nil {
-		return nil, err
+	var total int64
+
+	if err := s.db.Model(&models.User{}).Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
-	return users, nil
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 1000 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	if err := s.db.Offset(offset).Limit(pageSize).Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
 }
 
 // UpdateUser 更新用户信息
